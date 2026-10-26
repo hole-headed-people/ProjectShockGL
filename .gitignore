@@ -1,0 +1,37 @@
+# .NET build output (including test projects)
+[Bb]in/
+[Oo]bj/
+/.build/
+/artifacts/
+/TestResults/
+*.trx
+*.coverage
+*.coveragexml
+
+# Rider / ReSharper: local IDE settings and caches
+.idea/
+*.DotSettings.user
+_ReSharper*/
+*.sln.iml
+
+# Visual Studio: local workspace and user settings
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Temporary files, logs and crash dumps
+*.tmp
+*.temp
+*.bak
+*.log
+*.dmp
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Keep source assets, maps, Settings.ini, Layers.ini and shared *.DotSettings in Git.

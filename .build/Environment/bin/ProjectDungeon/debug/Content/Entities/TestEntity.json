@@ -1,8 +1,0 @@
-﻿{
-  "Class": "ProjectDungeon.Game.TestEntity, ProjectDungeon",
-  "Parameters": {
-    "Model": "Suzanne",
-    "Texture": "Test",
-    "DebugBillboard": "TestBillboard"
-  }
-}
