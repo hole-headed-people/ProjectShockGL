@@ -1,0 +1,109 @@
+{
+  "Placeables": [
+    {
+      "Path": "TestGeometry",
+      "Type": 0,
+      "Position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "Rotation": {
+        "X": 0.0,
+        "Y": 0.0,
+        "Z": 0.0,
+        "W": 1.0,
+        "IsIdentity": true
+      },
+      "Scale": [
+        11.5,
+        0.2,
+        13.9
+      ]
+    },
+    {
+      "Path": "TestGeometry",
+      "Type": 0,
+      "Position": [
+        5.169553,
+        1.1512979,
+        0.0
+      ],
+      "Rotation": {
+        "X": 0.0,
+        "Y": 0.0,
+        "Z": 0.0,
+        "W": 1.0,
+        "IsIdentity": true
+      },
+      "Scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "Path": "TestGeometry",
+      "Type": 0,
+      "Position": [
+        0.0,
+        1.1951607,
+        -4.2988253
+      ],
+      "Rotation": {
+        "X": 0.0,
+        "Y": 0.0,
+        "Z": 0.0,
+        "W": 1.0,
+        "IsIdentity": true
+      },
+      "Scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "Path": "TestGeometry",
+      "Type": 0,
+      "Position": [
+        0.0,
+        1.1788177,
+        6.2573986
+      ],
+      "Rotation": {
+        "X": 0.0,
+        "Y": 0.0,
+        "Z": 0.0,
+        "W": 1.0,
+        "IsIdentity": true
+      },
+      "Scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "Path": "TestGeometry",
+      "Type": 0,
+      "Position": [
+        -4.5326333,
+        1.1721793,
+        0.0
+      ],
+      "Rotation": {
+        "X": 0.0,
+        "Y": 0.0,
+        "Z": 0.0,
+        "W": 1.0,
+        "IsIdentity": true
+      },
+      "Scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    }
+  ]
+}

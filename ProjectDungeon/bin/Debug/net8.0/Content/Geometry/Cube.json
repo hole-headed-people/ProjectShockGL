@@ -1,0 +1,11 @@
+﻿{
+  "Model":"Cube",
+  "Texture":"WhitePixel",
+  "Color": [0.5, 0.5, 0.5, 1.0],
+  "ColliderType":"Box",
+  "Size": [1.0, 1.0, 1.0],
+  "Radius":1.0,
+  "Height":1.0,
+  "Offset":[0.0, 0.0, 0.0],
+  "Lit": true
+}

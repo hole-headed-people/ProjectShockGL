@@ -1,0 +1,6 @@
+﻿{
+  "Class": "ProjectDungeon.Game.Trigger, ProjectDungeon",
+  "Parameters": {
+    "DebugBillboard": "Trigger"
+  }
+}

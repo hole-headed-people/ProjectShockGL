@@ -1,0 +1,21 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Library</OutputType>
+        <TargetFramework>net8.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <PackageReference Include="ini-parser" Version="2.5.2" />
+      <PackageReference Include="NativeFileDialogNET" Version="2.0.2" />
+      <PackageReference Include="Newtonsoft.Json" Version="14.0.1-beta2" />
+      <PackageReference Include="Silk.NET.Input" Version="2.23.0" />
+      <PackageReference Include="Silk.NET.OpenGL" Version="2.23.0" />
+      <PackageReference Include="Silk.NET.Windowing" Version="2.23.0" />
+      <PackageReference Include="StbImageSharp" Version="2.30.16" />
+      <PackageReference Include="StbTrueTypeSharp" Version="1.26.13" />
+    </ItemGroup>
+</Project>

@@ -1,0 +1,6 @@
+﻿{
+  "Class": "ProjectDungeon.Core.PlayerStart, ProjectDungeon",
+  "Parameters": {
+    "DebugBillboard": "PlayerStart"
+  }
+}

@@ -1,0 +1,16 @@
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Physics\bin\LifecycleChecks\debug\LifecycleChecks.exe
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Physics\bin\LifecycleChecks\debug\LifecycleChecks.deps.json
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Physics\bin\LifecycleChecks\debug\LifecycleChecks.runtimeconfig.json
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Physics\bin\LifecycleChecks\debug\LifecycleChecks.dll
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Physics\bin\LifecycleChecks\debug\LifecycleChecks.pdb
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Physics\obj\LifecycleChecks\debug\LifecycleChecks.csproj.AssemblyReference.cache
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Physics\obj\LifecycleChecks\debug\LifecycleChecks.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Physics\obj\LifecycleChecks\debug\LifecycleChecks.AssemblyInfoInputs.cache
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Physics\obj\LifecycleChecks\debug\LifecycleChecks.AssemblyInfo.cs
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Physics\obj\LifecycleChecks\debug\LifecycleChecks.csproj.CoreCompileInputs.cache
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Physics\obj\LifecycleChecks\debug\Lifecycl.1C2EA3F3.Up2Date
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Physics\obj\LifecycleChecks\debug\LifecycleChecks.dll
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Physics\obj\LifecycleChecks\debug\refint\LifecycleChecks.dll
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Physics\obj\LifecycleChecks\debug\LifecycleChecks.pdb
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Physics\obj\LifecycleChecks\debug\LifecycleChecks.genruntimeconfig.cache
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Physics\obj\LifecycleChecks\debug\ref\LifecycleChecks.dll

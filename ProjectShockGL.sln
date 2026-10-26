@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProjectShockGL", "ProjectShockGL\ProjectShockGL.csproj", "{935126B5-E783-4120-A237-F84CC3D14C74}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProjectShockGLEditor", "ProjectShockGLEditor\ProjectShockGLEditor.csproj", "{27C39736-C404-4BEB-A330-BFA530B04B03}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProjectDungeon", "ProjectDungeon\ProjectDungeon.csproj", "{8C3C3AEA-DCBE-48AE-AAD3-1E899CFC54BC}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{935126B5-E783-4120-A237-F84CC3D14C74}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{935126B5-E783-4120-A237-F84CC3D14C74}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{935126B5-E783-4120-A237-F84CC3D14C74}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{935126B5-E783-4120-A237-F84CC3D14C74}.Release|Any CPU.Build.0 = Release|Any CPU
+		{27C39736-C404-4BEB-A330-BFA530B04B03}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{27C39736-C404-4BEB-A330-BFA530B04B03}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{27C39736-C404-4BEB-A330-BFA530B04B03}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{27C39736-C404-4BEB-A330-BFA530B04B03}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8C3C3AEA-DCBE-48AE-AAD3-1E899CFC54BC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8C3C3AEA-DCBE-48AE-AAD3-1E899CFC54BC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8C3C3AEA-DCBE-48AE-AAD3-1E899CFC54BC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8C3C3AEA-DCBE-48AE-AAD3-1E899CFC54BC}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

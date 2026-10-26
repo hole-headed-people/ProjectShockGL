@@ -1,0 +1,16 @@
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Pointer\bin\UIChecks\debug\UIChecks.exe
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Pointer\bin\UIChecks\debug\UIChecks.deps.json
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Pointer\bin\UIChecks\debug\UIChecks.runtimeconfig.json
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Pointer\bin\UIChecks\debug\UIChecks.dll
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Pointer\bin\UIChecks\debug\UIChecks.pdb
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Pointer\obj\UIChecks\debug\UIChecks.csproj.AssemblyReference.cache
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Pointer\obj\UIChecks\debug\UIChecks.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Pointer\obj\UIChecks\debug\UIChecks.AssemblyInfoInputs.cache
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Pointer\obj\UIChecks\debug\UIChecks.AssemblyInfo.cs
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Pointer\obj\UIChecks\debug\UIChecks.csproj.CoreCompileInputs.cache
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Pointer\obj\UIChecks\debug\UIChecks.csproj.Up2Date
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Pointer\obj\UIChecks\debug\UIChecks.dll
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Pointer\obj\UIChecks\debug\refint\UIChecks.dll
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Pointer\obj\UIChecks\debug\UIChecks.pdb
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Pointer\obj\UIChecks\debug\UIChecks.genruntimeconfig.cache
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Pointer\obj\UIChecks\debug\ref\UIChecks.dll

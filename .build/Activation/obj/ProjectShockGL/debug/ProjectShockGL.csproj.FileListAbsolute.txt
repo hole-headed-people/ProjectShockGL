@@ -1,0 +1,12 @@
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Activation\bin\ProjectShockGL\debug\ProjectShockGL.deps.json
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Activation\bin\ProjectShockGL\debug\ProjectShockGL.dll
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Activation\bin\ProjectShockGL\debug\ProjectShockGL.pdb
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Activation\obj\ProjectShockGL\debug\ProjectShockGL.csproj.AssemblyReference.cache
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Activation\obj\ProjectShockGL\debug\ProjectShockGL.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Activation\obj\ProjectShockGL\debug\ProjectShockGL.AssemblyInfoInputs.cache
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Activation\obj\ProjectShockGL\debug\ProjectShockGL.AssemblyInfo.cs
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Activation\obj\ProjectShockGL\debug\ProjectShockGL.csproj.CoreCompileInputs.cache
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Activation\obj\ProjectShockGL\debug\ProjectShockGL.dll
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Activation\obj\ProjectShockGL\debug\refint\ProjectShockGL.dll
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Activation\obj\ProjectShockGL\debug\ProjectShockGL.pdb
+C:\Users\Azamat\RiderProjects\ProjectShockGL\.build\Activation\obj\ProjectShockGL\debug\ref\ProjectShockGL.dll
