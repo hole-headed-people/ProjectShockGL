@@ -5,12 +5,16 @@ namespace ProjectShockGL.Core;
 public enum LightType
 {
     Directional,
-    Point
+    Point,
+    Spot
 }
 
 public class Light : Entity
 {
     private LightType _type = LightType.Point;
+    
+    private float _innerAngle = 30f;
+    private float _outerAngle = 45f;
 
     [Editable]
     public LightType Type
@@ -18,6 +22,8 @@ public class Light : Entity
         get => _type;
         set
         {
+            if (!Enum.IsDefined(value)) throw new ArgumentOutOfRangeException(nameof(Type));
+            
             if (_type == value)
             {
                 return;
@@ -34,6 +40,31 @@ public class Light : Entity
     [Editable] public float Intensity { get; set; } = 1f;
     [Editable] public float Radius { get; set; } = 10f;
     
+    [Editable]
+    public float InnerAngle
+    {
+        get => _innerAngle;
+        set
+        {
+            ValidateAngle(value, 0, nameof(InnerAngle));
+            _innerAngle = value;
+            _outerAngle = MathF.Max(_outerAngle, value);
+        }
+    }
+    
+    [Editable]
+    public float OuterAngle
+    {
+        get => _outerAngle;
+        set
+        {
+            ValidateAngle(value, 0.1f, nameof(OuterAngle));
+            
+            _outerAngle = value;
+            _innerAngle = MathF.Min(_innerAngle, value);
+        }
+    }
+    
     public static Light? Main { get; private set; }
     public static List<Light> All { get; private set; } = [];
 
@@ -43,10 +74,23 @@ public class Light : Entity
 
         OnTypeChanged();
     }
+    
+    private static void ValidateAngle(float angle, float minimum, string name)
+    {
+        if (!float.IsFinite(angle) || angle < minimum || angle > 179)
+        {
+            throw new ArgumentOutOfRangeException(name, $"Angle must be {minimum}..179 degrees.");
+        }
+    }
 
     internal void OnTypeChanged()
     {
-        if (Type == LightType.Point)
+        if (IsDestroyed)
+        {
+            return;
+        }
+        
+        if (Type is LightType.Point or LightType.Spot)
         {
             if (Main == this)
             {
@@ -75,13 +119,18 @@ public class Light : Entity
 
     public override void Destroy()
     {
-        base.Destroy();
-
-        if (Main == this)
+        try
         {
-            Main = null;
+            base.Destroy();
         }
-        
-        All.Remove(this);
+        finally
+        {
+            if (Main == this)
+            {
+                Main = null;
+            }
+            
+            All.Remove(this);
+        }
     }
 }

@@ -1,6 +1,6 @@
 ﻿{
-  "Class": "ProjectDungeon.Core.Trigger, ProjectDungeon",
+  "Class": "ProjectDungeon.Placeables.Trigger, ProjectDungeon",
   "Parameters": {
-    "DebugBillboard": "Trigger"
+    "DebugBillboard": "Editor/Trigger"
   }
 }

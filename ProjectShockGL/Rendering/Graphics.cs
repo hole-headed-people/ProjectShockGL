@@ -74,7 +74,7 @@ public class Graphics
             center.X,            center.Y,            center.Z,            1f
         );
 
-        Renderer.DrawQuadMesh(texture, model, color, ignoreDepth);
+        Renderer.DrawQuadMesh(texture, model, color, ignoreDepth: ignoreDepth);
     }
     
     public void DrawLine(Vector3 from, Vector3 to, Texture texture, Color color, float thickness = 0.05f, bool lit = false, bool ignoreDepth = false)

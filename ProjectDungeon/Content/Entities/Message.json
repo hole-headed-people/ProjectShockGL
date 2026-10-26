@@ -1,0 +1,6 @@
+﻿{
+  "Class": "ProjectDungeon.Placeables.Message, ProjectDungeon",
+  "Parameters": {
+    "DebugBillboard": "Editor/Message"
+  }
+}

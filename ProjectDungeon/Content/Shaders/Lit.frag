@@ -27,6 +27,8 @@ uniform vec3 uPointLightPositions[MAX_POINT_LIGHTS];
 uniform vec3 uPointLightColors[MAX_POINT_LIGHTS];
 uniform float uPointLightIntensities[MAX_POINT_LIGHTS];
 uniform float uPointLightRadii[MAX_POINT_LIGHTS];
+uniform vec3 uPointLightDirections[MAX_POINT_LIGHTS];
+uniform vec2 uPointLightConeCosines[MAX_POINT_LIGHTS];
 
 void main()
 {
@@ -53,10 +55,20 @@ void main()
     {
         vec3 toLight = uPointLightPositions[i] - vWorldPos;
         float dist = length(toLight);
+        if (dist <= 0.00001 || dist >= uPointLightRadii[i]) continue;
         vec3 L = toLight / dist;
 
         float diff = max(dot(N, L), 0.0);
         float atten = clamp(1.0 - dist / uPointLightRadii[i], 0.0, 1.0);
+        vec2 cone = uPointLightConeCosines[i];
+        if (cone.y >= -1.0)
+        {
+            float cosine = dot(-L, normalize(uPointLightDirections[i]));
+            float coneFactor = cone.x - cone.y < 0.000001
+                ? step(cone.y, cosine)
+                : smoothstep(cone.y, cone.x, cosine);
+            atten *= coneFactor;
+        }
 
         vec3 light = uPointLightColors[i] * uPointLightIntensities[i] * atten * diff * baseColor;
         finalColor += light;

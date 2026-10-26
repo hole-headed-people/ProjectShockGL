@@ -1,4 +1,5 @@
 ﻿using System.Numerics;
+using ProjectDungeon.Core;
 using ProjectShockGL;
 using ProjectShockGL.Core;
 using ProjectShockGL.Rendering;
@@ -6,7 +7,7 @@ using ProjectShockGL.Tools;
 
 namespace ProjectDungeon.Game;
 
-public class PlayerCharacter : Entity
+public class ShockPlayerCharacter : Character
 {
     private const float MouseSensitivity = 0.05f;
 
@@ -21,37 +22,47 @@ public class PlayerCharacter : Entity
     private Camera _camera = null!;
     private CharacterController _characterController = null!;
     
-    private Light _light = null!;
+    private Light? _light = null;
 
     public override void Create()
     {
         base.Create();
         
-        _camera = Camera.Active;
-        _camera.ClearColor = Color.Black;
-        _camera.Fov = 50f * MathHelper.Deg2Rad;
-
-        _light = ProjectShockGL.Core.Game.Instance.World.Spawn<Light>();
-        
-        _light.Intensity = 1f;
-        _light.Radius = 2f;
-        _light.Type = LightType.Point;
-        _light.Color = Color.White;
-        
         Layer = Layers.Get("Player");
         CollidesWith = Layers.Everything;
     }
 
-public override void Start()
+    public override void Start()
     {
         base.Start();
+
+        _camera = Camera.Active;
+        _camera.ClearColor = Color.Black;
+        _camera.Fov = 50f * MathHelper.Deg2Rad;
 
         _characterController = AddComponent<CharacterController>();
         
         _characterController.Height = 2f;
         _characterController.Radius = 0.3f;
+
+        var angles = QuaternionHelper.ToEulerDegrees(Transform.Rotation);
+        
+        _yaw = angles.Y;
+        _pitch = Math.Clamp(angles.X, -89f, 89f);
+        
+        _camera.Transform.Position = Transform.Position;
+        _camera.Transform.Rotation = Quaternion.CreateFromYawPitchRoll(
+            MathHelper.ToRadians(_yaw), MathHelper.ToRadians(_pitch), 0f);
+
+        _light = ProjectShockGL.Core.Game.Instance.World.Spawn<Light>();
+        
+        _light.Intensity = 1f;
+        _light.Radius = 10f;
+        _light.Type = LightType.Spot;
+        _light.Color = Color.White;
         
         _light.Transform.Position = Transform.Position;
+        _light.Transform.Rotation = _camera.Transform.Rotation;
     }
 
     public override void Update(float deltaTime)
@@ -60,9 +71,33 @@ public override void Start()
         
         UpdateMovement(deltaTime);
         UpdateRotation();
-        
-        _light.Transform.Position = Transform.Position;
+
+        if (_light != null)
+        {
+            _light.Transform.Position = Transform.Position;
+            _light.Transform.Rotation = _camera.Transform.Rotation;
+        }
+
         _camera.Transform.Position = Transform.Position;
+    }
+
+    public override void OnActiveChanged(bool isActive)
+    {
+        base.OnActiveChanged(isActive);
+        
+        _light?.SetActive(isActive);
+    }
+
+    public override void Destroy()
+    {
+        try
+        {
+            base.Destroy();
+        }
+        finally
+        {
+            _light?.Destroy();
+        }
     }
     
     private void UpdateMovement(float deltaTime)

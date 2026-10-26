@@ -1,0 +1,6 @@
+﻿{
+  "Class": "ProjectDungeon.Placeables.BeginPlayEvent, ProjectDungeon",
+  "Parameters": {
+    "DebugBillboard": "Editor/Entity"
+  }
+}

@@ -1,5 +1,7 @@
 ﻿using ProjectShockGL.Rendering;
 using Silk.NET.Input;
+using Silk.NET.Core;
+using StbImageSharp;
 using Silk.NET.Maths;
 using Silk.NET.OpenGL;
 using Silk.NET.Windowing;
@@ -54,19 +56,8 @@ public static class Application
     
     public static void Run()
     {
-        var width = Settings.GetInt("Window", "Width", 1024);
-        var height = Settings.GetInt("Window", "Height", 768);
-        
-        var canResize = Settings.GetBool("Window", "CanResize", false);
-        
         _title = Settings.GetString("Game", "Name", "ProjectShockGL");
-        
-        var options = WindowOptions.Default with
-        {
-            Size = new Vector2D<int>(width, height),
-            Title = _title,
-            WindowBorder = canResize ? WindowBorder.Resizable : WindowBorder.Fixed
-        };
+        var options = CreateWindowOptions();
         
         IsEditor = Settings.GetBool("Application", "IsEditor", false);
         IsDebug = Settings.GetBool("Application", "IsDebug", false);
@@ -84,8 +75,57 @@ public static class Application
         _window.Run();
     }
 
+    private static WindowOptions CreateWindowOptions()
+    {
+        var mode = Settings.GetString("Window", "Mode", "Windowed").Trim();
+        var options = WindowOptions.Default with
+        {
+            Title = _title, 
+            WindowState = WindowState.Normal
+        };
+        
+        if (mode.Equals("Borderless", StringComparison.OrdinalIgnoreCase))
+        {
+            var monitor = Silk.NET.Windowing.Monitor.GetMainMonitor(null);
+            var resolution = monitor.VideoMode.Resolution
+                ?? throw new InvalidOperationException("Cannot determine the primary monitor resolution.");
+
+            if (resolution.X <= 0 || resolution.Y <= 0)
+            {
+                throw new InvalidOperationException("The primary monitor has an invalid resolution.");
+            }
+            
+            options.Size = resolution;
+            options.Position = OperatingSystem.IsWindows() ? Vector2D<int>.Zero : monitor.Bounds.Origin;
+            options.WindowBorder = WindowBorder.Hidden;
+            
+            return options;
+        }
+
+        if (mode.Length > 0 && !mode.Equals("Windowed", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException($"Unknown Window.Mode '{mode}'. Use Windowed or Borderless.");
+        }
+
+        var width = Settings.GetInt("Window", "Width", 1024);
+        var height = Settings.GetInt("Window", "Height", 768);
+
+        if (width <= 0 || height <= 0)
+        {
+            throw new InvalidDataException("Window.Width and Window.Height must be positive.");
+        }
+        
+        options.Size = new Vector2D<int>(width, height);
+        options.WindowBorder = Settings.GetBool("Window", "CanResize", false)
+            ? WindowBorder.Resizable : WindowBorder.Fixed;
+        
+        return options;
+    }
+
     private static void OnLoad()
     {
+        ApplyWindowIcon();
+        
         WindowSize = new System.Numerics.Vector2(_window.Size.X, _window.Size.Y);
         
         _gl = _window.CreateOpenGL();
@@ -103,6 +143,30 @@ public static class Application
         Load?.Invoke();
     }
     
+    private static void ApplyWindowIcon()
+    {
+        var icon = Settings.GetString("Window", "Icon", string.Empty).Trim();
+
+        if (string.IsNullOrEmpty(icon))
+        {
+            return;
+        }
+        
+        try
+        {
+            var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, icon));
+            
+            using var stream = File.OpenRead(path);
+            var image = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
+            
+            _window.SetWindowIcon(new[] { new RawImage(image.Width, image.Height, image.Data) });
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine($"Cannot set window icon '{icon}': {exception.Message}");
+        }
+    }
+
     private static void OnUpdate(double deltaTime)
     {
         if (_quitRequested)
@@ -188,14 +252,12 @@ public static class Application
         
         _hasUnloaded = true;
 
-        Unload?.Invoke();
-
-        _renderer.Dispose();
-
-        Content.UnloadAll();
-
-        _inputContext.Dispose();
-        _gl.Dispose();
+        Cleanup.Run(
+            () => Cleanup.Run(Unload?.GetInvocationList().Cast<Action>().ToArray() ?? []),
+            _renderer.Dispose,
+            Content.UnloadAll,
+            _inputContext.Dispose,
+            _gl.Dispose);
     }
 
     private static bool CanClose()

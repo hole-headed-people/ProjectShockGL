@@ -254,6 +254,91 @@ Run("Disabled components start once when enabled and late components start befor
     world.Clear();
 });
 
+Run("Editor maintenance publishes objects without running gameplay or activation callbacks", () =>
+{
+    var world = new World();
+    var obj = world.Spawn<ActivationProbe>();
+    world.Update(0, simulate: false);
+    obj.SetActive(false);
+    obj.SetActive(true);
+    world.Update(0, simulate: false);
+    Check(world.GetAllObjects().Contains(obj));
+    Check(obj.Starts == 0 && obj.Updates == 0 && obj.Events.Count == 0 && obj.Part.Starts == 0);
+    world.Update(0);
+    Check(obj.Starts == 1 && obj.Updates == 1 && obj.Events.SequenceEqual(new[] { true }));
+    world.Clear();
+});
+
+Run("A failed component creation unregisters its collider and detaches it", () =>
+{
+    Physics.Initialize();
+    var obj = new GameObject();
+    try { obj.AddComponent<FailingCollider>(); Check(false); }
+    catch (InvalidOperationException) { }
+    Check(obj.GetComponent<FailingCollider>() == null && obj.Collider == null);
+    Check(FailingCollider.Last.IsDestroyed);
+    Check(!Physics.OverlapSphere(default, 1, Layers.Everything, out _));
+    obj.Destroy();
+});
+
+Run("Destroying an owner during component creation cannot attach a live component", () =>
+{
+    var obj = new GameObject();
+    try { obj.AddComponent<OwnerDestroyingComponent>(); Check(false); }
+    catch (ObjectDisposedException) { }
+    Check(obj.IsDestroyed && OwnerDestroyingComponent.Last.IsDestroyed);
+    Check(obj.GetComponent<OwnerDestroyingComponent>() == null);
+});
+
+Run("Cleanup continues after activity and component callbacks throw", () =>
+{
+    var world = new World();
+    var first = world.Spawn<ActivationProbe>();
+    var badPart = first.AddComponent<TrackedComponent>();
+    badPart.OnDestroy = () => throw new InvalidOperationException("component cleanup");
+    first.AddComponent<SphereCollider>();
+    var second = world.Spawn<TrackedObject>();
+    world.Update(0);
+    first.OnActivity = active => { if (!active) throw new InvalidOperationException("activity cleanup"); };
+    try { world.Clear(); Check(false); }
+    catch (AggregateException error) { Check(error.Flatten().InnerExceptions.Count == 2); }
+    Check(first.IsDestroyed && first.Part.IsDestroyed && badPart.IsDestroyed && first.Collider == null);
+    Check(second.IsDestroyed && second.Part.IsDestroyed && world.GetAllObjects(true).Length == 0);
+    Check(!Physics.OverlapSphere(default, 1, Layers.Everything, out _));
+});
+
+Run("Failed object creation releases its partially created components", () =>
+{
+    var world = new World();
+    try { world.Spawn<FailingObject>(); Check(false); }
+    catch (InvalidOperationException) { }
+    Check(FailingObject.Last.IsDestroyed && FailingObject.Last.Part.IsDestroyed);
+    world.Update(0);
+    Check(world.GetAllObjects(true).Length == 0);
+});
+
+Run("A throwing Destroy override cannot prevent base cleanup or leave a failed spawn alive", () =>
+{
+    var world = new World();
+    var obj = world.Spawn<ThrowingDestroyObject>();
+    try { world.Destroy(obj); Check(false); }
+    catch (AggregateException) { }
+    Check(obj.IsDestroyed && obj.Part.IsDestroyed);
+    world.Clear();
+    Check(obj.Destroys == 1);
+});
+
+Run("Objects spawned during Start still start and update in the same runtime frame", () =>
+{
+    var world = new World();
+    var first = world.Spawn<TrackedObject>();
+    TrackedObject? child = null;
+    first.OnStart = () => child = world.Spawn<TrackedObject>();
+    world.Update(0);
+    Check(child is { Starts: 1, Updates: 1 });
+    world.Clear();
+});
+
 static void Run(string name, Action test)
 {
     test();
@@ -306,4 +391,41 @@ public sealed class ActivationComponent : Component
     public int Starts, Updates;
     public override void Start() => Starts++;
     public override void Update(float dt) { if (Starts != 1) throw new Exception("Update before Start"); Updates++; }
+}
+
+public sealed class FailingCollider : SphereCollider
+{
+    public static FailingCollider Last = null!;
+    public override void Create()
+    {
+        Last = this;
+        base.Create();
+        throw new InvalidOperationException("creation failed after registration");
+    }
+}
+
+public sealed class OwnerDestroyingComponent : Component
+{
+    public static OwnerDestroyingComponent Last = null!;
+    public override void Create() { Last = this; Parent.Destroy(); }
+}
+
+public sealed class FailingObject : GameObject
+{
+    public static FailingObject Last = null!;
+    public Component Part = null!;
+    public override void Create()
+    {
+        Last = this;
+        Part = AddComponent<Component>();
+        throw new InvalidOperationException("object creation failed");
+    }
+}
+
+public sealed class ThrowingDestroyObject : GameObject
+{
+    public int Destroys;
+    public Component Part = null!;
+    public override void Create() => Part = AddComponent<Component>();
+    public override void Destroy() { Destroys++; throw new InvalidOperationException("before base.Destroy"); }
 }

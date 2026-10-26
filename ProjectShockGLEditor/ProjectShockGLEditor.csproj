@@ -2,6 +2,7 @@
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
+        <ApplicationIcon>Icons\Editor.ico</ApplicationIcon>
         <TargetFramework>net8.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
@@ -23,6 +24,10 @@
       </None>
       <None Update="Layers.ini">
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      </None>
+      <None Update="Icons\**\*">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       </None>
     </ItemGroup>
 

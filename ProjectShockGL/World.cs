@@ -21,7 +21,7 @@ public class World
         _spawnedObjects = [];
     }
 
-    public void Update(float deltaSeconds)
+    public void Update(float deltaSeconds, bool simulate = true)
     {
         while (_spawnedObjects.Count > 0)
         {
@@ -34,8 +34,12 @@ public class World
             
             _objects.Add(obj);
             _objectsVersion++;
-            obj.InitializeActivity();
-            obj.TryStart();
+            
+            if (simulate)
+            {
+                obj.InitializeActivity();
+                obj.TryStart();
+            }
         }
         
         var objectsToUpdate = GetAllObjects();
@@ -43,11 +47,17 @@ public class World
         
         foreach (var obj in objectsToUpdate)
         {
+            if (!simulate)
+            {
+                continue;
+            }
+            
             if (_clearVersion != clearVersion)
             {
                 break;
             }
 
+            obj.InitializeActivity();
             obj.TryStart();
 
             if (_clearVersion != clearVersion)
@@ -97,7 +107,7 @@ public class World
         
         _spawnedObjects.Enqueue(obj);
         
-        obj.Create();
+        CreateObject(obj);
         
         return obj;
     }
@@ -107,7 +117,7 @@ public class World
         var obj = new T();
         _spawnedObjects.Enqueue(obj);
         
-        obj.Create();
+        CreateObject(obj);
         
         return obj;
     }
@@ -122,6 +132,28 @@ public class World
         return obj;
     }
 
+    private static void CreateObject(Object obj)
+    {
+        try
+        {
+            obj.Create();
+        }
+        
+        catch (Exception creationError)
+        {
+            try
+            {
+                obj.Release();
+            }
+            catch (Exception cleanupError)
+            {
+                throw new AggregateException(creationError, cleanupError);
+            }
+            
+            throw;
+        }
+    }
+
     public void Destroy(Object? obj)
     {
         if (obj == null || obj.IsDestroyed)
@@ -134,7 +166,7 @@ public class World
             return;
         }
         
-        obj.Destroy();
+        obj.Release();
     }
 
     public void Clear()
@@ -149,12 +181,26 @@ public class World
         
         _cachedObjectsArray = null;
 
+        List<Exception> errors = [];
+        
         foreach (var obj in objects)
         {
             if (!obj.IsDestroyed)
             {
-                obj.Destroy();
+                try
+                {
+                    obj.Release();
+                }
+                catch (Exception error)
+                {
+                    errors.Add(error);
+                }
             }
+        }
+
+        if (errors.Count > 0)
+        {
+            throw new AggregateException("World cleanup failed.", errors);
         }
     }
 
@@ -171,6 +217,21 @@ public class World
         return null;
     }
 
+    public T[] FindAll<T>() where T : Object
+    {
+        var list = new List<T>();
+
+        foreach (var obj in GetAllObjects(true))
+        {
+            if (!obj.IsDestroyed && obj is T match)
+            {
+                list.Add(match);
+            }
+        }
+        
+        return list.ToArray();
+    }
+
     public Object? Find(string name)
     {
         foreach (var obj in GetAllObjects(true))
@@ -182,6 +243,21 @@ public class World
         }
         
         return null;
+    }
+
+    public Object[] FindAll(string name)
+    {
+        var list = new List<Object>();
+
+        foreach (var obj in GetAllObjects(true))
+        {
+            if (!obj.IsDestroyed && obj.Name == name)
+            {
+                list.Add(obj);
+            }
+        }
+        
+        return list.ToArray();
     }
     
     public Object[] GetAllObjects(bool includePending = false)

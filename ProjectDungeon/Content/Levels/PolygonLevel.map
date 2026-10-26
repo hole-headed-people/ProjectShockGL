@@ -1,16 +1,16 @@
 {
   "Environment": {
     "AmbientColor": [
-      1.0,
-      1.0,
-      1.0,
+      0.0,
+      0.0,
+      0.0,
       1.0
     ],
     "IsFogEnabled": false,
     "FogColor": [
-      0.5,
-      0.5,
-      0.5,
+      0.0,
+      0.0,
+      0.0,
       1.0
     ],
     "FogNear": 1.0,
@@ -28,9 +28,9 @@
           1.0,
           1.0
         ],
-        "Texture": "Default",
+        "Texture": "Test",
         "TextureFormat": 1,
-        "TextureScale": 1.0,
+        "TextureScale": 0.15,
         "Color": [
           1.0,
           1.0,
@@ -54,7 +54,7 @@
       "Scale": [
         7.0208187,
         0.19430065,
-        6.9846234
+        21.497065
       ],
       "Outputs": [],
       "Properties": {}
@@ -70,9 +70,9 @@
           1.0,
           1.0
         ],
-        "Texture": "Default",
+        "Texture": "Test",
         "TextureFormat": 1,
-        "TextureScale": 1.0,
+        "TextureScale": 0.15,
         "Color": [
           1.0,
           1.0,
@@ -83,7 +83,7 @@
       },
       "Position": [
         -3.3762648,
-        1.4595687,
+        2.0530128,
         0.0
       ],
       "Rotation": {
@@ -95,8 +95,8 @@
       },
       "Scale": [
         0.26311472,
-        2.7976742,
-        6.9846234
+        4.0028415,
+        21.457062
       ],
       "Outputs": [],
       "Properties": {}
@@ -112,9 +112,9 @@
           1.0,
           1.0
         ],
-        "Texture": "Default",
+        "Texture": "Test",
         "TextureFormat": 1,
-        "TextureScale": 1.0,
+        "TextureScale": 0.15,
         "Color": [
           1.0,
           1.0,
@@ -125,7 +125,7 @@
       },
       "Position": [
         3.3910882,
-        1.4595687,
+        2.0836754,
         0.0
       ],
       "Rotation": {
@@ -137,8 +137,154 @@
       },
       "Scale": [
         0.26311472,
-        2.7976742,
-        6.9846234
+        4.0360746,
+        21.557491
+      ],
+      "Outputs": [],
+      "Properties": {}
+    },
+    {
+      "Name": "PlayerStart_1",
+      "Path": "PlayerStart",
+      "Type": 1,
+      "IsActive": true,
+      "Brush": null,
+      "Position": [
+        0.0,
+        1.1195091,
+        -8.903137
+      ],
+      "Rotation": {
+        "X": 0.0,
+        "Y": 0.71896446,
+        "Z": 0.0,
+        "W": 0.69504684,
+        "IsIdentity": false
+      },
+      "Scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "Outputs": [],
+      "Properties": {}
+    },
+    {
+      "Name": "BrushBox_4",
+      "Path": "BrushBox",
+      "Type": 2,
+      "IsActive": true,
+      "Brush": {
+        "Size": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "Texture": "Test",
+        "TextureFormat": 1,
+        "TextureScale": 0.15,
+        "Color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "Lit": true
+      },
+      "Position": [
+        0.0,
+        3.969252,
+        0.0
+      ],
+      "Rotation": {
+        "X": 0.0,
+        "Y": 0.0,
+        "Z": 0.0,
+        "W": 1.0,
+        "IsIdentity": true
+      },
+      "Scale": [
+        7.0208187,
+        0.19430065,
+        21.497065
+      ],
+      "Outputs": [],
+      "Properties": {}
+    },
+    {
+      "Name": "Cube_1",
+      "Path": "Cube",
+      "Type": 0,
+      "IsActive": true,
+      "Brush": null,
+      "Position": [
+        -1.8345141,
+        1.0473863,
+        7.2606783
+      ],
+      "Rotation": {
+        "X": 0.0,
+        "Y": 0.27478138,
+        "Z": 0.0,
+        "W": 0.9615068,
+        "IsIdentity": false
+      },
+      "Scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "Outputs": [],
+      "Properties": {}
+    },
+    {
+      "Name": "Cube_2",
+      "Path": "Cube",
+      "Type": 0,
+      "IsActive": true,
+      "Brush": null,
+      "Position": [
+        1.5427661,
+        1.0199981,
+        -2.4805098
+      ],
+      "Rotation": {
+        "X": 0.0,
+        "Y": 0.00651747,
+        "Z": 0.0,
+        "W": 0.9999788,
+        "IsIdentity": false
+      },
+      "Scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "Outputs": [],
+      "Properties": {}
+    },
+    {
+      "Name": "Cube_3",
+      "Path": "Cube",
+      "Type": 0,
+      "IsActive": true,
+      "Brush": null,
+      "Position": [
+        1.5427661,
+        1.0473863,
+        4.0411925
+      ],
+      "Rotation": {
+        "X": 0.0,
+        "Y": 0.00651747,
+        "Z": 0.0,
+        "W": 0.9999788,
+        "IsIdentity": false
+      },
+      "Scale": [
+        1.0,
+        1.0,
+        1.0
       ],
       "Outputs": [],
       "Properties": {}
@@ -150,9 +296,9 @@
       "IsActive": true,
       "Brush": null,
       "Position": [
-        0.0,
-        2.0997953,
-        0.0
+        1.6766825,
+        2.141862,
+        7.7834387
       ],
       "Rotation": {
         "X": 0.0,
@@ -171,24 +317,26 @@
         "Type": 1,
         "Color": [
           1.0,
-          1.0,
-          1.0,
+          0.58823526,
+          0.0,
           1.0
         ],
-        "Intensity": 1.0,
-        "Radius": 10.0
+        "Intensity": 0.3,
+        "Radius": 10.0,
+        "InnerAngle": 30.0,
+        "OuterAngle": 45.0
       }
     },
     {
-      "Name": "PlayerStart_1",
-      "Path": "PlayerStart",
+      "Name": "Message_1",
+      "Path": "Message",
       "Type": 1,
       "IsActive": true,
       "Brush": null,
       "Position": [
-        0.0,
-        1.1195091,
-        1.8575661
+        -2.188199,
+        0.9024358,
+        5.0487776
       ],
       "Rotation": {
         "X": 0.0,
@@ -203,6 +351,39 @@
         1.0
       ],
       "Outputs": [],
+      "Properties": {}
+    },
+    {
+      "Name": "BeginPlayEvent_1",
+      "Path": "BeginPlayEvent",
+      "Type": 1,
+      "IsActive": true,
+      "Brush": null,
+      "Position": [
+        0.49895394,
+        0.84007335,
+        15.054711
+      ],
+      "Rotation": {
+        "X": 0.0,
+        "Y": 0.0,
+        "Z": 0.0,
+        "W": 1.0,
+        "IsIdentity": true
+      },
+      "Scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "Outputs": [
+        {
+          "Event": "OnBeginPlay",
+          "TargetName": "Message_1",
+          "Input": "Print",
+          "Parameter": "TestTestTest"
+        }
+      ],
       "Properties": {}
     }
   ]

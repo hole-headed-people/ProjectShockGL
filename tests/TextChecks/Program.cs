@@ -5,6 +5,8 @@ using ProjectShockGL.UI;
 using Silk.NET.OpenGL;
 using Silk.NET.Maths;
 using Silk.NET.Windowing;
+using Texture = ProjectShockGL.Rendering.Texture;
+using Shader = ProjectShockGL.Rendering.Shader;
 
 var root = Path.GetFullPath(args.FirstOrDefault(a => !a.StartsWith("--")) ?? ".");
 var fontPath = Path.Combine(root, "ProjectDungeon/Content/Fonts/NotoSans-Regular.ttf");
@@ -105,10 +107,39 @@ void Render()
         "[Content]\nCustomPath=" + Path.Combine(root, "ProjectDungeon/Content") + "\n");
     Settings.Initialize();
     Content.Initialize(gl);
+    var corruptTexture = Path.Combine(AppContext.BaseDirectory, "CorruptTexture.png");
+    File.WriteAllText(corruptTexture, "not an image");
+    try
+    {
+        var rejected = false;
+        try { Texture.Load(gl, corruptTexture); }
+        catch { rejected = true; }
+        Check(rejected && gl.GetInteger(GetPName.TextureBinding2D) == 0);
+        using var shader = new Shader(gl, ShaderType.VertexShader, "#version 330 core\nvoid main(){gl_Position=vec4(0);}");
+        var shaderHandle = shader.Handle;
+        Check(gl.IsShader(shaderHandle));
+        shader.Dispose();
+        shader.Dispose();
+        Check(!gl.IsShader(shaderHandle));
+        var invalidRejected = false;
+        try { using var invalid = new Shader(gl, ShaderType.VertexShader, "invalid shader source"); }
+        catch { invalidRejected = true; }
+        Check(invalidRejected && gl.GetError() == GLEnum.NoError);
+        Console.WriteLine("PASS: Corrupt texture releases its GL handle and shaders clean up safely");
+    }
+    finally { File.Delete(corruptTexture); }
     var preview = new RenderPreviewSettings();
     using var renderer = new Renderer(gl, 640, 240, preview);
     var graphics = new Graphics(renderer);
     Camera.Initialize(window);
+    graphics.BeginDraw(Camera.Active);
+    graphics.DrawLine2D(new Vector3(-0.5f, 0, -2), new Vector3(0.5f, 0, -2),
+        ProjectShockGL.Rendering.Plane.Xy, Content.GetWhitePixel(), Color.White, ignoreDepth: true);
+    var unlitProgram = (uint)typeof(Renderer).GetField("_unlitProgram",
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(renderer)!;
+    Check((uint)gl.GetInteger(GetPName.CurrentProgram) == unlitProgram && gl.IsEnabled(EnableCap.DepthTest));
+    graphics.EndDraw();
+    Console.WriteLine("PASS: DrawLine2D depth override keeps the line unlit and restores depth testing");
     var lightWorld = new World();
     for (var i = 0; i < 17; i++) lightWorld.Spawn<ProjectShockGL.Core.Light>().SetActive(false);
     var point = lightWorld.Spawn<ProjectShockGL.Core.Light>();
@@ -195,6 +226,48 @@ void Render()
         preview.Unlit = false;
         preview.EnvironmentEnabled = true;
     }
+    var spotEnvironment = ProjectShockGL.Environment.Capture();
+    var spotWorld = new World();
+    try
+    {
+        ProjectShockGL.Environment.Apply(new ProjectShockGL.Core.EnvironmentData { AmbientColor = Color.Black });
+        var spot = spotWorld.Spawn<ProjectShockGL.Core.Light>();
+        spot.Type = ProjectShockGL.Core.LightType.Spot;
+        spot.InnerAngle = 20;
+        spot.OuterAngle = 50;
+        spot.Radius = 10;
+        byte[] SpotPixels()
+        {
+            graphics.BeginDraw(Camera.Active);
+            graphics.DrawQuad(new Vector3(0, 0, -3), Quaternion.Identity, new Vector2(20),
+                Content.GetWhitePixel(), Color.White, lit: true);
+            gl.Finish();
+            var values = new byte[3];
+            for (var sample = 0; sample < 3; sample++)
+            {
+                var pixel = new byte[4];
+                unsafe { fixed (byte* p = pixel) gl.ReadPixels(320 + sample * 60, 120, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, p); }
+                values[sample] = pixel[0];
+            }
+            Check(gl.GetError() == GLEnum.NoError);
+            return values;
+        }
+        var cone = SpotPixels();
+        Check(cone[0] > cone[1] + 20 && cone[1] > 10 && cone[2] < 3);
+        spot.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI / 2);
+        Check(SpotPixels().All(value => value < 3));
+        spot.Transform.Rotation = Quaternion.Identity;
+        spot.SetActive(false);
+        Check(SpotPixels().All(value => value < 3));
+        spot.SetActive(true);
+        spot.InnerAngle = spot.OuterAngle;
+        Check(SpotPixels()[0] > 100);
+        spot.Type = ProjectShockGL.Core.LightType.Point;
+        Check(SpotPixels()[2] > 30);
+        Console.WriteLine("PASS: Spotlight renders a soft cone, follows rotation/activity and preserves ordinary point lighting");
+    }
+    finally { spotWorld.Clear(); ProjectShockGL.Environment.Apply(spotEnvironment); }
+
     // Use a tiny striped BMP (decoded by content, regardless of its .jpg extension).
     var checkerName = Path.Combine(AppContext.BaseDirectory, "brush-checker");
     using (var writer = new BinaryWriter(File.Create(checkerName + ".jpg")))
@@ -245,6 +318,28 @@ void Render()
     Check(!gl.IsVertexArray(brushVao) && gl.GetError() == GLEnum.NoError);
     Camera.Active.Orthographic = false;
     Console.WriteLine("PASS: BrushBox renders tiled texture after size/scale edits and releases its private GPU mesh");
+    var editorProperty = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+    var wasEditor = Application.IsEditor;
+    var previewWorld = new World();
+    editorProperty.SetValue(null, true);
+    try
+    {
+        var missingBrush = previewWorld.Spawn<ProjectShockGL.Core.BrushBox>();
+        missingBrush.TextureName = "MissingPreviewTexture";
+        previewWorld.Update(0, simulate: false);
+        var queue = new RenderQueue();
+        graphics.BeginDraw(Camera.Active);
+        previewWorld.Render(queue);
+        queue.Flush(graphics);
+        graphics.EndDraw();
+        Check(missingBrush.TextureName == "MissingPreviewTexture" && gl.GetError() == GLEnum.NoError);
+        Console.WriteLine("PASS: Missing BrushBox texture uses editor fallback without changing its saved material");
+    }
+    finally
+    {
+        previewWorld.Clear();
+        editorProperty.SetValue(null, wasEditor);
+    }
     var canvas = new Canvas();
     canvas.Resize(new Vector2(640, 240));
     var font = Content.LoadFont("NotoSans-Regular", 24)!;

@@ -1,6 +1,6 @@
 ﻿{
-  "Class": "ProjectDungeon.Core.PlayerStart, ProjectDungeon",
+  "Class": "ProjectDungeon.Placeables.PlayerStart, ProjectDungeon",
   "Parameters": {
-    "DebugBillboard": "PlayerStart"
+    "DebugBillboard": "Editor/PlayerStart"
   }
 }

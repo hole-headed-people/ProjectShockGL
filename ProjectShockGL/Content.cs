@@ -1,4 +1,4 @@
-﻿using Newtonsoft.Json;
+using Newtonsoft.Json;
 using ProjectShockGL.Core;
 using ProjectShockGL.Rendering;
 using ProjectShockGL.Tools;
@@ -329,36 +329,21 @@ public static class Content
     
     public static void UnloadAll()
     {
-        foreach (var font in Fonts.Values) font.Dispose();
-        Fonts.Clear();
-        foreach (var shader in Shaders.Values)
-        {
-            shader.Dispose();
-        }
-        
-        Shaders.Clear();
+        var resources = Fonts.Values.Cast<IDisposable>()
+            .Concat(Shaders.Values).Concat(Textures.Values).Concat(Meshes.Values).ToList();
+        if (_whiteTexture != null) resources.Add(_whiteTexture);
 
-        foreach (var texture in Textures.Values)
-        {
-            texture.Dispose();
-        }
-        
+        Fonts.Clear();
+        Shaders.Clear();
         Textures.Clear();
-        
-        foreach (var mesh in Meshes.Values)
-        {
-            mesh.Dispose();
-        }
-        
         Meshes.Clear();
-        
         Geometries.Clear();
         Entities.Clear();
-        
-        _whiteTexture?.Dispose();
+        Levels.Clear();
         _whiteTexture = null;
+
+        Cleanup.Run(resources.Distinct().Select<IDisposable, Action>(resource => resource.Dispose).ToArray());
     }
-    
     internal static Mesh CreateMesh(float[] vertices, uint[] indices)
     {
         return new Mesh(_gl, vertices, indices);

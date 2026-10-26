@@ -3,7 +3,7 @@ using ProjectShockGL;
 using ProjectShockGL.Core;
 using Object = ProjectShockGL.Core.Object;
 
-namespace ProjectDungeon.Core;
+namespace ProjectDungeon.Placeables;
 
 public class Trigger : Entity
 {
@@ -21,7 +21,7 @@ public class Trigger : Entity
     {
         base.OnTriggerEnter(other);
 
-        if (other is not PlayerCharacter)
+        if (other is not ShockPlayerCharacter)
         {
             return;
         }

@@ -727,6 +727,124 @@ Run("Invalid BrushBox descriptions reject loading without replacing the current 
     Check(legacy.Type == PlaceableType.Geometry && legacy.Brush == null);
 });
 
+Run("Spotlight map roundtrip and duplication preserve full cone angles and orientation", () =>
+{
+    EditorLevelManager.NewLevel();
+    var light = (Light)Entity.Create("Light")!;
+    light.Name = "spot_1";
+    light.Type = LightType.Spot;
+    light.InnerAngle = 20;
+    light.OuterAngle = 55;
+    light.Radius = 8;
+    light.Transform.Rotation = Quaternion.CreateFromYawPitchRoll(0.6f, -0.3f, 0);
+    var rotation = light.Transform.Rotation;
+    var path = Path.Combine(testRoot, "spot.map");
+    EditorLevelManager.SaveCurrentLevel(path);
+    EditorLevelManager.OpenLevel(path);
+    var loaded = Game.Instance.World.Find<Light>()!;
+    Check(loaded.Type == LightType.Spot && loaded.InnerAngle == 20 && loaded.OuterAngle == 55 && loaded.Radius == 8);
+    Check(MathF.Abs(Quaternion.Dot(loaded.Transform.Rotation, rotation)) > 0.9999f);
+    Check(Light.All.Contains(loaded) && Light.Main != loaded);
+    var copy = (Light)EditorLevelManager.DuplicateObject(loaded);
+    Check(copy.Type == LightType.Spot && copy.InnerAngle == 20 && copy.OuterAngle == 55);
+    copy.InnerAngle = 35;
+    Check(loaded.InnerAngle == 20);
+});
+
+Run("Spotlight angle constraints, type transitions and destruction keep registries consistent", () =>
+{
+    EditorLevelManager.NewLevel();
+    var light = Game.Instance.World.Spawn<Light>();
+    light.Type = LightType.Spot;
+    light.OuterAngle = 20;
+    Check(light.InnerAngle == 20);
+    light.InnerAngle = 60;
+    Check(light.OuterAngle == 60);
+    Throws(() => light.OuterAngle = 0);
+    Throws(() => light.InnerAngle = float.NaN);
+    Throws(() => light.OuterAngle = 180);
+    Check(Light.All.Count(l => l == light) == 1);
+    light.Type = LightType.Directional;
+    Check(Light.Main == light && !Light.All.Contains(light));
+    light.Type = LightType.Spot;
+    Check(Light.Main == null && Light.All.Count(l => l == light) == 1);
+    light.Destroy();
+    light.Type = LightType.Point;
+    Check(!Light.All.Contains(light) && Light.Main != light);
+});
+
+Run("Spotlight gizmo matches the rotated outer cone and radial cutoff", () =>
+{
+    var light = new Light { Radius = 7, OuterAngle = 60 };
+    light.Transform.Position = new Vector3(2, 3, 4);
+    light.Transform.Rotation = Quaternion.CreateFromYawPitchRoll(0.9f, 0.4f, 0);
+    var lines = LightGizmo.ConeLines(light, light.OuterAngle).ToArray();
+    Check(lines.Length == 52);
+    foreach (var line in lines)
+    {
+        var toRim = line.To - light.Transform.Position;
+        Check(MathF.Abs(toRim.Length() - light.Radius) < 0.0001f);
+        Check(MathF.Abs(Vector3.Dot(Vector3.Normalize(toRim), light.Transform.Forward) - MathF.Cos(MathF.PI / 6)) < 0.0001f);
+    }
+    light.Radius = 0;
+    Check(!LightGizmo.ConeLines(light, 60).Any());
+});
+
+Run("Corrupt BrushBox texture preserves the current world", () =>
+{
+    Directory.CreateDirectory(Path.Combine(testRoot, "Textures"));
+    File.WriteAllText(Path.Combine(testRoot, "Textures", "Corrupt.png"), "not an image");
+    var existing = Game.Instance.World.Spawn<CheckEntity>();
+    Throws(() => LevelManager.Load(new Level { Placeables = [new Placeable {
+        Type = PlaceableType.BrushBox, Brush = new BrushBoxData { Texture = "Corrupt", TextureFormat = TextureFormat.Png }
+    }] }));
+    Check(!existing.IsDestroyed && Game.Instance.World.GetAllObjects(true).Contains(existing));
+    Game.Instance.World.Clear();
+});
+
+Run("Editor Game update skips gameplay lifecycle and physics events", () =>
+{
+    var editorProperty = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+    var previous = Application.IsEditor;
+    editorProperty.SetValue(null, true);
+    try
+    {
+        var first = Game.Instance.World.Spawn<RuntimeProbe>();
+        Game.Instance.World.Spawn<RuntimeProbe>();
+        ((CheckGame)Game.Instance).UpdateForTest();
+        Check(first.Starts == 0 && first.Updates == 0 && first.Enters == 0);
+        Check(Game.Instance.World.GetAllObjects().Contains(first));
+        Game.Instance.World.Clear();
+    }
+    finally { editorProperty.SetValue(null, previous); }
+});
+
+Run("Player camera keeps spawn direction and character owns its flashlight", () =>
+{
+    var camera = (ProjectShockGL.Rendering.Camera)Activator.CreateInstance(typeof(ProjectShockGL.Rendering.Camera),
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance, null,
+        new object[] { new Silk.NET.Maths.Vector2D<int>(800, 600) }, null)!;
+    ProjectShockGL.Rendering.Camera.ToggleTo(camera);
+    var world = Game.Instance.World;
+    var character = world.Spawn<ProjectDungeon.Game.ShockPlayerCharacter>();
+    character.Transform.Rotation = Quaternion.CreateFromYawPitchRoll(1.2f, 0.2f, 0);
+    var expected = character.Transform.Forward;
+    world.Update(0);
+    Check(Vector3.Distance(camera.Transform.Forward, expected) < 0.0001f);
+    character.Turn(1);
+    world.Update(0);
+    Check(Vector3.Distance(camera.Transform.Forward, expected) < 0.002f);
+    var light = world.Find<Light>()!;
+    Check(light.IsActive);
+    character.SetActive(false);
+    Check(!light.IsActive);
+    character.SetActive(true);
+    Check(light.IsActive);
+    world.Destroy(character);
+    Check(light.IsDestroyed);
+    world.Clear();
+});
+
 Game.Instance.World.Clear();
 Console.WriteLine("All editor checks passed.");
 
@@ -743,7 +861,7 @@ static void Throws(Action action)
     throw new Exception("Expected operation to fail");
 }
 
-public sealed class CheckGame : Game { public void LoadForTest() => Load(); }
+public sealed class CheckGame : Game { public void LoadForTest() => Load(); public void UpdateForTest() => Update(0); }
 public class CheckEntity : Entity
 {
     public int Starts;
@@ -771,4 +889,13 @@ public sealed class RejectingEntity : Entity
         }
     }
     public override void Create() { base.Create(); AddComponent<SphereCollider>(); }
+}
+
+public sealed class RuntimeProbe : Entity
+{
+    public int Starts, Updates, Enters;
+    public override void Create() { base.Create(); AddComponent<SphereCollider>().IsTrigger = true; }
+    public override void Start() { base.Start(); Starts++; }
+    public override void Update(float dt) { base.Update(dt); Updates++; }
+    public override void OnTriggerEnter(GameObject other) => Enters++;
 }

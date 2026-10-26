@@ -187,27 +187,31 @@ public static class Inspector
                 var directory = System.IO.Path.Combine(Content.Path, "Textures");
                 
                 if (Directory.Exists(directory))
+                {
                     foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories).Order())
                     {
-                        var extension = System.IO.Path.GetExtension(file).ToLowerInvariant();
+                        var extension = Path.GetExtension(file).ToLowerInvariant();
                         
                         if (extension is not (".jpg" or ".png"))
                         {
                             continue;
                         }
                         
-                        var relative = System.IO.Path.GetRelativePath(directory, file);
+                        var relative = Path.GetRelativePath(directory, file);
                         var textureName = relative[..^extension.Length];
                         var format = extension == ".png" ? TextureFormat.Png : TextureFormat.Jpeg;
                         
                         if (ImGui.Selectable(relative, brush.TextureName == textureName && brush.TextureFormat == format))
+                        {
                             Editor.Execute(() =>
                             {
                                 _ = Content.LoadTexture(textureName, format) ?? throw new FileNotFoundException(relative);
                                 brush.TextureName = textureName;
                                 brush.TextureFormat = format;
                             });
+                        }
                     }
+                }
                 
                 ImGui.EndCombo();
             }
@@ -244,6 +248,11 @@ public static class Inspector
             
             foreach (var prop in EditableProperties.Get(entity.GetType()))
             {
+                if (entity is Light && prop.Name is nameof(Light.InnerAngle) or nameof(Light.OuterAngle))
+                {
+                    continue;
+                }
+                
                 var value = prop.GetValue(entity)!;
                 var type = prop.PropertyType;
 
@@ -251,7 +260,7 @@ public static class Inspector
                 {
                     var f = (float)value;
                     
-                    if (ImGui.DragFloat(prop.Name, ref f))
+                    if (ImGui.DragFloat(prop.Name, ref f, 0.01f))
                     {
                         prop.SetValue(entity, f);
                     }
@@ -314,7 +323,30 @@ public static class Inspector
                 }
             }
             
-            // Outputs
+            if (entity is Light { Type: LightType.Spot } spot)
+            {
+                ImGui.Separator();
+                ImGui.TextUnformatted("Spot cone (full angles, degrees)");
+                
+                var innerAngle = spot.InnerAngle;
+
+                if (ImGui.SliderFloat("Inner angle", ref innerAngle, 0, 179))
+                {
+                    spot.InnerAngle = innerAngle;
+                }
+                
+                var outerAngle = spot.OuterAngle;
+
+                if (ImGui.SliderFloat("Outer angle", ref outerAngle, 0.1f, 179))
+                {
+                    spot.OuterAngle = outerAngle;
+                }
+                
+                ImGui.TextUnformatted("Yellow: outer | Cyan: inner | White: direction");
+            }
+            
+            //Outputs
+
             ImGui.Separator();
             ImGui.Text("Outputs");
 

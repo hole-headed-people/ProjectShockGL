@@ -19,7 +19,7 @@ public class Game
             return;
         }
 
-        var name = Settings.GetString("Game", "Class", "");
+        var name = Settings.GetString("Game", "Class", "ProjectShockGL.Core.Game, ProjectShockGL");
 
         if (string.IsNullOrEmpty(name))
         {
@@ -65,9 +65,13 @@ public class Game
 
     protected virtual void Update(float deltaTime)
     {
-        World.Update(deltaTime);
-        Physics.Update();
-        UIManager.Update(deltaTime);
+        World.Update(deltaTime, simulate: !Application.IsEditor);
+        
+        if (!Application.IsEditor)
+        {
+            Physics.Update();
+            UIManager.Update(deltaTime);
+        }
     }
     
     protected virtual void Render(Graphics graphics)
@@ -78,8 +82,10 @@ public class Game
     
     protected virtual void Unload()
     {
-        LevelManager.Unload(World);
-        UIManager.Destroy();
+        Cleanup.Run(() =>
+        {
+            LevelManager.Unload(World);
+        }, UIManager.Destroy);
     }
 
     private void RenderUI(Graphics graphics)

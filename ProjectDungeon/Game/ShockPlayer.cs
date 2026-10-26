@@ -1,19 +1,17 @@
-using System.Numerics;
+﻿using System.Numerics;
+using ProjectDungeon.Core;
 using ProjectShockGL;
 using Silk.NET.Input;
-using Core_Object = ProjectShockGL.Core.Object;
 
 namespace ProjectDungeon.Game;
 
-public class Player : Core_Object
+public class ShockPlayer : Player
 {
-    private PlayerCharacter? _character;
-
-    public override void Update(float deltaTime)
+    protected override void OnGameInput()
     {
-        base.Update(deltaTime);
+        base.OnGameInput();
 
-        if (_character == null)
+        if (GetCharacter() is not ShockPlayerCharacter character)
         {
             return;
         }
@@ -54,17 +52,12 @@ public class Player : Core_Object
             //}
         }
         
-        _character.Move(new Vector3(horizontalAxis, 0f, verticalAxis));
+        character.Move(new Vector3(horizontalAxis, 0f, verticalAxis));
         
         var lookVector = Input.MouseDeltaPosition;
         lookVector.X *= -1f;
         
-        _character.Turn(lookVector.X);
-        _character.LookAt(lookVector.Y);
-    }
-
-    public void SetCharacter(PlayerCharacter character)
-    {
-        _character = character;
+        character.Turn(lookVector.X);
+        character.LookAt(lookVector.Y);
     }
 }

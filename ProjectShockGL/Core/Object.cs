@@ -12,6 +12,7 @@ public class Object
     private bool _isActive = true;
     private bool _activityInitialized;
     private bool _hasStarted;
+    private bool _isReleasing;
     
     private (Vector3 min, Vector3 max)? _cachedWorldBounds;
 
@@ -133,12 +134,38 @@ public class Object
     
     public virtual void Destroy()
     {
+        DestroyCore();
+    }
+
+    internal void Release()
+    {
+        if (IsDestroyed || _isReleasing)
+        {
+            return;
+        }
+        
+        _isReleasing = true;
+
+        try
+        {
+            Cleanup.Run(Destroy, DestroyCore);
+        }
+
+        finally
+        {
+            _isReleasing = false;
+        }
+    }
+
+    private void DestroyCore()
+    {
         if (IsDestroyed)
         {
             return;
         }
         
         IsDestroyed = true;
+        List<Exception> errors = [];
         
         if (_isActive)
         {
@@ -146,15 +173,29 @@ public class Object
 
             if (_activityInitialized)
             {
-                OnActiveChanged(false);
+                try
+                {
+                    OnActiveChanged(false);
+                }
+                catch (Exception error)
+                {
+                    errors.Add(error);
+                }
             }
         }
 
-        foreach (var component in _components)
+        foreach (var component in _components.ToArray())
         {
             if (!component.IsDestroyed)
             {
-                component.Destroy();
+                try
+                {
+                    component.Release();
+                }
+                catch (Exception error)
+                {
+                    errors.Add(error);
+                }
             }
         }
         
@@ -162,6 +203,11 @@ public class Object
         _renderComponents.Clear();
         
         Collider = null;
+        
+        if (errors.Count > 0)
+        {
+            throw new AggregateException("Object cleanup failed.", errors);
+        }
     }
     
     public virtual (Vector3 min, Vector3 max) GetLocalBounds()
@@ -241,7 +287,22 @@ public class Object
         var component = new T();
         
         component.Initialize(this);
-        component.Create();
+        _components.Add(component);
+        try
+        {
+            component.Create();
+            ObjectDisposedException.ThrowIf(IsDestroyed || component.IsDestroyed, this);
+        }
+        catch (Exception creationError)
+        {
+            _components.Remove(component);
+            try
+            {
+                component.Release();
+            }
+            catch (Exception cleanupError) { throw new AggregateException(creationError, cleanupError); }
+            throw;
+        }
 
         if (component is RenderComponent renderComponent)
         {
@@ -253,8 +314,6 @@ public class Object
             Collider = collider;
         }
     
-        _components.Add(component);
-        
         return component;
     }
     
@@ -277,10 +336,9 @@ public class Object
             Collider = null;
         }
 
-        component.IsEnabled = false;
-        component.Destroy();
-        
         _components.Remove(component);
+        component.IsEnabled = false;
+        component.Release();
     }
 
     public T? GetComponent<T>() where T : Component

@@ -75,8 +75,8 @@ public static class LevelManager
         {
             try
             {
-                staged.Clear();
-                RefreshLights();
+                try { staged.Clear(); }
+                finally { RefreshLights(); }
             }
             finally
             {
@@ -122,10 +122,12 @@ public static class LevelManager
                 Unloading?.Invoke(previous);
             }
             
-            world.Clear();
-            
-            ActiveLevel = null;
-            Environment.Reset();
+            try { world.Clear(); }
+            finally
+            {
+                ActiveLevel = null;
+                Environment.Reset();
+            }
             
             if (previous != null)
             {
@@ -222,6 +224,10 @@ public static class LevelManager
             {
                 throw new FileNotFoundException("BrushBox texture was not found.", path);
             }
+            
+            using var stream = File.OpenRead(path);
+            
+            StbImageSharp.ImageResult.FromStream(stream, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
         }
         
         var brush = world.Spawn<BrushBox>();

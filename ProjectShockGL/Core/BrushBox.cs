@@ -17,6 +17,7 @@ public class BrushBox : Object
     private Vector3 _meshScale;
     
     private float _meshTextureScale;
+    private (string Name, TextureFormat Format)? _failedTexture;
     
     public Vector3 Size
     {
@@ -39,7 +40,11 @@ public class BrushBox : Object
         get => _textureScale;
         set
         {
-            if (!float.IsFinite(value) || value <= 0) throw new ArgumentOutOfRangeException(nameof(TextureScale));
+            if (!float.IsFinite(value) || value <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(TextureScale));
+            }
+            
             _textureScale = value;
         }
     }
@@ -75,10 +80,27 @@ public class BrushBox : Object
         
         renderer.Mesh = _mesh;
         
-        renderer.Texture = string.IsNullOrWhiteSpace(TextureName) || TextureName == "WhitePixel"
-            ? Content.GetWhitePixel()
-            : Content.LoadTexture(TextureName, TextureFormat)
-                ?? throw new FileNotFoundException($"BrushBox texture '{TextureName}' ({TextureFormat}) was not found.");
+        var textureKey = (TextureName, TextureFormat);
+        
+        if (_failedTexture != textureKey)
+        {
+            try
+            {
+                renderer.Texture = string.IsNullOrWhiteSpace(TextureName) || TextureName == "WhitePixel"
+                    ? Content.GetWhitePixel()
+                    : Content.LoadTexture(TextureName, TextureFormat)
+                        ?? throw new FileNotFoundException($"BrushBox texture '{TextureName}' ({TextureFormat}) was not found.");
+                
+                _failedTexture = null;
+            }
+            catch (Exception error) when (Application.IsEditor)
+            {
+                Console.Error.WriteLine($"BrushBox '{Name}', texture '{TextureName}': {error.Message}");
+                renderer.Texture = Content.GetWhitePixel();
+                
+                _failedTexture = textureKey;
+            }
+        }
         
         renderer.Color = Color;
         renderer.Lit = Lit;

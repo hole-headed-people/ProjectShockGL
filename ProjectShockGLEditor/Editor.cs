@@ -3,6 +3,7 @@ using ImGuiNET;
 using NativeFileDialogNET;
 using ProjectShockGL;
 using ProjectShockGL.Rendering;
+using Silk.NET.Core;
 using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.OpenGL;
@@ -162,6 +163,11 @@ public static class Editor
         {
             var bounds = selected.GetWorldBounds();
             graphics.DrawBoxWireframe(bounds.min, bounds.max, Color.White);
+
+            if (selected is ProjectShockGL.Core.Light light)
+            {
+                LightGizmo.Draw(graphics, light);
+            }
         }
     }
 

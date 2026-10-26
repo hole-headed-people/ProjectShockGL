@@ -41,4 +41,25 @@ public class Component
     {
         IsDestroyed = true;
     }
+
+    internal void Release()
+    {
+        try
+        {
+            if (!IsDestroyed)
+            {
+                Destroy();
+            }
+        }
+        finally
+        {
+            IsEnabled = false;
+            IsDestroyed = true;
+            
+            if (this is Collider collider)
+            {
+                Physics.Unregister(collider);
+            }
+        }
+    }
 }

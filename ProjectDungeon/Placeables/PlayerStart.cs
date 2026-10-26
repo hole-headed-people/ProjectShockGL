@@ -3,9 +3,9 @@ using ProjectShockGL;
 using ProjectShockGL.Core;
 using ProjectShockGL.Rendering;
 
-namespace ProjectDungeon.Core;
+namespace ProjectDungeon.Placeables;
 
-public class PlayerStart : Entity
+public sealed class PlayerStart : Entity
 {
     public override void Create()
     {

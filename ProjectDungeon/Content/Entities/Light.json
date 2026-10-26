@@ -1,6 +1,6 @@
 ﻿{
   "Class": "ProjectShockGL.Core.Light, ProjectShockGL",
   "Parameters": {
-    "DebugBillboard": "Light"
+    "DebugBillboard": "Editor/Light"
   }
 }
