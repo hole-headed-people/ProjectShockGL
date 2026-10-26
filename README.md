@@ -1,88 +1,302 @@
-# UI foundation
+# ProjectShockGL
 
-`Game` owns a sealed `UIManager`, which creates one `Canvas` using
-`[Game] UICanvasClass` in `Settings.ini`. An empty setting uses the base canvas;
-an invalid type logs a message and falls back to it. A valid canvas type must
-have a public parameterless constructor. Exceptions inside its constructor or
-`OnCreate` are allowed to surface so game initialization errors remain visible.
+Небольшой игровой движок на C# и OpenGL с собственным редактором уровней. Разрабатывается для системной игры от первого лица, вдохновленной System Shock: комнаты, исследование, триггеры и связи между объектами.
 
-Create game UI by overriding `OnCreate` in the configured canvas. Create widget
-behavior through `OnCreate`, `OnUpdate`, `OnDraw`, and `OnDestroy`. Tree traversal
-is handled by the framework; these hooks do not need base calls.
+Это личный инструмент для создания конкретной игры и изучения устройства движков. Проект не стремится быть универсальным: интерфейсы и возможности меняются по мере разработки игры. Если хочется разобраться, собрать свой уровень или попробовать добавить игровую механику — ниже описана текущая основа.
+
+## Требования и запуск
+
+- .NET SDK **8.0**. Настройки выбора SDK находятся в [global.json](global.json).
+- Видеокарта и драйвер с поддержкой **OpenGL 3.3**.
+- Разработка ведется на Windows; работа на других платформах не проверена.
+- При первой сборке нужен доступ к NuGet для восстановления зависимостей.
+
+Команды выполняются из корневой папки проекта:
+
+```sh
+dotnet build ProjectShockGL.sln
+dotnet run --project ProjectShockGLEditor/ProjectShockGLEditor.csproj
+```
+
+Запуск игры отдельно:
+
+```sh
+dotnet run --project ProjectDungeon/ProjectDungeon.csproj
+```
+
+Также можно открыть решение в Rider или Visual Studio и выбрать стартовым проектом редактор либо игру. Встроенной кнопки Play в редакторе пока нет.
+
+При сборке возможно предупреждение `NU1701` для используемой версии `ini-parser`: это известное предупреждение о целевой платформе пакета.
+
+## Что находится в решении
+
+| Проект / папка | Назначение |
+| --- | --- |
+| [ProjectShockGL](ProjectShockGL) | Ядро движка, рендерер, объекты, коллизии, загрузка ресурсов и UI |
+| [ProjectDungeon](ProjectDungeon) | Игровой проект: ввод, персонаж, триггеры и пример Canvas |
+| [ProjectShockGLEditor](ProjectShockGLEditor) | Редактор уровней на ImGui |
+| [ProjectDungeon/Content](ProjectDungeon/Content) | Общие ресурсы игры и редактора |
+| [tests](tests) | Консольные проверки отдельных систем |
+
+Основные библиотеки: Silk.NET, ImGui.NET, Newtonsoft.Json, StbImageSharp и StbTrueTypeSharp.
+
+## Первый уровень
+
+1. Запустите редактор. Создайте новую карту через **File → New** или откройте существующую через **File → Open**.
+2. В **Palette → Geometry** выберите `Cube` и нажмите **Create**. Сейчас новый объект появляется в начале координат.
+3. Измените Position, Rotation и Scale через **Inspector** или манипуляторы в сцене. Из кубов можно собрать пол, стены и препятствия.
+4. В **Palette → Entity** создайте `PlayerStart` и разместите его в свободном месте над полом. Это позиция и поворот появления персонажа.
+5. При необходимости добавьте источники света. Настройки окружения находятся в **View → Environment**.
+6. Сохраните карту в **ProjectDungeon/Content/Levels**, например `MyLevel.map`.
+7. В [ShockGame.cs](ProjectDungeon/Game/ShockGame.cs) измените имя в `LevelManager.Load("PolygonLevel")` на `"MyLevel"` — без расширения.
+8. Запустите игровой проект. При изменении карты остановите игру и запустите ее снова.
+
+В репозитории уже есть карты, которые можно открыть и использовать как примеры.
+
+### Управление редактором
+
+| Действие | Управление |
+| --- | --- |
+| Выбрать объект | ЛКМ в сцене или строка в списке Scene |
+| Осмотреться | Удерживать ПКМ и двигать мышью |
+| Перемещение камеры | ПКМ + WASD, Q/E — вниз/вверх |
+| Сдвиг камеры | Удерживать среднюю кнопку мыши и двигать мышью |
+| Фокус на выбранном объекте | F |
+| Перемещение / вращение / масштаб | G / R / T или кнопки верхней панели |
+| Изменить трансформ | Перетащить соответствующую ось или кольцо манипулятора |
+| Привязка к шагу | Snap в панели или Shift при перетаскивании |
+| Отмена текущего перетаскивания | Esc |
+| Дублирование | Ctrl+D или Duplicate |
+| Удаление | Delete или Delete в Inspector |
+| Отмена / повтор изменения трансформа | Ctrl+Z / Ctrl+Y |
+| Новая карта / открыть | Ctrl+N / Ctrl+O |
+| Сохранить / сохранить как | Ctrl+S / Ctrl+Shift+S |
+
+Горячие клавиши сцены работают, когда редактор не занят вводом в поле. История отмены пока относится к трансформам; создание, удаление и дублирование объектов очищают эту историю.
+
+### Предпросмотр и окружение
+
+В верхней панели есть независимые настройки просмотра:
+
+- **Lit** — обычный рендер с учетом настройки освещения материала.
+- **Unlit** — отображение сцены без влияния освещения.
+- **Environment** — показ тумана и Ambient уровня. При отключении туман убирается, а Ambient предпросмотра становится белым.
+
+Эти переключатели не изменяют карту, не влияют на игровой рендер и не помечают уровень как измененный. Параметры самого уровня редактируются отдельно в окне Environment и сохраняются в `.map`.
+
+## Объекты и жизненный цикл
+
+Основные классы:
+
+- `Application` создает окно и графический контекст, вызывает события игрового цикла.
+- `Game` содержит `World` и `UIManager`. Игровой класс выбирается через Settings.ini.
+- `World` владеет объектами: создает, обновляет, отрисовывает и уничтожает их.
+- `ProjectShockGL.Core.Object` содержит Transform, компоненты, слой и состояние активности.
+- `Entity` добавляет описание ресурса, редактируемые свойства и Outputs для игровой логики.
+- `Geometry` представляет размещаемую геометрию с визуальной частью и коллайдером. Она помечается статической.
+
+Для создания объектов используйте `World.Spawn<T>()`, `Entity.Create(...)` или `Geometry.Create(...)`, а для удаления — `World.Destroy(obj)`. `World.Clear()` освобождает весь мир, включая объекты, ожидающие первого обновления.
+
+Порядок работы:
+
+1. При создании сразу вызывается `Create()`.
+2. Объект ожидает регистрации в первом `World.Update`. К этому моменту загрузчик назначает свойства и трансформ из карты.
+3. Для активного объекта вызывается начальный `OnActiveChanged(true)`, затем `Start()`.
+4. `Start()` вызывается один раз. Для изначально выключенного объекта он откладывается до первого активного обновления.
+5. Активные нестатические объекты получают `Update(deltaTime)`. Повторное включение не повторяет Start.
+6. При уничтожении освобождаются компоненты. Уничтоженный объект нельзя включить снова.
+
+В переопределениях жизненного цикла вызывайте базовый метод, если нужно сохранить обработку компонентов.
+
+`SetActive(false)` отключает обновление, отрисовку и участие в физических запросах. Выключенный Light перестает освещать сцену. Объект при этом остается доступен через `World.Find(...)`.
+
+`World.Find<T>()` и `World.Find(name)` учитывают созданные объекты, еще ожидающие Start. Наличие объекта в поиске не означает, что его Start уже выполнен.
+
+### Загрузка уровня
+
+`LevelManager.Load("MyLevel")` загружает карту из `Content/Levels/MyLevel.map`. Также можно передать экземпляр `Level`.
+
+Есть события `Loading`, `Loaded`, `Unloading`, `Unloaded`, свойства `ActiveLevel`, `IsLoading` и метод `Unload()`.
+
+В `Loaded` новый мир и Environment уже назначены, но объекты еще не получили Start. В этом обработчике удобно найти PlayerStart и создать персонажа. Пример подписки и отписки есть в [ShockGame.cs](ProjectDungeon/Game/ShockGame.cs).
+
+Загрузка синхронная. Новый уровень сначала подготавливается отдельно: ошибка создания его объектов не удаляет старую сцену. Вложенная загрузка из обработчика перехода запрещена. При замене карты Unloaded относится к уже удаленному старому уровню; новый мир в этот момент уже установлен.
+
+## Игровая логика и связи объектов
+
+В Inspector у сущностей есть **Name**, редактируемые свойства и список **Outputs**. Связь содержит:
+
+| Поле | Значение |
+| --- | --- |
+| Event | Имя события, которое обрабатывает код сущности |
+| Target | Точное имя целевого объекта в мире |
+| Input | Метод цели, помеченный атрибутом `[Input("...")]` |
+| Parameter | Аргумент или аргументы метода, разделенные запятыми |
+
+Outputs сами по себе не вызываются: код сущности решает, когда отправлять событие. Пример реализации находится в [Trigger.cs](ProjectDungeon/Core/Trigger.cs). Этот триггер реагирует на вход `PlayerCharacter` и обрабатывает Outputs с Event `OnTriggerEnter`.
+
+### Включить объект через триггер
+
+1. Дайте целевому объекту уникальное имя, например `room_light`.
+2. Снимите у него **IsActive** в Inspector. Это состояние сохранится в карту. Выключенные объекты можно выбрать через список Scene, где они отмечены `(inactive)`.
+3. Создайте Trigger, разместите и масштабируйте его область.
+4. Добавьте ему Output: Event = `OnTriggerEnter`, Target = `room_light`, Input = `SetActive`, Parameter = `true`.
+5. Сохраните карту и проверьте ее в игре.
+
+Для выключения используйте `false`. Для bool-параметров нужны именно `true`/`false`, а не `1`/`0`. Числа в параметрах записываются с точкой в качестве десятичного разделителя. Имена целей лучше делать уникальными: поиск возвращает первый подходящий объект.
+
+### Добавить свою сущность
+
+Создайте класс в игровом проекте, унаследованный от `Entity`. Атрибут `[Editable]` открывает свойства в Inspector, `[Input]` позволяет вызывать метод через Outputs.
+
+Например, файл `ProjectDungeon/Core/Door.cs`:
 
 ```csharp
-public class GameCanvas : ProjectShockGL.UI.Canvas
-{
-    protected override void OnCreate()
-    {
-        var group = Add<Widget>();
-        group.Rect.Size = new Vector2(300, 100);
-        group.Rect.Anchor = new Vector2(0, 1);
-        group.Rect.Pivot = new Vector2(0, 1);
-        group.Rect.Position = new Vector2(20, -20);
+using System.Numerics;
+using ProjectShockGL.Core;
 
-        var element = group.Add<ColoredWidget>();
-        element.Rect.Position = new Vector2(10, 10);
-        element.Rect.Size = new Vector2(100, 30);
+namespace ProjectDungeon.Core;
+
+public class Door : Entity
+{
+    private bool _opened;
+
+    [Editable]
+    public Vector3 OpenOffset { get; set; } = new(0, 2, 0);
+
+    public override void Create()
+    {
+        base.Create();
+        AddComponent<BoxCollider>();
     }
-}
 
-public class ColoredWidget : Widget
-{
-    protected override void OnDraw(Graphics graphics)
+    [Input("Open")]
+    public void Open()
     {
-        graphics.DrawUIRect(Rect.AbsolutePosition, Rect.Size, Color.Red);
+        if (_opened) return;
+        _opened = true;
+        Transform.Position += OpenOffset;
     }
 }
 ```
 
-The example uses `System.Numerics`, `ProjectShockGL.UI`, and
-`ProjectShockGL.Rendering`. Configure the assembly-qualified name of `GameCanvas`
-in your game's settings. The existing `ProjectDungeon.UI.Canvas` is already
-configured and can be extended directly.
+Создайте `ProjectDungeon/Content/Entities/Door.json`:
 
-## Hierarchy and coordinates
+```json
+{
+  "Class": "ProjectDungeon.Core.Door, ProjectDungeon",
+  "Parameters": {}
+}
+```
 
-- `Canvas.Children` contains root widgets. `Widget.Parent == null` means its
-  layout parent is the canvas. Every attached widget exposes the same `Canvas`.
-- `Add<T>()` attaches and initializes a new widget. `SetParent(widget)` moves it
-  within its canvas; `SetParent(null)` moves it back to the root. Local transform
-  values are preserved. Cycles and transfers between canvases are rejected.
-- `Children` is read-only. `Destroy()` detaches and recursively destroys a branch
-  once. `Canvas.Clear()` destroys its root branches without replacing the canvas.
-- Coordinates start at the top left; X goes right and Y goes down. Currently one
-  canvas unit equals one window coordinate unit. The renderer uses the framebuffer
-  viewport, so logical coordinates remain consistent on high-DPI displays.
-- `Rect.Position` offsets the pivot from the parent's normalized `Anchor`.
-  `Rect.AbsolutePosition` is the resulting top-left corner. `Size` is local and
-  nonnegative. Parent movement and resizing are reflected immediately.
-- Anchors and pivots default to `(0, 0)`; size defaults to `(100, 100)`. This first
-  version has no stretch anchors, rotation, per-widget scaling, or clipping.
+После пересборки и перезапуска редактора Door появится в Palette → Entity. Это пример логики и коллайдера: визуальную модель двери нужно добавить отдельно, например через MeshComponent в Create. В Parameters можно передавать настройки ресурса, которые сущность читает в `Load(...)`; пример — DebugBillboard у Trigger.
 
-## Frame behavior
+## Ресурсы и настройки
 
-UI updates after the world and physics. UI draws after all application world
-render handlers and before the editor's ImGui overlay. The UI pass uses an
-orthographic projection without depth testing, lighting, or face culling, and
-restores scene matrices and depth/culling states afterward.
+Ресурсы загружаются через `Content` по именам относительно соответствующих папок:
 
-Parents draw before children; later siblings draw on top. Reparenting during a
-traversal never processes the same widget more than once in that traversal.
-`Visible = false` hides a whole branch, but it may still update.
-`IsEnabled = false` stops updates for the branch, but it remains drawable.
+| Папка в Content | Содержимое |
+| --- | --- |
+| Entities | JSON-описания классов сущностей и их параметров |
+| Geometry | JSON-описания геометрии: модель, текстура, цвет, коллайдер, Lit |
+| Meshes | Модели `.obj` |
+| Textures | Текстуры `.jpg` и `.png` |
+| Fonts | Шрифты `.ttf` и их лицензии |
+| Shaders | Шейдеры `.vert` и `.frag` |
+| Levels | Уровни `.map` в формате JSON |
 
-Input routing, focus, modal screens, text, and predefined controls are not part
-of this foundation. UI state survives `World.Clear()` and level changes; it is
-destroyed when the game unloads.
+Имя обычно передается без расширения: `Content.LoadMesh("Cube")`, `Entity.Create("Trigger")`, `Content.LoadFont("NotoSans-Regular", 24)`.
 
-## Checks
+`Content.LoadTexture("Name")` по умолчанию ищет JPG. Для PNG используйте `Content.LoadTexture("Name", TextureFormat.Png)`. В описании Geometry значение Texture `WhitePixel` означает встроенную белую текстуру. У BoxCollider свойство HalfExtents, а также поле Size в текущем описании Geometry задают **полуразмеры** коллайдера.
 
-From the solution directory:
+После добавления новых ресурсов перезапустите редактор: списки Palette и загруженные ресурсы кэшируются.
+
+У игры и редактора собственные Settings.ini. В секции Game задаются Class и, при необходимости, UICanvasClass в формате `Полное.Имя.Класса, ИмяСборки`. В Content.Path задается папка ресурсов относительно исполняемого файла. Content.CustomPath переопределяет ее; относительное значение тоже считается от папки исполняемого файла.
+
+Редактор по умолчанию читает исходную папку `ProjectDungeon/Content` через CustomPath. Игра использует копию Content, которую сборка помещает рядом с исполняемым файлом. Поэтому сохраняйте карты в исходную папку и запускайте игру с пересборкой. При изменении структуры выходных папок проверьте CustomPath редактора.
+
+Слои описаны в Layers.ini. `Layers.Get("Player")` возвращает маску слоя, `CollidesWith` задает маску взаимодействий. В игровой конфигурации уже есть Default, Player и Trigger.
+
+## Коллизии и персонаж
+
+Доступны BoxCollider, SphereCollider и CapsuleCollider, события входа/выхода столкновений и триггеров, Raycast, OverlapSphere, OverlapSphereAll и OverlapCapsule.
+
+В запрос можно передать фильтр, чтобы исключить владельца и триггеры:
+
+```csharp
+var filter = new PhysicsQueryFilter
+{
+    IgnoreObject = this,
+    IgnoreTriggers = true
+};
+
+if (Physics.Raycast(Transform.Position, Transform.Forward, 2f,
+        Layers.Everything, out var hit, filter))
+{
+    Console.WriteLine(hit.Object.Name);
+}
+```
+
+CharacterController наследует CapsuleCollider. `Move(displacement)` принимает **смещение в мировых координатах**, а не скорость. Если задана скорость, умножайте ее на deltaTime. Гравитация задается игровым кодом. Есть IsGrounded, GroundNormal, CollisionFlags, StepOffset и SlopeLimit. По умолчанию высота ступеньки — 0,3 мировой единицы, допустимый уклон — 45°.
+
+Текущая физика предназначена для простого кинематического движения и запросов. Здесь нет полноценной динамики твердых тел, сил, автоматического выталкивания из начального пересечения или автоматического скольжения вниз по крутому склону.
+
+В игровом проекте [Player](ProjectDungeon/Game/Player.cs) читает ввод, а [PlayerCharacter](ProjectDungeon/Game/PlayerCharacter.cs) управляет движением и взглядом персонажа. Управление примером: WASD и мышь, Esc — выход.
+
+## UI
+
+Game создает sealed UIManager, а тот — один Canvas, класс которого задан в Settings.ini. HUD, панели и другие экраны размещаются внутри этого Canvas как виджеты. Widget поддерживает детей и родителя; Parent == null означает корень Canvas.
+
+RectTransform использует начало координат в левом верхнем углу: X направлен вправо, Y — вниз. Доступны Position, Size, Anchor и Pivot. Это пока простая система без растяжения по двум якорям и вращения UI.
+
+Пример кода внутри `Canvas.OnCreate()`:
+
+```csharp
+var label = Add<ProjectShockGL.UI.Text>();
+label.Rect.Position = new System.Numerics.Vector2(24, 24);
+label.Rect.Size = new System.Numerics.Vector2(400, 80);
+label.Font = ProjectShockGL.Content.LoadFont("NotoSans-Regular", 24);
+label.Content = "Доступ разрешен\nAccess granted";
+label.Color = ProjectShockGL.Rendering.Color.Green;
+```
+
+Text использует растровый атлас TTF, поддерживает русский и английский текст, переносы, выравнивание и обрезку по собственному Rect. Размер шрифта задается при загрузке; для другого размера загрузите тот же шрифт с другим числом пикселей. Шрифт общий: виджет не должен освобождать его при удалении. Noto Sans включен вместе с [лицензией OFL](ProjectDungeon/Content/Fonts/OFL.txt).
+
+Для интерактивности переопределяйте у Widget методы OnMouseEnter, OnMouseExit, OnMousePressed, OnMouseReleased и OnMouseCancelled. UIManager.Pointer выбирает верхний виджет и удерживает получателя нажатия до отпускания. Text по умолчанию пропускает указатель; у декоративных виджетов можно отключать HitTestVisible.
+
+Указатель UI работает при обычном видимом курсоре и активном окне. Для открытия игрового меню переключайте CursorMode.Raw на CursorMode.Normal; при возврате в игру — обратно. UI пока не блокирует игровой ввод автоматически.
+
+## Проверки
+
+Из корня репозитория:
+
+```sh
+dotnet run --project tests/LifecycleChecks
+dotnet run --project tests/PhysicsChecks
+dotnet run --project tests/UIChecks
+dotnet run --project tests/EditorChecks
+dotnet run --project tests/TextChecks -- .
+```
+
+Проверка текста, освещения и предпросмотра в скрытом окне OpenGL (PowerShell; папка нужна для изображения результата):
 
 ```powershell
-dotnet run --project tests/UIChecks/UIChecks.csproj
+New-Item -ItemType Directory -Force .build/Text | Out-Null
+dotnet run --project tests/TextChecks -- . --render
 ```
 
-These checks exercise settings, ownership, transforms, tree traversal, destruction,
-and game lifecycle integration without creating an OpenGL window. They do not
-visually validate GPU rendering.
+Последняя команда требует рабочего графического контекста. Проверки создают служебные файлы в выходных папках; не используйте эти папки для хранения своих карт. Для сборки при запущенной игре или редакторе можно указать отдельный путь артефактов, чтобы не перезаписывать занятые DLL:
+
+```sh
+dotnet build ProjectShockGL.sln --artifacts-path .build/LocalCheck
+```
+
+При таком нестандартном расположении артефактов путь Content.CustomPath редактора нужно настроить отдельно; команда выше предназначена прежде всего для проверки сборки.
+
+## Текущие границы проекта
+
+- Освещение без динамических теней и без запекания.
+- Редактор собирает уровни из подготовленных ресурсов; полноценного браузера импорта, редактора материалов и Play Mode пока нет.
+- Сохранение уровня описывает размещенные объекты и Environment, а не произвольное состояние всех runtime-компонентов. Это не система сохранений прохождения.
+- Активность объектов сохраняется в карте, но отдельные флаги компонентов не являются универсально сериализуемыми настройками.
+- API и формат ресурсов могут меняться вместе с игрой. Рабочие примеры в ProjectDungeon и код соответствующих систем служат ориентиром при расширении.
