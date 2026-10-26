@@ -647,6 +647,86 @@ Run("Viewport preview toggles leave the map snapshot, Environment and dirty stat
     finally { preview.Unlit = previousUnlit; preview.EnvironmentEnabled = previousEnvironment; }
 });
 
+Run("BrushBox mesh has outward faces and constant world UV density after nonuniform scaling", () =>
+{
+    var size = new Vector3(2, 3, 4);
+    var scale = new Vector3(3, 2, 0.5f);
+    var (vertices, indices) = ProjectShockGL.Rendering.BrushBoxMesh.Build(size, scale, 2);
+    Check(vertices.Length == 24 * 8 && indices.Length == 36);
+    Vector3 Position(int vertex) => new(vertices[vertex * 8], vertices[vertex * 8 + 1], vertices[vertex * 8 + 2]);
+    Vector2 Uv(int vertex) => new(vertices[vertex * 8 + 6], vertices[vertex * 8 + 7]);
+    for (var face = 0; face < 6; face++)
+    {
+        var first = face * 4;
+        var a = Position(first); var b = Position(first + 1); var c = Position(first + 2);
+        var normal = new Vector3(vertices[first * 8 + 3], vertices[first * 8 + 4], vertices[first * 8 + 5]);
+        Check(Vector3.Dot(Vector3.Normalize(Vector3.Cross(b - a, c - b)), normal) > 0.999f);
+        Check(MathF.Abs(Vector2.Distance(Uv(first), Uv(first + 1)) / ((b - a) * scale).Length() - 2) < 0.0001f);
+        Check(MathF.Abs(Vector2.Distance(Uv(first + 1), Uv(first + 2)) / ((c - b) * scale).Length() - 2) < 0.0001f);
+    }
+});
+
+Run("BrushBox dimensions keep collider and transformed bounds aligned", () =>
+{
+    EditorLevelManager.NewLevel();
+    var brush = Game.Instance.World.Spawn<BrushBox>();
+    brush.Size = new Vector3(2, 4, 6);
+    brush.Transform.Position = new Vector3(10, 0, 0);
+    brush.Transform.Scale = new Vector3(2, 1, 0.5f);
+    var collider = (BoxCollider)brush.Collider!;
+    Check(collider.HalfExtents == new Vector3(1, 2, 3));
+    var (min, max) = brush.GetWorldBounds();
+    Check(min == new Vector3(8, -2, -1.5f) && max == new Vector3(12, 2, 1.5f));
+    brush.Size = Vector3.One;
+    Check(collider.HalfExtents == new Vector3(0.5f));
+    Check(Physics.Raycast(new Vector3(10, 0, -5), Vector3.UnitZ, 10, Layers.Everything, out var hit) && hit.Object == brush);
+});
+
+Run("BrushBox roundtrip and duplication preserve independent size, material, transform and activity", () =>
+{
+    EditorLevelManager.NewLevel();
+    var brush = Game.Instance.World.Spawn<BrushBox>();
+    brush.Name = "wall_1";
+    brush.Size = new Vector3(4, 3, 0.25f);
+    brush.TextureScale = 2.5f;
+    brush.Color = Color.Cyan;
+    brush.Lit = false;
+    brush.Transform.Position = new Vector3(2, 3, 4);
+    brush.Transform.Scale = new Vector3(2, 1, 3);
+    brush.SetActive(false);
+    var path = Path.Combine(testRoot, "brush.map");
+    EditorLevelManager.SaveCurrentLevel(path);
+    EditorLevelManager.OpenLevel(path);
+    var loaded = Game.Instance.World.Find<BrushBox>()!;
+    Check(loaded.Name == "wall_1" && loaded.Size == brush.Size && !loaded.IsActive);
+    Check(loaded.TextureScale == 2.5f && loaded.Color.Equals(Color.Cyan) && !loaded.Lit);
+    Check(loaded.Transform.Position == brush.Transform.Position && loaded.Transform.Scale == brush.Transform.Scale);
+    Selection.Object = loaded;
+    Check(Editor.CanDuplicateSelection);
+    var copy = (BrushBox)EditorLevelManager.DuplicateObject(loaded);
+    Check(copy.Name == "wall_2" && copy.Size == loaded.Size && copy.Collider != loaded.Collider && !copy.IsActive);
+    copy.Size = Vector3.One;
+    Check(loaded.Size == new Vector3(4, 3, 0.25f));
+    EditorLevelManager.RefreshDirty();
+    Check(EditorLevelManager.IsDirty);
+});
+
+Run("Invalid BrushBox descriptions reject loading without replacing the current world", () =>
+{
+    var before = Game.Instance.World.GetAllObjects(true);
+    foreach (var data in new[]
+    {
+        new BrushBoxData { Size = new Vector3(0, 1, 1) },
+        new BrushBoxData { TextureScale = float.NaN },
+        new BrushBoxData { Texture = "missing-texture" }
+    })
+        Throws(() => LevelManager.Load(new Level { Placeables = [new Placeable { Type = PlaceableType.BrushBox, Brush = data }] }));
+    Check(Game.Instance.World.GetAllObjects(true).SequenceEqual(before));
+    Throws(() => ProjectShockGL.Rendering.BrushBoxMesh.Build(Vector3.One, Vector3.Zero, 1));
+    var legacy = JsonConvert.DeserializeObject<Placeable>("{\"Type\":0,\"Path\":\"Box\"}")!;
+    Check(legacy.Type == PlaceableType.Geometry && legacy.Brush == null);
+});
+
 Game.Instance.World.Clear();
 Console.WriteLine("All editor checks passed.");
 

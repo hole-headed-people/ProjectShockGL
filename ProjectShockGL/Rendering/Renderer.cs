@@ -135,14 +135,17 @@ public class Renderer : IDisposable
     public void BeginFrame(Camera camera)
     {
         var environmentEnabled = _preview?.EnvironmentEnabled ?? true;
+        
         _frameFogEnabled = environmentEnabled && Environment.IsFogEnabled;
         _frameForceUnlit = _preview?.Unlit ?? false;
+        
         _gl.Viewport(0, 0, (uint)_screenWidth, (uint)_screenHeight);
         _gl.ClearColor(camera.ClearColor.R, camera.ClearColor.G, camera.ClearColor.B, 1f);
         _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
         var projection = camera.GetProjectionMatrix();
         var view = camera.GetViewMatrix();
+        
         _frameProjection = projection;
         _frameView = view;
         
@@ -328,7 +331,11 @@ public class Renderer : IDisposable
     private void DrawMeshInternal(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit,
         bool ignoreDepth = false, Vector4? uvRect = null)
     {
-        if (_frameForceUnlit) lit = false;
+        if (_frameForceUnlit)
+        {
+            lit = false;
+        }
+        
         if (_isUI)
         {
             lit = false;
@@ -340,9 +347,11 @@ public class Renderer : IDisposable
         var colorLoc = lit ? _litColor : _unlitColor;
 
         _gl.UseProgram(program);
+        
         if (!lit)
         {
             var uv = uvRect ?? new Vector4(0, 0, 1, 1);
+            
             _gl.Uniform4(_unlitUvRect, uv.X, uv.Y, uv.Z, uv.W);
             _gl.Uniform1(_unlitAlphaCutoff, _isUI ? 0f : 0.5f);
         }

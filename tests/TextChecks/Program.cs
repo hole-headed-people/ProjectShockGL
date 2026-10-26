@@ -195,6 +195,56 @@ void Render()
         preview.Unlit = false;
         preview.EnvironmentEnabled = true;
     }
+    // Use a tiny striped BMP (decoded by content, regardless of its .jpg extension).
+    var checkerName = Path.Combine(AppContext.BaseDirectory, "brush-checker");
+    using (var writer = new BinaryWriter(File.Create(checkerName + ".jpg")))
+    {
+        writer.Write((ushort)0x4d42); writer.Write(102); writer.Write(0); writer.Write(54);
+        writer.Write(40); writer.Write(4); writer.Write(4); writer.Write((ushort)1); writer.Write((ushort)24);
+        writer.Write(0); writer.Write(48); writer.Write(0); writer.Write(0); writer.Write(0); writer.Write(0);
+        for (var y = 0; y < 4; y++)
+            for (var x = 0; x < 4; x++)
+                for (var channel = 0; channel < 3; channel++) writer.Write((byte)(x < 2 ? 255 : 0));
+    }
+    var brushWorld = new World();
+    var brush = brushWorld.Spawn<ProjectShockGL.Core.BrushBox>();
+    brush.Size = new Vector3(2, 2, 0.5f);
+    brush.Transform.Position = new Vector3(0, 0, -3);
+    brush.TextureName = checkerName;
+    brush.Lit = false;
+    brushWorld.Update(0);
+    Camera.Active.Orthographic = true;
+    Camera.Active.OrthoSize = 4;
+    void CheckBrushPattern()
+    {
+        graphics.BeginDraw(Camera.Active);
+        var queue = new RenderQueue();
+        brushWorld.Render(queue);
+        queue.Flush(graphics);
+        gl.Finish();
+        for (var sample = 0; sample < 4; sample++)
+        {
+            var pixel = new byte[4];
+            unsafe { fixed (byte* p = pixel) gl.ReadPixels(275 + sample * 30, 120, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, p); }
+            Check(sample % 2 == 0 ? pixel[0] > 240 : pixel[0] < 10);
+        }
+        Check(gl.GetError() == GLEnum.NoError);
+    }
+    CheckBrushPattern();
+    brush.Transform.Scale = new Vector3(2, 1, 1);
+    CheckBrushPattern();
+    brush.Transform.Scale = Vector3.One;
+    brush.Size = new Vector3(4, 2, 0.5f);
+    CheckBrushPattern();
+    var brushMesh = (Mesh)typeof(ProjectShockGL.Core.BrushBox).GetField("_mesh",
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(brush)!;
+    var brushVao = (uint)typeof(Mesh).GetField("_vao",
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(brushMesh)!;
+    Check(gl.IsVertexArray(brushVao));
+    brushWorld.Clear();
+    Check(!gl.IsVertexArray(brushVao) && gl.GetError() == GLEnum.NoError);
+    Camera.Active.Orthographic = false;
+    Console.WriteLine("PASS: BrushBox renders tiled texture after size/scale edits and releases its private GPU mesh");
     var canvas = new Canvas();
     canvas.Resize(new Vector2(640, 240));
     var font = Content.LoadFont("NotoSans-Regular", 24)!;

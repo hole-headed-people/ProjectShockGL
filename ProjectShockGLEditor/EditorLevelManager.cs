@@ -46,6 +46,7 @@ public static class EditorLevelManager
             {
                 Geometry geometry => geometry.Path, 
                 Entity entity => entity.Path, 
+                BrushBox => "BrushBox",
                 _ => null
             };
             
@@ -62,9 +63,19 @@ public static class EditorLevelManager
             var placeable = new Placeable
             {
                 Name = obj.Name, Path = path,
+                
                 IsActive = obj.IsActive,
-                Type = obj is Geometry ? PlaceableType.Geometry : PlaceableType.Entity,
+                
+                Type = obj is BrushBox ? PlaceableType.BrushBox : obj is Geometry ? PlaceableType.Geometry : PlaceableType.Entity,
+                
+                Brush = obj is BrushBox brush ? new BrushBoxData
+                {
+                    Size = brush.Size, Texture = brush.TextureName, TextureFormat = brush.TextureFormat,
+                    TextureScale = brush.TextureScale, Color = brush.Color, Lit = brush.Lit
+                } : null,
+                
                 Position = obj.Transform.Position, Rotation = obj.Transform.Rotation, Scale = obj.Transform.Scale,
+                
                 Outputs = obj is Entity source ? source.Outputs.Select(output => new OutputData
                 {
                     Event = output.Event, 
@@ -143,6 +154,7 @@ public static class EditorLevelManager
         {
             Name = name, Path = snapshot.Path, Type = snapshot.Type,
             IsActive = snapshot.IsActive,
+            Brush = snapshot.Brush,
             Position = snapshot.Position, Rotation = snapshot.Rotation, Scale = snapshot.Scale,
             Properties = snapshot.Properties, Outputs = snapshot.Outputs
         };

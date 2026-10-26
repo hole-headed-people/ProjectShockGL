@@ -40,7 +40,7 @@ public static class Editor
     public static bool SceneHovered => InScene(Input.GetMousePosition());
     
     public static bool CanDuplicateSelection => Selection.Object is { IsDestroyed: false } &&
-                                                Selection.Object is ProjectShockGL.Core.Geometry or ProjectShockGL.Core.Entity;
+                                                Selection.Object is ProjectShockGL.Core.Geometry or ProjectShockGL.Core.Entity or ProjectShockGL.Core.BrushBox;
 
     public static void Initialize()
     {

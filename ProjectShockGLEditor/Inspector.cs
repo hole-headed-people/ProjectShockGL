@@ -12,6 +12,7 @@ public static class Inspector
     private static Vector3 _dragStartPosition;
     private static Quaternion _dragStartRotation;
     private static Vector3 _dragStartScale;
+    private static Vector3 _brushSizeStart;
     
     public static void Draw()
     {
@@ -137,6 +138,95 @@ public static class Inspector
                 obj.Transform.Scale));
         }
         
+        if (obj is BrushBox brush)
+        {
+            ImGui.Separator();
+            ImGui.TextUnformatted("BrushBox");
+            
+            var brushName = brush.Name;
+
+            if (ImGui.InputText("Name", ref brushName, 128))
+            {
+                brush.Name = brushName;
+            }
+            
+            var size = brush.Size;
+            var beforeSize = size;
+
+            if (ImGui.DragFloat3("Size", ref size, 0.1f))
+            {
+                brush.Size = Vector3.Max(new Vector3(0.01f), size);
+            }
+
+            if (ImGui.IsItemActivated())
+            {
+                _brushSizeStart = beforeSize;
+            }
+
+            if (ImGui.IsItemDeactivatedAfterEdit() && _brushSizeStart != brush.Size)
+            {
+                UndoRedo.Register(new PropertyChangeAction<Vector3>(v => brush.Size = v, _brushSizeStart, brush.Size));
+            }
+            
+            var density = brush.TextureScale;
+
+            if (ImGui.DragFloat("Texture scale", ref density, 0.05f, 0.01f, 1000))
+            {
+                brush.TextureScale = Math.Clamp(density, 0.01f, 1000);
+            }
+            
+            ImGui.TextUnformatted("Texture scale = repeats per world unit");
+            
+            if (ImGui.BeginCombo("Texture", $"{brush.TextureName} ({brush.TextureFormat})"))
+            {
+                if (ImGui.Selectable("WhitePixel", brush.TextureName == "WhitePixel"))
+                {
+                    brush.TextureName = "WhitePixel";
+                }
+                
+                var directory = System.IO.Path.Combine(Content.Path, "Textures");
+                
+                if (Directory.Exists(directory))
+                    foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories).Order())
+                    {
+                        var extension = System.IO.Path.GetExtension(file).ToLowerInvariant();
+                        
+                        if (extension is not (".jpg" or ".png"))
+                        {
+                            continue;
+                        }
+                        
+                        var relative = System.IO.Path.GetRelativePath(directory, file);
+                        var textureName = relative[..^extension.Length];
+                        var format = extension == ".png" ? TextureFormat.Png : TextureFormat.Jpeg;
+                        
+                        if (ImGui.Selectable(relative, brush.TextureName == textureName && brush.TextureFormat == format))
+                            Editor.Execute(() =>
+                            {
+                                _ = Content.LoadTexture(textureName, format) ?? throw new FileNotFoundException(relative);
+                                brush.TextureName = textureName;
+                                brush.TextureFormat = format;
+                            });
+                    }
+                
+                ImGui.EndCombo();
+            }
+            
+            var color = new Vector4(brush.Color.R, brush.Color.G, brush.Color.B, brush.Color.A);
+            
+            if (ImGui.ColorEdit4("Color", ref color))
+            {
+                brush.Color = new Color(color.X, color.Y, color.Z, color.W);
+            }
+            
+            var lit = brush.Lit;
+
+            if (ImGui.Checkbox("Lit", ref lit))
+            {
+                brush.Lit = lit;
+            }
+        }
+
         if (obj is Entity entity)
         {
             ImGui.Separator();

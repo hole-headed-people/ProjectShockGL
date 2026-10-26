@@ -3,6 +3,7 @@ using System.Numerics;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using ProjectShockGL.Core;
+using ProjectShockGL.Rendering;
 using ProjectShockGL.Tools;
 using Object = ProjectShockGL.Core.Object;
 
@@ -139,7 +140,7 @@ public static class LevelManager
 
     public static Object CreateObject(World world, Placeable placeable)
     {
-        if (placeable == null || string.IsNullOrWhiteSpace(placeable.Path))
+        if (placeable == null || (placeable.Type != PlaceableType.BrushBox && string.IsNullOrWhiteSpace(placeable.Path)))
         {
             throw new InvalidDataException("A map object has no asset path.");
         }
@@ -159,6 +160,7 @@ public static class LevelManager
         {
             PlaceableType.Entity => Entity.Create(placeable.Path, world),
             PlaceableType.Geometry => Geometry.Create(placeable.Path, world),
+            PlaceableType.BrushBox => CreateBrush(world, placeable),
             _ => throw new InvalidDataException($"Unknown object type: {placeable.Type}")
         };
 
@@ -197,6 +199,41 @@ public static class LevelManager
         obj.SetActive(placeable.IsActive);
         
         return obj;
+    }
+
+    private static BrushBox CreateBrush(World world, Placeable placement)
+    {
+        var data = placement.Brush ?? new BrushBoxData();
+        
+        BrushBoxMesh.Build(data.Size, placement.Scale, data.TextureScale);
+
+        if (!Enum.IsDefined(data.TextureFormat) || !float.IsFinite(data.Color.R) || !float.IsFinite(data.Color.G) ||
+            !float.IsFinite(data.Color.B) || !float.IsFinite(data.Color.A))
+        {
+            throw new InvalidDataException("Invalid BrushBox material.");
+        }
+        
+        if (!string.IsNullOrWhiteSpace(data.Texture) && data.Texture != "WhitePixel")
+        {
+            var extension = data.TextureFormat == TextureFormat.Png ? ".png" : ".jpg";
+            var path = Path.Combine(Content.Path, "Textures", data.Texture + extension);
+            
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException("BrushBox texture was not found.", path);
+            }
+        }
+        
+        var brush = world.Spawn<BrushBox>();
+        
+        brush.Size = data.Size;
+        brush.TextureName = data.Texture;
+        brush.TextureFormat = data.TextureFormat;
+        brush.TextureScale = data.TextureScale;
+        brush.Color = data.Color;
+        brush.Lit = data.Lit;
+        
+        return brush;
     }
 
     private static bool Finite(Vector3 value)

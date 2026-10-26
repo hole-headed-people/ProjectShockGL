@@ -42,6 +42,32 @@ public static class Palette
         }
 
         ImGui.Separator();
+        if (ImGui.Button("Create BrushBox"))
+        {
+            Editor.Execute(() =>
+            {
+                ObjectManipulator.Commit();
+                
+                var world = ProjectShockGL.Core.Game.Instance.World;
+                var names = world.GetAllObjects(true).Select(obj => obj.Name).ToHashSet();
+                var suffix = 1;
+
+                while (names.Contains($"BrushBox_{suffix}"))
+                {
+                    suffix++;
+                }
+                
+                var brush = world.Spawn<BrushBox>();
+                brush.Name = $"BrushBox_{suffix}";
+                
+                Selection.Object = brush;
+                
+                UndoRedo.Clear();
+                Editor.Report($"Created: {brush.Name}");
+            });
+        }
+
+        ImGui.Separator();
         
         var expectedType = _isGeometryTab ? "Geometry" : "Entity";
 
@@ -89,8 +115,6 @@ public static class Palette
                 {
                     throw new InvalidOperationException($"Cannot create asset '{name}'.");
                 }
-                
-                //obj.Transform.Position = Camera.Active.Transform.Position + Camera.Active.Transform.Forward * 5;
                 
                 var names = ProjectShockGL.Core.Game.Instance.World.GetAllObjects(true).Select(item => item.Name).ToHashSet();
                 var suffix = 1;

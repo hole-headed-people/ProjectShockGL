@@ -358,4 +358,9 @@ public static class Content
         _whiteTexture?.Dispose();
         _whiteTexture = null;
     }
+    
+    internal static Mesh CreateMesh(float[] vertices, uint[] indices)
+    {
+        return new Mesh(_gl, vertices, indices);
+    }
 }
