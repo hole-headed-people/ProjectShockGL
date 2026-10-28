@@ -6,7 +6,7 @@ namespace ProjectShockGLEditor;
 
 public static class ObjectPicker
 {
-    public static void PickAt(Vector2 mousePos, Vector2 screenSize)
+    public static void PickAt(Vector2 mousePos, Vector2 screenSize, bool additive = false)
     {
         var camera = Camera.Active;
 
@@ -16,8 +16,17 @@ public static class ObjectPicker
             return;
         }
         
-        Selection.Object = Pick(origin, direction, camera.Far,
+        var picked = Pick(origin, direction, camera.Far,
             ProjectShockGL.Core.Game.Instance.World.GetAllObjects(includePending: true));
+
+        if (additive && picked != null)
+        {
+            Selection.Toggle(picked);
+        }
+        else if (!additive)
+        {
+            Selection.Object = picked;
+        }
     }
     
     private static ProjectShockGL.Core.Object? Pick(Vector3 rayOrigin, Vector3 rayDir, 

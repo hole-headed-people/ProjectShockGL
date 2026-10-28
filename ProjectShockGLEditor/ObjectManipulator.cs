@@ -30,56 +30,47 @@ public static class ObjectManipulator
     public static float ScaleStep { get; set; } = 0.1f;
     public static bool IsDragging => _target != null;
 
+    private static (EditorObjectReference Reference, TransformState State)[] _members = [];
+    private static readonly ProjectShockGL.Core.Transform GroupTransform = new();
+    private static bool IsGroup => _members.Length > 1;
+    public static Vector3 Pivot => GetPivot(Selection.Objects.Where(o => o.IsEditorVisible).ToArray());
+    private static Vector3 GetPivot(Object[] objects) => objects.Length == 0 ? Vector3.Zero :
+        objects.Aggregate(Vector3.Zero, (sum, obj) => sum + obj.Transform.Position) / objects.Length;
+
     public static void Cancel()
     {
-        if (_target != null && !_target.IsDestroyed)
-        {
-            _before.Apply(_target.Transform);
-        }
-        
+        foreach (var member in _members)
+            if (!member.Reference.Current.IsDestroyed) member.State.Apply(member.Reference.Current.Transform);
         _target = null;
+        _members = [];
         _dragAxis = -1;
     }
 
     public static void Commit()
     {
-        if (_target == null)
-        {
-            return;
-        }
-        
-        var target = _target;
-        
-        if (!target.IsDestroyed)
-        {
-            var after = TransformState.Capture(target.Transform);
-            
-            if (after != _before)
-            {
-                var reference = EditorObjectReference.Get(target);
-                
-                UndoRedo.Register(new PropertyChangeAction<TransformState>(state =>
-                {
-                    if (!reference.Current.IsDestroyed)
-                    {
-                        state.Apply(reference.Current.Transform);
-                    }
-                }, _before, after));
-            }
-        }
-        
+        if (_target == null) return;
+        var members = _members;
+        var before = members.Select(m => m.State).ToArray();
+        var after = members.Select(m => TransformState.Capture(m.Reference.Current.Transform)).ToArray();
         _target = null;
+        _members = [];
         _dragAxis = -1;
+        if (before.SequenceEqual(after)) return;
+        UndoRedo.Register(new PropertyChangeAction<TransformState[]>(states =>
+        {
+            for (var i = 0; i < members.Length; i++)
+                if (!members[i].Reference.Current.IsDestroyed) states[i].Apply(members[i].Reference.Current.Transform);
+        }, before, after));
     }
-
     public static bool Draw(Vector2 screenSize, Vector2 sceneMin, Vector2 sceneMax, bool allowInput)
     {
-        if (_target != null && (_target != Selection.Object || _target.IsDestroyed))
+        if (_target != null && (!Selection.Contains(_target) ||
+            _members.Any(m => m.Reference.Current.IsDestroyed || !m.Reference.Current.IsEditorVisible)))
         {
             Cancel();
         }
         
-        var target = Selection.Object;
+        var target = Selection.Objects.LastOrDefault(o => o.IsEditorVisible);
 
         if (target == null || target.IsDestroyed || !target.IsEditorVisible)
         {
@@ -106,7 +97,7 @@ public static class ObjectManipulator
 
         var camera = Camera.Active;
         var vp = camera.GetViewMatrix() * camera.GetProjectionMatrix();
-        var position = target.Transform.Position;
+        var position = IsDragging ? (IsGroup ? GroupTransform.Position : target.Transform.Position) : Pivot;
         var depth = Vector3.Dot(position - camera.Transform.Position, camera.Transform.Forward);
         var length = camera.Orthographic ? camera.OrthoSize * 90 / screenSize.Y
             : 2 * depth * MathF.Tan(camera.Fov * 0.5f) * 90 / screenSize.Y;
@@ -224,7 +215,7 @@ public static class ObjectManipulator
 
     private static Vector3 GetAxis(Object target, int index)
     {
-        return Local || Mode == ManipulationMode.Scale
+        return Local || (Mode == ManipulationMode.Scale && Selection.Objects.Count(o => o.IsEditorVisible) <= 1)
             ? Vector3.Transform(Axes[index], target.Transform.Rotation)
             : Axes[index];
     }
@@ -232,7 +223,20 @@ public static class ObjectManipulator
     internal static void BeginDrag(Object target, int axisIndex, Vector2 mouse, float length,
         Vector3 cameraForward, Matrix4x4 vp, Vector2 size)
     {
-        _before = TransformState.Capture(target.Transform);
+        var selected = Selection.Objects.Where(o => o.IsEditorVisible).ToArray();
+
+        if (!selected.Contains(target))
+        {
+            selected = [target];
+        }
+        
+        _members = selected.Select(o => (EditorObjectReference.Get(o), TransformState.Capture(o.Transform))).ToArray();
+        
+        GroupTransform.Position = GetPivot(selected);
+        GroupTransform.Rotation = Local ? target.Transform.Rotation : Quaternion.Identity;
+        GroupTransform.Scale = Vector3.One;
+        
+        _before = TransformState.Capture(IsGroup ? GroupTransform : target.Transform);
         _dragAxis = axisIndex;
         _startMouse = mouse;
         _length = length;
@@ -279,7 +283,45 @@ public static class ObjectManipulator
 
     internal static void ApplyDrag(Vector2 mouse, Matrix4x4 vp, Vector2 size, bool snap)
     {
-        var transform = _target!.Transform;
+        if (_target == null)
+        {
+            return;
+        }
+        
+        ApplyDragInternal(mouse, vp, size, snap);
+
+        if (!IsGroup)
+        {
+            return;
+        }
+        
+        var deltaRotation = Quaternion.Normalize(GroupTransform.Rotation * Quaternion.Inverse(_before.Rotation));
+        var factor = GroupTransform.Scale / _before.Scale;
+        
+        foreach (var member in _members)
+        {
+            if (member.Reference.Current.IsDestroyed)
+            {
+                continue;
+            }
+            
+            var state = member.State;
+            var relative = Vector3.Transform(state.Position - _before.Position, Quaternion.Inverse(_before.Rotation));
+            
+            relative *= factor;
+            relative = Vector3.Transform(relative, _before.Rotation);
+            
+            var transform = member.Reference.Current.Transform;
+            
+            transform.Position = GroupTransform.Position + Vector3.Transform(relative, deltaRotation);
+            transform.Rotation = Mode == ManipulationMode.Rotate ? Quaternion.Normalize(deltaRotation * state.Rotation) : state.Rotation;
+            transform.Scale = Mode == ManipulationMode.Scale ? Vector3.Max(new Vector3(.01f), state.Scale * factor) : state.Scale;
+        }
+    }
+
+    private static void ApplyDragInternal(Vector2 mouse, Matrix4x4 vp, Vector2 size, bool snap)
+    {
+        var transform = IsGroup ? GroupTransform : _target!.Transform;
         
         if (_dragAxis == 3)
         {
@@ -361,4 +403,5 @@ public static class ObjectManipulator
         }
     }
 }
+
 

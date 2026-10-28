@@ -88,7 +88,6 @@ public static class SceneGroups
 
     public static void Draw(Object[] objects)
     {
-        
         ImGui.SetNextItemWidth(-1);
         ImGui.InputTextWithHint("##groupName", "New group name", ref _name, 128);
         ImGui.BeginDisabled(string.IsNullOrWhiteSpace(_name));
@@ -119,13 +118,22 @@ public static class SceneGroups
             
             if (open)
             {
-                var selected = Selection.Object;
+                var selected = Selection.Objects;
                 
-                ImGui.BeginDisabled(selected == null || selected.IsDestroyed);
+                ImGui.BeginDisabled(selected.Length == 0);
 
-                if (ImGui.Button("Add selected") && selected != null)
+                if (ImGui.Button("Add selected"))
                 {
-                    Change(() => { if (!selected.EditorGroups.Contains(group.Id)) selected.EditorGroups.Add(group.Id); });
+                    Change(() =>
+                    {
+                        foreach (var obj in selected)
+                        {
+                            if (!obj.EditorGroups.Contains(group.Id))
+                            {
+                                obj.EditorGroups.Add(group.Id);
+                            }
+                        }
+                    });
                 }
                 
                 ImGui.EndDisabled();

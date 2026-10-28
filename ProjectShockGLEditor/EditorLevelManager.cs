@@ -67,7 +67,12 @@ public static class EditorLevelManager
                 IsActive = obj.IsActive,
                 EditorGroups = obj.EditorGroups.ToArray(),
                 
-                Type = obj is BrushBox ? PlaceableType.BrushBox : obj is Geometry ? PlaceableType.Geometry : PlaceableType.Entity,
+                Type = obj switch
+                {
+                    BrushBox => PlaceableType.BrushBox,
+                    Geometry => PlaceableType.Geometry,
+                    _ => PlaceableType.Entity
+                },
                 
                 Brush = obj is BrushBox brush ? new BrushBoxData
                 {

@@ -383,6 +383,77 @@ public static class Content
             .ToArray();
     }
 
+    public static Placeable? LoadPrefab(string name)
+    {
+        var data = LoadPrefabData(name);
+        if (data == null) return null;
+        if (data.Placeables.Length != 1) throw new InvalidDataException("Use LoadPrefabData for a multi-object prefab.");
+        var source = data.Placeables[0];
+        return Prefab.WithTransform(source, source.Position + data.Pivot, source.Rotation);
+    }
+
+    public static PrefabData? LoadPrefabData(string name)
+    {
+        var path = PrefabPath(name);
+
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+        
+        var settings = JsonHelper.GetSettings();
+        var json = JObject.Parse(File.ReadAllText(path));
+        
+        PrefabData data;
+
+        if (json.Property("Placeables", StringComparison.OrdinalIgnoreCase) != null)
+        {
+            data = json.ToObject<PrefabData>(JsonSerializer.Create(settings))!;
+        }
+        else
+        {
+            var source = json.ToObject<Placeable>(JsonSerializer.Create(settings))!;
+            
+            data = new PrefabData { Pivot = source.Position,
+                Placeables = [Prefab.WithTransform(source, System.Numerics.Vector3.Zero, source.Rotation)] };
+        }
+
+        if (data.Placeables == null || data.Placeables.Length == 0 || data.Placeables.Any(p => p == null) ||
+            !float.IsFinite(data.Pivot.X) || !float.IsFinite(data.Pivot.Y) || !float.IsFinite(data.Pivot.Z))
+        {
+            throw new InvalidDataException($"Prefab '{name}' has invalid placements or pivot.");
+        }
+        
+        return data;
+    }
+
+    public static string PrefabPath(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || System.IO.Path.IsPathRooted(name))
+        {
+            throw new ArgumentException("Use a relative prefab name without extension.", nameof(name));
+        }
+        
+        var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(Path, "Prefabs")) + System.IO.Path.DirectorySeparatorChar;
+        var file = System.IO.Path.GetFullPath(System.IO.Path.Combine(root, name + ".json"));
+
+        if (!file.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Prefab must remain inside Content/Prefabs.", nameof(name));
+        }
+        
+        return file;
+    }
+
+    public static string[] GetAllPrefabNames()
+    {
+        var root = System.IO.Path.Combine(Path, "Prefabs");
+        
+        return Directory.Exists(root) ? Directory.GetFiles(root, "*.json", SearchOption.AllDirectories)
+            .Select(file => System.IO.Path.ChangeExtension(System.IO.Path.GetRelativePath(root, file), null)!.Replace('\\', '/'))
+            .Order(StringComparer.OrdinalIgnoreCase).ToArray() : [];
+    }
+
     public static string[] GetAllEntityNames()
     {
         var dir = System.IO.Path.Combine(Path, "Entities");
@@ -401,11 +472,18 @@ public static class Content
     public static void UnloadAll()
     {
         PostProcessSettings.Reset();
+        
         PostProcessProfiles.Clear();
+        
         var resources = Fonts.Values.Cast<IDisposable>()
             .Concat(Programs.Values).Concat(Shaders.Values).Concat(Textures.Values).Concat(Meshes.Values).ToList();
+        
         Programs.Clear();
-        if (_whiteTexture != null) resources.Add(_whiteTexture);
+
+        if (_whiteTexture != null)
+        {
+            resources.Add(_whiteTexture);
+        }
 
         Fonts.Clear();
         Shaders.Clear();

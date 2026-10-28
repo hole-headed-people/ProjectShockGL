@@ -1288,6 +1288,274 @@ RunScene("Palette creation uses short unique names while retaining nested asset 
     Check(Selection.Object!.Name == "Check_2");
 });
 
+RunScene("Single-object prefabs save independent values and Outputs, and support editor history", () =>
+{
+    var source = (CheckEntity)SceneObjects.Create(PlaceableType.Entity, "Check");
+    source.Number = 17;
+    source.Transform.Position = new Vector3(2, 3, 4);
+    source.SetActive(false);
+    source.EditorGroups.Add("level-only");
+    source.Outputs.Add(new OutputData { Event = "OnUsed", TargetName = "gate", Input = "SetActive", Parameter = "true" });
+    var name = "Logic/Lever-" + Guid.NewGuid().ToString("N");
+    source.Values = [1, 2, 3];
+    var path = Content.PrefabPath(name);
+    try
+    {
+        PrefabTools.Save(source, name);
+        Check(Content.GetAllPrefabNames().Contains(name));
+        var template = Content.LoadPrefab(name)!;
+        Check(template.EditorGroups.Length == 0 && template.Outputs.Single().TargetName == "gate");
+        var a = (CheckEntity)SceneObjects.CreatePrefab(name);
+        var b = (CheckEntity)SceneObjects.CreatePrefab(name);
+        Check(a.Number == 17 && b.Number == 17 && !a.IsActive && a.Transform.Position == source.Transform.Position);
+        Check(a.Name != b.Name && a.EditorGroups.Count == 0 && a.Path == source.Path);
+        a.Outputs[0].Parameter = "false"; a.Number = 99;
+        a.Values.Add(4);
+        Check(b.Values.SequenceEqual(new[] { 1, 2, 3 }) && source.Values.Count == 3);
+        Check(b.Outputs[0].Parameter == "true" && template.Outputs[0].Parameter == "true");
+        var reference = EditorObjectReference.Get(b);
+        UndoRedo.Undo(); Check(b.IsDestroyed);
+        UndoRedo.Redo(); Check(((CheckEntity)reference.Current).Number == 17);
+        var editorProperty = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+        try
+        {
+            editorProperty.SetValue(null, false);
+            var runtime = (CheckEntity)Prefab.Instantiate(name, Game.Instance.World, Vector3.One, Quaternion.Identity);
+            Check(runtime.Transform.Position == Vector3.One && runtime.Number == 17 && runtime.Outputs[0].Parameter == "true");
+        }
+        finally { editorProperty.SetValue(null, true); }
+        var previous = File.ReadAllText(path);
+        Throws(() => PrefabTools.Save(source, name));
+        Check(File.ReadAllText(path) == previous);
+        Throws(() => Content.PrefabPath("../outside"));
+        Throws(() => Content.PrefabPath(Path.GetFullPath("outside")));
+    }
+    finally { File.Delete(path); }
+});
+
+RunScene("Brush prefab retains procedural settings and failed prefab spawn cleans up", () =>
+{
+    var brush = (BrushBox)SceneObjects.Create(PlaceableType.BrushBox);
+    brush.Size = new Vector3(4, 2, 3); brush.Movable = true;
+    brush.TextureScale = 2;
+    var template = EditorLevelManager.CaptureLevel([brush]).Placeables.Single();
+    var copy = (BrushBox)Prefab.Instantiate(template, Game.Instance.World);
+    Check(copy.Size == brush.Size && copy.Movable && copy.TextureScale == 2);
+    var first = (CheckEntity)SceneObjects.Create(PlaceableType.Entity, "Check");
+    first.Values = [5];
+    var shared = EditorLevelManager.CaptureLevel([first]).Placeables.Single();
+    var left = (CheckEntity)Prefab.Instantiate(shared, Game.Instance.World);
+    var right = (CheckEntity)Prefab.Instantiate(shared, Game.Instance.World);
+    left.Values.Add(6);
+    Check(right.Values.Count == 1 && first.Values.Count == 1);
+    var world = Game.Instance.World;
+    var rejecting = (RejectingEntity)SceneObjects.Create(PlaceableType.Entity, "Rejecting");
+    var bad = EditorLevelManager.CaptureLevel([rejecting]).Placeables.Single();
+    var count = world.GetAllObjects(true).Count(o => !o.IsDestroyed);
+    RejectingEntity.RejectWrites = true;
+    try { Throws(() => Prefab.Instantiate(bad, world)); }
+    finally { RejectingEntity.RejectWrites = false; }
+    Check(world.GetAllObjects(true).Count(o => !o.IsDestroyed) == count);
+});
+
+RunScene("Multiple selection transforms around a common pivot with atomic undo and cancellation", () =>
+{
+    var a = SceneObjects.Create(PlaceableType.BrushBox);
+    var b = SceneObjects.Create(PlaceableType.BrushBox);
+    a.Transform.Position = new Vector3(-2, 0, 0);
+    b.Transform.Position = new Vector3(2, 0, 0);
+    Selection.Object = a; Selection.Toggle(b);
+    Check(Selection.Objects.Length == 2 && Selection.Contains(a) && Selection.Object == b);
+    Selection.Toggle(a); Check(Selection.Objects.Length == 1);
+    Selection.Toggle(a); Check(Selection.Objects.Length == 2);
+    UndoRedo.Clear();
+    var size = new Vector2(1280, 768);
+    var eye = new Vector3(5, 4, 6);
+    var vp = Matrix4x4.CreateLookAt(eye, Vector3.Zero, Vector3.UnitY) * Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 3, size.X / size.Y, .1f, 100);
+    var forward = Vector3.Normalize(-eye);
+    ObjectManipulator.Local = false;
+    ObjectManipulator.Mode = ManipulationMode.Move;
+    GizmoMath.Project(Vector3.UnitX, vp, size, out var start);
+    GizmoMath.Project(Vector3.UnitX * 2, vp, size, out var end);
+    ObjectManipulator.BeginDrag(a, 0, start, 2, forward, vp, size);
+    ObjectManipulator.ApplyDrag(end, vp, size, false);
+    ObjectManipulator.Commit();
+    Check(Vector3.Distance(a.Transform.Position, new Vector3(-1, 0, 0)) < .001f);
+    Check(Vector3.Distance(b.Transform.Position, new Vector3(3, 0, 0)) < .001f);
+    UndoRedo.Undo(); Check(a.Transform.Position.X == -2 && b.Transform.Position.X == 2 && !UndoRedo.CanUndo);
+    UndoRedo.Redo(); UndoRedo.Undo();
+    ObjectManipulator.Mode = ManipulationMode.Rotate;
+    GizmoMath.Project(Vector3.UnitX, vp, size, out start);
+    GizmoMath.Project(Vector3.UnitY, vp, size, out end);
+    ObjectManipulator.BeginDrag(a, 2, start, 1, forward, vp, size);
+    ObjectManipulator.ApplyDrag(end, vp, size, false);
+    Check(Vector3.Distance(a.Transform.Position, new Vector3(0, -2, 0)) < .001f);
+    Check(Vector3.Distance(b.Transform.Position, new Vector3(0, 2, 0)) < .001f);
+    ObjectManipulator.Commit(); UndoRedo.Undo();
+    Check(a.Transform.Rotation == Quaternion.Identity && a.Transform.Position.X == -2);
+    ObjectManipulator.Mode = ManipulationMode.Scale;
+    ObjectManipulator.BeginDrag(a, 3, Vector2.Zero, 2, forward, vp, size);
+    ObjectManipulator.ApplyDrag(new Vector2(100, 0), vp, size, false);
+    Check(Math.Abs(a.Transform.Position.X + 2 * MathF.E) < .001f && Math.Abs(b.Transform.Scale.X - MathF.E) < .001f);
+    ObjectManipulator.Cancel();
+    Check(a.Transform.Position.X == -2 && b.Transform.Position.X == 2 && a.Transform.Scale == Vector3.One);
+    ObjectManipulator.BeginDrag(a, 3, Vector2.Zero, 2, forward, vp, size);
+    ObjectManipulator.ApplyDrag(new Vector2(100, 0), vp, size, false);
+    ObjectManipulator.Commit();
+    var reference = EditorObjectReference.Get(a);
+    SceneObjects.Delete(a); UndoRedo.Undo(); UndoRedo.Undo();
+    Check(reference.Current.Transform.Position.X == -2 && b.Transform.Position.X == 2);
+    Selection.Object = b; Check(Selection.Objects.Length == 1);
+    Selection.Object = null; Check(Selection.Objects.Length == 0);
+});
+
+RunScene("Prefab sets insert relative to a pivot and undo as one independent set", () =>
+{
+    var a = (CheckEntity)SceneObjects.Create(PlaceableType.Entity, "Check");
+    var b = (BrushBox)SceneObjects.Create(PlaceableType.BrushBox);
+    a.Transform.Position = new Vector3(8, 0, 0); b.Transform.Position = new Vector3(12, 0, 0);
+    a.Values = [1, 2];
+    a.Outputs.Add(new OutputData { Event = "OnUsed", TargetName = b.Name, Input = "SetActive", Parameter = "true" });
+    var name = "Puzzles/Set-" + Guid.NewGuid().ToString("N");
+    var path = Content.PrefabPath(name);
+    try
+    {
+        PrefabTools.Save(new GameObject[] { a, b }, name);
+        var data = Content.LoadPrefabData(name)!;
+        Check(data.Pivot == new Vector3(10, 0, 0) && data.Placeables.Length == 2);
+        Check(data.Placeables[0].Position.X == -2 && data.Placeables[1].Position.X == 2);
+        Throws(() => Prefab.Instantiate(name));
+        Selection.Set([a, b]); UndoRedo.Clear();
+        var inserted = SceneObjects.CreatePrefabSet(name, new Vector3(0, 5, 0), Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI / 2));
+        Check(Selection.Objects.SequenceEqual(inserted));
+        Check(Vector3.Distance(inserted[0].Transform.Position, new Vector3(0, 3, 0)) < .001f);
+        Check(Vector3.Distance(inserted[1].Transform.Position, new Vector3(0, 7, 0)) < .001f);
+        Check(((CheckEntity)inserted[0]).Outputs[0].TargetName == b.Name);
+        var references = inserted.Select(EditorObjectReference.Get).ToArray();
+        UndoRedo.Undo(); Check(inserted.All(o => o.IsDestroyed) && Selection.Objects.SequenceEqual(new GameObject[] { a, b }) && !UndoRedo.CanUndo);
+        UndoRedo.Redo(); Check(Selection.Objects.SequenceEqual(references.Select(r => r.Current)));
+        var second = Prefab.InstantiateAll(data, Game.Instance.World, Vector3.Zero);
+        ((CheckEntity)second[0]).Values.Add(3);
+        Check(((CheckEntity)references[0].Current).Values.Count == 2 && a.Values.Count == 2);
+        Check(second.Select(o => o.Name).Intersect(references.Select(r => r.Current.Name)).Count() == 0);
+        var oldName = "Old-" + Guid.NewGuid().ToString("N");
+        var oldPath = Content.PrefabPath(oldName);
+        try
+        {
+            File.WriteAllText(oldPath, JsonConvert.SerializeObject(EditorLevelManager.CaptureLevel([a]).Placeables[0], JsonHelper.GetSettings()));
+            var legacy = Prefab.InstantiateAll(oldName, Game.Instance.World, Vector3.Zero);
+            Check(legacy.Length == 1 && legacy[0].Transform.Position == Vector3.Zero);
+        }
+        finally { File.Delete(oldPath); }
+    }
+    finally { File.Delete(path); }
+});
+
+RunScene("Failure halfway through prefab set creation leaves no partial set", () =>
+{
+    var good = SceneObjects.Create(PlaceableType.BrushBox);
+    var bad = SceneObjects.Create(PlaceableType.Entity, "Rejecting");
+    var placements = EditorLevelManager.CaptureLevel([good, bad]).Placeables;
+    var world = Game.Instance.World;
+    var count = world.GetAllObjects(true).Count(o => !o.IsDestroyed);
+    RejectingEntity.RejectWrites = true;
+    try { Throws(() => Prefab.InstantiateAll(new PrefabData { Placeables = placements }, world)); }
+    finally { RejectingEntity.RejectWrites = false; }
+    Check(world.GetAllObjects(true).Count(o => !o.IsDestroyed) == count);
+});
+
+RunScene("Multiple deletion restores scene order, selection and earlier group transforms", () =>
+{
+    var a = (CheckEntity)SceneObjects.Create(PlaceableType.Entity, "Check");
+    var middle = SceneObjects.Create(PlaceableType.BrushBox);
+    var b = (CheckEntity)SceneObjects.Create(PlaceableType.Entity, "Check");
+    a.Values = [1, 2]; b.Number = 7; b.SetActive(false);
+    a.Outputs.Add(new OutputData { Event = "Test", TargetName = b.Name, Input = "SetActive", Parameter = "true" });
+    a.EditorGroups.Add("group");
+    var aName = a.Name; var bName = b.Name;
+    Selection.Set([b, a]); UndoRedo.Clear();
+    var ar = EditorObjectReference.Get(a); var br = EditorObjectReference.Get(b);
+    var size = new Vector2(1280, 768); var eye = new Vector3(5, 4, 6);
+    var vp = Matrix4x4.CreateLookAt(eye, Vector3.Zero, Vector3.UnitY) * Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 3, size.X / size.Y, .1f, 100);
+    ObjectManipulator.Mode = ManipulationMode.Scale; ObjectManipulator.Local = false;
+    ObjectManipulator.BeginDrag(a, 3, Vector2.Zero, 2, Vector3.Normalize(-eye), vp, size);
+    ObjectManipulator.ApplyDrag(new Vector2(50, 0), vp, size, false); ObjectManipulator.Commit();
+    var scale = a.Transform.Scale;
+    SceneObjects.Delete(Selection.Objects);
+    Check(a.IsDestroyed && b.IsDestroyed && Selection.Objects.Length == 0);
+    for (var cycle = 0; cycle < 3; cycle++)
+    {
+        UndoRedo.Undo();
+        Check(Game.Instance.World.GetAllObjects(true).Where(o => !o.IsDestroyed).SequenceEqual(new[] { ar.Current, middle, br.Current }));
+        Check(Selection.Objects.SequenceEqual(new[] { br.Current, ar.Current }));
+        Check(ar.Current.Name == aName && br.Current.Name == bName && !br.Current.IsActive);
+        Check(((CheckEntity)ar.Current).Values.Count == 2 && ar.Current.EditorGroups.Contains("group"));
+        Check(((CheckEntity)ar.Current).Outputs[0].TargetName == bName);
+        UndoRedo.Undo(); Check(ar.Current.Transform.Scale == Vector3.One && br.Current.Transform.Scale == Vector3.One && !UndoRedo.CanUndo);
+        UndoRedo.Redo(); Check(ar.Current.Transform.Scale == scale);
+        UndoRedo.Redo(); Check(ar.Current.IsDestroyed && br.Current.IsDestroyed);
+    }
+});
+
+RunScene("Multiple duplication is one action with independent data and stable redo names", () =>
+{
+    var a = (CheckEntity)SceneObjects.Create(PlaceableType.Entity, "Check");
+    var b = (BrushBox)SceneObjects.Create(PlaceableType.BrushBox);
+    a.Values = [1]; b.Size = new Vector3(2, 3, 4); b.EditorGroups.Add("group");
+    a.Outputs.Add(new OutputData { Event = "Test", TargetName = a.Name, Input = "SetActive", Parameter = "true" });
+    Selection.Set([a, b]); UndoRedo.Clear();
+    Check(Editor.CanDuplicateSelection);
+    var copies = SceneObjects.Duplicate(Selection.Objects);
+    Check(Selection.Objects.SequenceEqual(copies));
+    Check(((CheckEntity)copies[0]).Outputs[0].TargetName == copies[0].Name);
+    ((CheckEntity)copies[0]).Values.Add(2); Check(a.Values.Count == 1);
+    Check(((BrushBox)copies[1]).Size == b.Size && copies[1].EditorGroups.Contains("group"));
+    var refs = copies.Select(EditorObjectReference.Get).ToArray(); var names = copies.Select(o => o.Name).ToArray();
+    for (var cycle = 0; cycle < 3; cycle++)
+    {
+        UndoRedo.Undo(); Check(refs.All(r => r.Current.IsDestroyed) && Selection.Objects.SequenceEqual(new GameObject[] { a, b }) && !UndoRedo.CanUndo);
+        UndoRedo.Redo(); Check(Selection.Objects.SequenceEqual(refs.Select(r => r.Current)));
+        Check(refs.Select(r => r.Current.Name).SequenceEqual(names) && ((CheckEntity)refs[0].Current).Values.Count == 1);
+    }
+});
+
+RunScene("Failed batch duplication leaves no partial copies or history changes", () =>
+{
+    var a = SceneObjects.Create(PlaceableType.BrushBox);
+    var b = SceneObjects.Create(PlaceableType.Entity, "Rejecting");
+    Selection.Set([a, b]); UndoRedo.Clear();
+    var before = Game.Instance.World.GetAllObjects(true).Where(o => !o.IsDestroyed).ToArray();
+    RejectingEntity.RejectWrites = true;
+    try { Throws(() => SceneObjects.Duplicate(Selection.Objects)); }
+    finally { RejectingEntity.RejectWrites = false; }
+    Check(Game.Instance.World.GetAllObjects(true).Where(o => !o.IsDestroyed).SequenceEqual(before));
+    Check(Selection.Objects.SequenceEqual(new[] { a, b }) && !UndoRedo.CanUndo);
+});
+
+RunScene("Batch deletion remains undoable after callback errors and failed restoration can be retried", () =>
+{
+    var good = SceneObjects.Create(PlaceableType.BrushBox);
+    var rejecting = SceneObjects.Create(PlaceableType.Entity, "Rejecting");
+    Selection.Set([good, rejecting]); UndoRedo.Clear();
+    var refs = Selection.Objects.Select(EditorObjectReference.Get).ToArray();
+    SceneObjects.Delete(Selection.Objects);
+    RejectingEntity.RejectWrites = true;
+    try { Throws(UndoRedo.Undo); }
+    finally { RejectingEntity.RejectWrites = false; }
+    Check(Game.Instance.World.GetAllObjects(true).All(o => o.IsDestroyed) && UndoRedo.CanUndo);
+    UndoRedo.Undo();
+    Check(Selection.Objects.SequenceEqual(refs.Select(r => r.Current)) && refs.All(r => !r.Current.IsDestroyed));
+    var throwing = SceneObjects.Create(PlaceableType.Entity, "ThrowDestroy");
+    var plain = SceneObjects.Create(PlaceableType.BrushBox);
+    Selection.Set([throwing, plain]); UndoRedo.Clear();
+    var throwingRef = EditorObjectReference.Get(throwing);
+    ThrowingDeleteEntity.RejectDestroy = true;
+    try { Throws(() => SceneObjects.Delete(Selection.Objects)); }
+    finally { ThrowingDeleteEntity.RejectDestroy = false; }
+    Check(throwing.IsDestroyed && plain.IsDestroyed && UndoRedo.CanUndo);
+    UndoRedo.Undo(); Check(!throwingRef.Current.IsDestroyed && Selection.Objects.Length == 2);
+});
+
 if (args.Contains("--imgui"))
 {
     var context = ImGuiNET.ImGui.CreateContext();
@@ -1309,6 +1577,39 @@ if (args.Contains("--imgui"))
             draw();
             ImGuiNET.ImGui.Render();
         }
+        RunScene("Real Scene Ctrl-click toggles membership and multiple Inspector does not edit objects", () =>
+        {
+            var a = SceneObjects.Create(PlaceableType.BrushBox);
+            var b = SceneObjects.Create(PlaceableType.BrushBox);
+            Selection.Object = null;
+            var sizeField = typeof(Editor).GetField("_windowSize", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+            var previousSize = sizeField.GetValue(null);
+            sizeField.SetValue(null, new Vector2(1280, 768));
+            var drawScene = typeof(Editor).GetMethod("DrawHierarchy", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+            void Scene() => drawScene.Invoke(null, null);
+            try
+            {
+                Frame(Scene);
+                Frame(Scene, 30, 110);
+                Frame(Scene, 30, 110, true); Frame(Scene, 30, 110, false);
+                Check(Selection.Object == a && Selection.Objects.Length == 1);
+                io.AddKeyEvent(ImGuiNET.ImGuiKey.ModCtrl, true);
+                Frame(Scene, 30, 127);
+                Frame(Scene, 30, 127, true); Frame(Scene, 30, 127, false);
+                Check(Selection.Contains(a) && Selection.Contains(b) && Selection.Objects.Length == 2);
+                Frame(Inspector.Draw, 30, 110, true); Frame(Inspector.Draw, 80, 110, true); Frame(Inspector.Draw, 80, 110, false);
+                Check(a.Transform.Position == Vector3.Zero && b.Transform.Position == Vector3.Zero);
+                Frame(Scene); Frame(Scene, 30, 110);
+                Frame(Scene, 30, 110, true); Frame(Scene, 30, 110, false);
+                Check(Selection.Object == b && Selection.Objects.Length == 1);
+            }
+            finally
+            {
+                io.AddKeyEvent(ImGuiNET.ImGuiKey.ModCtrl, false);
+                Frame(Scene);
+                sizeField.SetValue(null, previousSize);
+            }
+        });
         Run("Real ImGui Inspector checkbox and a multi-frame numeric drag undo before the earlier transform", () =>
         {
             EditorLevelManager.NewLevel();

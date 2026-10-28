@@ -40,8 +40,8 @@ public static class Editor
     public static bool SceneHovered => InScene(Input.GetMousePosition());
     public static HashSet<string> HiddenEditorGroups { get; } = new(StringComparer.Ordinal);
     
-    public static bool CanDuplicateSelection => Selection.Object is { IsDestroyed: false } &&
-                                                Selection.Object is ProjectShockGL.Core.Geometry or ProjectShockGL.Core.Entity or ProjectShockGL.Core.BrushBox;
+    public static bool CanDuplicateSelection => Selection.Objects.Length > 0 && Selection.Objects.All(o =>
+        o is ProjectShockGL.Core.Geometry or ProjectShockGL.Core.Entity or ProjectShockGL.Core.BrushBox);
 
     public static void Initialize()
     {
@@ -159,7 +159,7 @@ public static class Editor
     {
         SceneGrid.Render(graphics);
         
-        if (Selection.Object is { IsDestroyed: false, IsEditorVisible: true } selected)
+        foreach (var selected in Selection.Objects.Where(o => o.IsEditorVisible))
         {
             var bounds = selected.GetLocalBounds();
             graphics.DrawBoxWireframe(bounds.min, bounds.max, selected.Transform.GetModelMatrix(), Color.White);
@@ -189,10 +189,12 @@ public static class Editor
         
         ImGui.SetNextWindowPos(new Vector2(0, 82 + (_windowSize.Y - 110) * 0.32f));
         ImGui.SetNextWindowSize(new Vector2(LeftWidth, (_windowSize.Y - 110) * 0.28f));
+        
         if (ImGui.Begin("Groups", PanelFlags))
         {
             SceneGroups.Draw(ProjectShockGL.Core.Game.Instance.World.GetAllObjects(true));
         }
+        
         ImGui.End();
 
         ImGui.SetNextWindowPos(new Vector2(0, 82 + (_windowSize.Y - 110) * 0.60f));
@@ -218,7 +220,7 @@ public static class Editor
 
         if (allowScene && !owned && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
-            ObjectPicker.PickAt(mouse, _windowSize);
+            ObjectPicker.PickAt(mouse, _windowSize, ImGui.GetIO().KeyCtrl || Input.IsKey(Key.ControlLeft) || Input.IsKey(Key.ControlRight));
         }
         
         _imGui.Render();
@@ -358,14 +360,15 @@ public static class Editor
         
         Execute(() =>
         {
-            var duplicate = SceneObjects.Duplicate(Selection.Object!);
-            _status = $"Duplicated: {duplicate.Name}";
+            var copies = SceneObjects.Duplicate(Selection.Objects);
+            _status = $"Duplicated: {copies.Length} object(s)";
         });
     }
 
     public static void DeleteSelection()
     {
-        if (Selection.Object is not { IsDestroyed: false } selected)
+        var selected = Selection.Objects;
+        if (selected.Length == 0)
         {
             return;
         }
@@ -373,7 +376,7 @@ public static class Editor
         Execute(() =>
         {
             SceneObjects.Delete(selected);
-            _status = "Object deleted";
+            _status = $"Deleted: {selected.Length} object(s)";
         });
     }
 
@@ -404,10 +407,11 @@ public static class Editor
                     label += " (hidden)";
                 }
                 
-                if (ImGui.Selectable(label, Selection.Object == obj))
+                if (ImGui.Selectable(label, Selection.Contains(obj)))
                 {
                     ObjectManipulator.Commit();
-                    Selection.Object = obj;
+                    if (ImGui.GetIO().KeyCtrl || Input.IsKey(Key.ControlLeft) || Input.IsKey(Key.ControlRight)) Selection.Toggle(obj);
+                    else Selection.Object = obj;
                 }
                 
                 ImGui.PopID();
@@ -474,12 +478,12 @@ public static class Editor
                 Execute(() => { UndoRedo.Redo(); EditorLevelManager.RefreshDirty(); });
             }
 
-            if (ImGui.MenuItem("Duplicate object", "Ctrl+D", false, CanDuplicateSelection && !ObjectManipulator.IsDragging))
+            if (ImGui.MenuItem("Duplicate object(s)", "Ctrl+D", false, CanDuplicateSelection && !ObjectManipulator.IsDragging))
             {
                 DuplicateSelection();
             }
 
-            if (ImGui.MenuItem("Delete object", "Delete", false, Selection.Object != null))
+            if (ImGui.MenuItem("Delete object(s)", "Delete", false, Selection.Objects.Length > 0))
             {
                 DeleteSelection();
             }

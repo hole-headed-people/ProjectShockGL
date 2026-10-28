@@ -14,6 +14,7 @@ public static class Inspector
     private static string _before = "";
     private static string _textureSearch = "";
 
+
     public static void Draw()
     {
         if (!ImGui.Begin("Inspector", ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize |
@@ -25,6 +26,16 @@ public static class Inspector
         }
 
         var obj = Selection.Object;
+        
+        if (Selection.Objects.Length > 1)
+        {
+            ImGui.TextUnformatted($"Selected objects: {Selection.Objects.Length}");
+            ImGui.TextWrapped("Multiple-object editing is not available. Use the scene gizmo to move, rotate or scale the selection.");
+            PrefabTools.DrawSave();
+            ImGui.End();
+            
+            return;
+        }
         
         if (obj == null || obj.IsDestroyed)
         {
@@ -479,6 +490,7 @@ public static class Inspector
         
         ImGui.Separator();
 
+        PrefabTools.DrawSave();
         ImGui.PopID();
         ImGui.End();
     }
@@ -505,6 +517,7 @@ public static class Inspector
         }
     }
 }
+
 
 
 

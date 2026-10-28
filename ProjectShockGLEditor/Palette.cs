@@ -1,3 +1,4 @@
+using System.Numerics;
 using ImGuiNET;
 using ProjectShockGL;
 using ProjectShockGL.Core;
@@ -6,7 +7,7 @@ namespace ProjectShockGLEditor;
 
 public static class Palette
 {
-    private static bool _isGeometryTab = true;
+    private static string _tab = "Geometry";
     
     private static string _selected = "";
     private static string _search = "";
@@ -14,6 +15,12 @@ public static class Palette
     private static string[] _items = [];
     private static string _currentType = "";
 
+    private static string[] ReadItems() => _tab switch
+    {
+        "Geometry" => Content.GetAllGeometryNames(),
+        "Entity" => Content.GetAllEntityNames(),
+        _ => Content.GetAllPrefabNames()
+    };
     public static void Draw()
     {
         if (!ImGui.Begin("Palette", ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize |
@@ -26,7 +33,7 @@ public static class Palette
         
         if (ImGui.Button("Geometry"))
         {
-            _isGeometryTab = true;
+            _tab = "Geometry";
             _selected = "";
             _items = [];
             _currentType = "";
@@ -36,12 +43,19 @@ public static class Palette
 
         if (ImGui.Button("Entity"))
         {
-            _isGeometryTab = false;
+            _tab = "Entity";
             _selected = "";
             _items = [];
             _currentType = "";
         }
 
+        ImGui.SameLine();
+        if (ImGui.Button("Prefab"))
+        {
+            _tab = "Prefab";
+            _currentType = "";
+            _selected = "";
+        }
         ImGui.Separator();
         if (ImGui.Button("Create BrushBox"))
         {
@@ -54,13 +68,11 @@ public static class Palette
 
         ImGui.Separator();
         
-        var expectedType = _isGeometryTab ? "Geometry" : "Entity";
+        var expectedType = _tab;
 
         if (_currentType != expectedType)
         {
-            _items = _isGeometryTab
-                ? Content.GetAllGeometryNames()
-                : Content.GetAllEntityNames();
+            _items = ReadItems();
             
             _currentType = expectedType;
             _selected = "";
@@ -70,11 +82,14 @@ public static class Palette
         ImGui.InputTextWithHint("##search", "Search assets...", ref _search, 256);
         if (ImGui.Button("Refresh"))
         {
-            _items = _isGeometryTab ? Content.GetAllGeometryNames() : Content.GetAllEntityNames();
+            _items = ReadItems();
             if (!_items.Contains(_selected)) _selected = "";
         }
+        
         ImGui.BeginChild("##assets", new System.Numerics.Vector2(0, Math.Max(80, ImGui.GetContentRegionAvail().Y - 65)));
+        
         AssetFolders.Draw(_items, _search, path => path == _selected, path => _selected = path);
+        
         ImGui.EndChild();
         ImGui.Separator();
         
@@ -90,7 +105,13 @@ public static class Palette
             Editor.Execute(() =>
             {
                 var name = _selected;
-                var obj = SceneObjects.Create(_isGeometryTab ? PlaceableType.Geometry : PlaceableType.Entity, name);
+                if (_tab == "Prefab")
+                {
+                    var objects = SceneObjects.CreatePrefabSet(name, Vector3.Zero);
+                    Editor.Report($"Created prefab: {name} ({objects.Length} objects)");
+                    return;
+                }
+                var obj = SceneObjects.Create(_tab == "Geometry" ? PlaceableType.Geometry : PlaceableType.Entity, name);
                 Editor.Report($"Created: {obj.Name}");
             });
         }
@@ -103,4 +124,5 @@ public static class Palette
         ImGui.End();
     }
 }
+
 
