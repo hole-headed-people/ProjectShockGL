@@ -5,7 +5,7 @@ using Object = ProjectShockGL.Core.Object;
 
 namespace ProjectShockGLEditor;
 
-public enum ManipulationMode { Move, Rotate, Scale }
+public enum ManipulationMode { Move, Rotate, Scale, Resize }
 
 public static class ObjectManipulator
 {
@@ -28,7 +28,7 @@ public static class ObjectManipulator
     public static bool SnapEnabled { get; set; }
     public static float RotationStep { get; set; } = 15;
     public static float ScaleStep { get; set; } = 0.1f;
-    public static bool IsDragging => _target != null;
+    public static bool IsDragging => _target != null || BrushResizer.IsDragging;
 
     private static (EditorObjectReference Reference, TransformState State)[] _members = [];
     private static readonly ProjectShockGL.Core.Transform GroupTransform = new();
@@ -39,6 +39,7 @@ public static class ObjectManipulator
 
     public static void Cancel()
     {
+        BrushResizer.Cancel();
         foreach (var member in _members)
             if (!member.Reference.Current.IsDestroyed) member.State.Apply(member.Reference.Current.Transform);
         _target = null;
@@ -48,6 +49,7 @@ public static class ObjectManipulator
 
     public static void Commit()
     {
+        BrushResizer.Commit();
         if (_target == null) return;
         var members = _members;
         var before = members.Select(m => m.State).ToArray();
@@ -64,6 +66,11 @@ public static class ObjectManipulator
     }
     public static bool Draw(Vector2 screenSize, Vector2 sceneMin, Vector2 sceneMax, bool allowInput)
     {
+        if (Mode == ManipulationMode.Resize)
+        {
+            return BrushResizer.Draw(screenSize, sceneMin, sceneMax, allowInput);
+        }
+        
         if (_target != null && (!Selection.Contains(_target) ||
             _members.Any(m => m.Reference.Current.IsDestroyed || !m.Reference.Current.IsEditorVisible)))
         {
@@ -87,6 +94,7 @@ public static class ObjectManipulator
         if (IsDragging && !ImGui.IsMouseDown(ImGuiMouseButton.Left))
         {
             Commit();
+            
             return true;
         }
 

@@ -1556,6 +1556,74 @@ RunScene("Batch deletion remains undoable after callback errors and failed resto
     UndoRedo.Undo(); Check(!throwingRef.Current.IsDestroyed && Selection.Objects.Length == 2);
 });
 
+RunScene("Brush resize keeps opposite faces fixed under rotation and signed nonuniform scale", () =>
+{
+    var brush = (BrushBox)SceneObjects.Create(PlaceableType.BrushBox);
+    Selection.Object = brush;
+    var screen = new Vector2(1280, 768);
+    var center = new Vector3(1, 2, 0);
+    var eye = center + new Vector3(8, 7, 10);
+    var forward = Vector3.Normalize(center - eye);
+    var vp = Matrix4x4.CreateLookAt(eye, center, Vector3.UnitY) * Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 3, screen.X / screen.Y, .1f, 100);
+    var axes = new[] { Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ };
+    foreach (var scale in new[] { Vector3.One, new Vector3(2, .5f, 3), new Vector3(-2, 1, .75f) })
+    foreach (var rotation in new[] { Quaternion.Identity, Quaternion.CreateFromYawPitchRoll(.6f, .3f, .2f) })
+    for (var face = 0; face < 6; face++)
+    {
+        brush.Size = new Vector3(4, 3, 2); brush.Transform.Position = center;
+        brush.Transform.Scale = scale; brush.Transform.Rotation = rotation;
+        var initial = TransformState.Capture(brush.Transform); var initialSize = brush.Size;
+        var index = face / 2; var sign = face % 2 == 0 ? -1 : 1;
+        var local = axes[index] * initialSize[index] * .5f * sign;
+        var moving = brush.Transform.TransformPoint(local);
+        var fixedPoint = brush.Transform.TransformPoint(-local);
+        var outward = Vector3.Transform(axes[index] * sign * MathF.Sign(scale[index]), rotation);
+        Check(GizmoMath.Project(moving, vp, screen, out var start));
+        Check(GizmoMath.Project(moving + outward * 1.3f, vp, screen, out var end));
+        Check(BrushResizer.BeginDrag(brush, face, start, forward, vp, screen));
+        BrushResizer.ApplyDrag(end, vp, screen, false);
+        Check(Math.Abs(brush.Size[index] - (initialSize[index] + 1.3f / Math.Abs(scale[index]))) < .002f);
+        Check(Vector3.Distance(brush.Transform.TransformPoint(-axes[index] * brush.Size[index] * .5f * sign), fixedPoint) < .002f);
+        Check(brush.Transform.Scale == scale && brush.Transform.Rotation == rotation);
+        ObjectManipulator.Cancel();
+        Check(brush.Size == initialSize && TransformState.Capture(brush.Transform) == initial);
+    }
+});
+
+RunScene("Resize snap, minimum size and combined size-position history survive restored objects", () =>
+{
+    var brush = (BrushBox)SceneObjects.Create(PlaceableType.BrushBox);
+    brush.Size = new Vector3(2); brush.Transform.Scale = new Vector3(2, 1, 1);
+    Selection.Object = brush; UndoRedo.Clear();
+    var reference = EditorObjectReference.Get(brush);
+    var screen = new Vector2(1280, 768); var eye = new Vector3(5, 4, 6); var forward = Vector3.Normalize(-eye);
+    var vp = Matrix4x4.CreateLookAt(eye, Vector3.Zero, Vector3.UnitY) * Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 3, screen.X / screen.Y, .1f, 100);
+    var previousStep = SceneGrid.Step;
+    try
+    {
+        SceneGrid.Step = 1;
+        GizmoMath.Project(new Vector3(2, 0, 0), vp, screen, out var start);
+        GizmoMath.Project(new Vector3(2.73f, 0, 0), vp, screen, out var end);
+        Check(BrushResizer.BeginDrag(brush, 1, start, forward, vp, screen));
+        BrushResizer.ApplyDrag(end, vp, screen, true); ObjectManipulator.Commit();
+        Check(Math.Abs(brush.Size.X - 2.5f) < .001f && Math.Abs(brush.Transform.Position.X - .5f) < .001f);
+        UndoRedo.Undo(); Check(brush.Size.X == 2 && brush.Transform.Position == Vector3.Zero && !UndoRedo.CanUndo);
+        UndoRedo.Redo();
+        var size = brush.Size; var position = brush.Transform.Position;
+        SceneObjects.Delete(brush); UndoRedo.Undo(); UndoRedo.Undo();
+        var restored = (BrushBox)reference.Current;
+        Check(restored.Size.X == 2 && restored.Transform.Position == Vector3.Zero);
+        UndoRedo.Redo(); Check(restored.Size == size && restored.Transform.Position == position);
+        GizmoMath.Project(restored.Transform.TransformPoint(Vector3.UnitX * restored.Size.X * .5f), vp, screen, out start);
+        GizmoMath.Project(new Vector3(-10, 0, 0), vp, screen, out end);
+        Check(BrushResizer.BeginDrag(restored, 1, start, forward, vp, screen));
+        BrushResizer.ApplyDrag(end, vp, screen, false);
+        Check(restored.Size.X == .01f && Math.Abs(restored.Transform.Position.X - restored.Size.X + 2) < .002f);
+        ObjectManipulator.Cancel();
+    }
+    finally { SceneGrid.Step = previousStep; ObjectManipulator.Cancel(); }
+});
+
 if (args.Contains("--imgui"))
 {
     var context = ImGuiNET.ImGui.CreateContext();

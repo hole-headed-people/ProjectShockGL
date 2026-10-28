@@ -108,7 +108,7 @@ public static class Editor
                     DuplicateSelection();
                 }
             }
-            else if (SceneHovered && !Input.IsMouseButton(MouseButton.Right))
+            else if (SceneHovered && !Input.IsMouseButton(MouseButton.Right) && !ObjectManipulator.IsDragging)
             {
                 if (Input.IsKeyDown(Key.G))
                 {
@@ -124,6 +124,7 @@ public static class Editor
                 {
                     ObjectManipulator.Mode = ManipulationMode.Scale;
                 }
+                if (Input.IsKeyDown(Key.B)) ObjectManipulator.Mode = ManipulationMode.Resize;
 
                 if (Input.IsKeyDown(Key.Delete))
                 {
@@ -530,7 +531,7 @@ public static class Editor
                     ImGui.SameLine();
                 }
                 
-                var hotkey = mode == ManipulationMode.Move ? "G" : mode == ManipulationMode.Rotate ? "R" : "T";
+                var hotkey = mode switch { ManipulationMode.Move => "G", ManipulationMode.Rotate => "R", ManipulationMode.Scale => "T", _ => "B" };
 
                 if (ImGui.RadioButton($"{mode} ({hotkey})", ObjectManipulator.Mode == mode))
                 {
