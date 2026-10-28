@@ -386,6 +386,22 @@ public class Renderer : IDisposable
         DrawMeshInternal(_quadMesh, texture, model, color, lit, ignoreDepth, uvRect, shader, shaderParameters);
     }
 
+    internal void DrawLineMesh(Texture texture, Matrix4x4 model, Color color, bool lit = false,
+        bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
+    {
+        var cullFace = _gl.IsEnabled(EnableCap.CullFace);
+        try
+        {
+            _gl.Disable(EnableCap.CullFace);
+            DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters);
+        }
+        finally
+        {
+            if (cullFace) _gl.Enable(EnableCap.CullFace);
+            else _gl.Disable(EnableCap.CullFace);
+        }
+    }
+
     public void DrawMesh(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit = false, bool ignoreDepth = false,
         ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
     {

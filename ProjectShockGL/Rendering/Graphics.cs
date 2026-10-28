@@ -75,7 +75,7 @@ public class Graphics
             center.X,            center.Y,            center.Z,            1f
         );
 
-        Renderer.DrawQuadMesh(texture, model, color, ignoreDepth: ignoreDepth);
+        Renderer.DrawLineMesh(texture, model, color, ignoreDepth: ignoreDepth);
     }
     
     public void DrawLine(Vector3 from, Vector3 to, Texture texture, Color color, float thickness = 0.05f, bool lit = false,
@@ -108,7 +108,7 @@ public class Graphics
             center.X,            center.Y,            center.Z,            1f
         );
 
-        Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters);
+        Renderer.DrawLineMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters);
     }
     
     public void DrawBoxWireframe(
