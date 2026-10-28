@@ -139,10 +139,7 @@ public class Renderer : IDisposable
             _gl.Enable(EnableCap.DepthTest);
             _gl.DepthFunc(DepthFunction.Less);
 
-            if (!Application.IsDebug)
-            {
-                _gl.Enable(EnableCap.CullFace);
-            }
+            _gl.Enable(EnableCap.CullFace);
 
             _gl.CullFace(TriangleFace.Back);
             _gl.FrontFace(FrontFaceDirection.Ccw);

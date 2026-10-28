@@ -71,7 +71,7 @@ public class Game
 
     protected virtual void Update(float deltaSeconds)
     {
-        var gameDeltaSeconds = deltaSeconds * Time.DeltaSeconds;
+        var gameDeltaSeconds = deltaSeconds * Time.TimeScale;
         
         World.Update(gameDeltaSeconds, !Application.IsEditor, deltaSeconds);
         

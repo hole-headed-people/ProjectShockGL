@@ -55,13 +55,48 @@ using (var timer = new Timer())
     catch (ArgumentOutOfRangeException) { Check(timer.RemainingSeconds == 3 && timer.IsRunning()); }
 }
 var advance = typeof(Application).GetMethod("AdvanceTime", BindingFlags.NonPublic | BindingFlags.Static)!;
-var start = Application.Time; var rawStart = Application.UnscaledTime;
-Application.TimeScale = .5f; advance.Invoke(null, [2d]);
-Check(Application.Time == start + 1 && Application.UnscaledTime == rawStart + 2);
-Check(Application.DeltaTime == 1 && Application.UnscaledDeltaTime == 2);
-Application.TimeScale = 0; advance.Invoke(null, [1d]);
-Check(Application.Time == start + 1 && Application.UnscaledTime == rawStart + 3 && Application.DeltaTime == 0);
-try { Application.TimeScale = -1; throw new Exception("Negative scale accepted"); }
+var start = Time.ElapsedTime; var rawStart = Time.UnscaledElapsedTime;
+Time.TimeScale = .5f; advance.Invoke(null, [2d]);
+Check(Time.ElapsedTime == start + 1 && Time.UnscaledElapsedTime == rawStart + 2);
+Check(Time.DeltaSeconds == 1 && Time.UnscaledDeltaSeconds == 2);
+Time.TimeScale = 0; advance.Invoke(null, [1d]);
+Check(Time.ElapsedTime == start + 1 && Time.UnscaledElapsedTime == rawStart + 3 && Time.DeltaSeconds == 0);
+try { Time.TimeScale = -1; throw new Exception("Negative scale accepted"); }
 catch (ArgumentOutOfRangeException) { checks++; }
-Application.TimeScale = 1;
+Time.TimeScale = 1;
+foreach (var fps in new[] { 30, 120 })
+foreach (var scale in new[] { 1f, .5f, 0f })
+{
+    var game = new StepGame();
+    var world = new World();
+    typeof(ProjectShockGL.Core.Game).GetProperty("World")!.SetValue(game, world);
+    var ui = new ProjectShockGL.UI.UIManager();
+    typeof(ProjectShockGL.UI.UIManager).GetField("_isDestroyed", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(ui, true);
+    typeof(ProjectShockGL.Core.Game).GetProperty("UIManager")!.SetValue(game, ui);
+    typeof(ProjectShockGL.Core.Game).GetField("_timerManager", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(game, manager);
+    var probe = world.Spawn<StepProbe>();
+    using var scaledTimer = new Timer();
+    using var rawTimer = new Timer(true);
+    scaledTimer.Run(10); rawTimer.Run(10);
+    Time.TimeScale = scale;
+    // A stale global delta must not alter the step passed into Game.Update.
+    Time.DeltaSeconds = .123f;
+    for (var frame = 0; frame < fps; frame++) game.Step(1f / fps);
+    Check(Math.Abs(probe.Elapsed - scale) < .0001f);
+    Check(Math.Abs(scaledTimer.RemainingSeconds - (10 - scale)) < .0002f);
+    Check(Math.Abs(rawTimer.RemainingSeconds - 9) < .0002f);
+    world.Clear();
+}
+Time.TimeScale = 1;
 Console.WriteLine($"PASS: {checks} timer/time checks");
+
+
+public sealed class StepGame : ProjectShockGL.Core.Game
+{
+    public void Step(float delta) => base.Update(delta);
+}
+public sealed class StepProbe : ProjectShockGL.Core.Object
+{
+    public float Elapsed;
+    public override void Update(float delta) { base.Update(delta); Elapsed += delta; }
+}
