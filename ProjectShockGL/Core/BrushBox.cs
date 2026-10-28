@@ -6,6 +6,11 @@ namespace ProjectShockGL.Core;
 public class BrushBox : Object
 {
     private Vector3 _size = Vector3.One;
+    public bool Movable
+    {
+        get => !IsStatic;
+        set => ConfigureStatic(!value);
+    }
     
     private float _textureScale = 1;
     

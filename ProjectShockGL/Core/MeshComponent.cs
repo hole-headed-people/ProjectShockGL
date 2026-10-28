@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using ProjectShockGL.Rendering;
 
 namespace ProjectShockGL.Core;
@@ -25,6 +25,8 @@ public class MeshComponent : RenderComponent
             Rotation = Parent.Transform.Rotation,
             Scale = UseParentScale ? Parent.Transform.Scale * Scale : new Vector3(Scale),
             Texture = Texture,
+            Shader = Shader,
+            ShaderParameters = Shader == null ? null : ShaderParameters.Snapshot(),
             Lit = Lit,
             IgnoreDepth = IgnoreDepth,
             RenderOrder = RenderOrder

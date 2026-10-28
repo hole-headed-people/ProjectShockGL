@@ -3,7 +3,6 @@ using ImGuiNET;
 using NativeFileDialogNET;
 using ProjectShockGL;
 using ProjectShockGL.Rendering;
-using Silk.NET.Core;
 using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.OpenGL;
@@ -39,6 +38,7 @@ public static class Editor
     private static float LeftWidth => MathF.Min(230, _windowSize.X * 0.23f);
     private static float RightWidth => MathF.Min(320, _windowSize.X * 0.28f);
     public static bool SceneHovered => InScene(Input.GetMousePosition());
+    public static HashSet<string> HiddenEditorGroups { get; } = new(StringComparer.Ordinal);
     
     public static bool CanDuplicateSelection => Selection.Object is { IsDestroyed: false } &&
                                                 Selection.Object is ProjectShockGL.Core.Geometry or ProjectShockGL.Core.Entity or ProjectShockGL.Core.BrushBox;
@@ -50,7 +50,7 @@ public static class Editor
         Application.Load += SceneCamera.Initialize;
         Application.Update += OnUpdate;
         Application.BeforeRender += OnBeforeRender;
-        Application.Render += OnRender;
+        Application.RenderOverlay += OnRender;
         Application.AfterRender += OnAfterRender;
         Application.Resized += OnResized;
         Application.Unload += OnUnload;
@@ -96,12 +96,12 @@ public static class Editor
 
                 if (Input.IsKeyDown(Key.Z))
                 {
-                    UndoRedo.Undo();
+                    Execute(() => { UndoRedo.Undo(); EditorLevelManager.RefreshDirty(); });
                 }
 
                 if (Input.IsKeyDown(Key.Y))
                 {
-                    UndoRedo.Redo();
+                    Execute(() => { UndoRedo.Redo(); EditorLevelManager.RefreshDirty(); });
                 }
                 if (Input.IsKeyDown(Key.D) && _pendingAction == null && _error == null)
                 {
@@ -159,7 +159,7 @@ public static class Editor
     {
         SceneGrid.Render(graphics);
         
-        if (Selection.Object is { IsDestroyed: false } selected)
+        if (Selection.Object is { IsDestroyed: false, IsEditorVisible: true } selected)
         {
             var bounds = selected.GetWorldBounds();
             graphics.DrawBoxWireframe(bounds.min, bounds.max, Color.White);
@@ -186,8 +186,16 @@ public static class Editor
         DrawToolbar();
         DrawHierarchy();
         
-        ImGui.SetNextWindowPos(new Vector2(0, 82 + (_windowSize.Y - 110) * 0.48f));
-        ImGui.SetNextWindowSize(new Vector2(LeftWidth, (_windowSize.Y - 110) * 0.52f));
+        ImGui.SetNextWindowPos(new Vector2(0, 82 + (_windowSize.Y - 110) * 0.32f));
+        ImGui.SetNextWindowSize(new Vector2(LeftWidth, (_windowSize.Y - 110) * 0.28f));
+        if (ImGui.Begin("Groups", PanelFlags))
+        {
+            SceneGroups.Draw(ProjectShockGL.Core.Game.Instance.World.GetAllObjects(true));
+        }
+        ImGui.End();
+
+        ImGui.SetNextWindowPos(new Vector2(0, 82 + (_windowSize.Y - 110) * 0.60f));
+        ImGui.SetNextWindowSize(new Vector2(LeftWidth, (_windowSize.Y - 110) * 0.40f));
         
         Palette.Draw();
         
@@ -278,7 +286,12 @@ public static class Editor
         {
             ObjectManipulator.Commit();
             EditorLevelManager.RefreshDirty();
-            if (!EditorLevelManager.IsDirty) { action(); return; }
+            
+            if (!EditorLevelManager.IsDirty)
+            {
+                action(); return;
+            }
+            
             _pendingAction = action;
             _requestUnsavedPopup = true;
         });
@@ -344,14 +357,7 @@ public static class Editor
         
         Execute(() =>
         {
-            ObjectManipulator.Commit();
-            
-            var duplicate = EditorLevelManager.DuplicateObject(Selection.Object!);
-            
-            Selection.Object = duplicate;
-            UndoRedo.Clear();
-            EditorLevelManager.RefreshDirty();
-            
+            var duplicate = SceneObjects.Duplicate(Selection.Object!);
             _status = $"Duplicated: {duplicate.Name}";
         });
     }
@@ -363,19 +369,17 @@ public static class Editor
             return;
         }
         
-        ObjectManipulator.Cancel();
-        ProjectShockGL.Core.Game.Instance.World.Destroy(selected);
-        
-        Selection.Object = null;
-        UndoRedo.Clear();
-        
-        _status = "Object deleted";
+        Execute(() =>
+        {
+            SceneObjects.Delete(selected);
+            _status = "Object deleted";
+        });
     }
 
     private static void DrawHierarchy()
     {
         ImGui.SetNextWindowPos(new Vector2(0, 82));
-        ImGui.SetNextWindowSize(new Vector2(LeftWidth, (_windowSize.Y - 110) * 0.48f));
+        ImGui.SetNextWindowSize(new Vector2(LeftWidth, (_windowSize.Y - 110) * 0.32f));
         
         if (ImGui.Begin("Scene", PanelFlags))
         {
@@ -392,6 +396,11 @@ public static class Editor
                 if (!obj.IsActive)
                 {
                     label += " (inactive)";
+                }
+
+                if (!obj.IsEditorVisible)
+                {
+                    label += " (hidden)";
                 }
                 
                 if (ImGui.Selectable(label, Selection.Object == obj))
@@ -454,14 +463,14 @@ public static class Editor
         }
         if (ImGui.BeginMenu("Edit"))
         {
-            if (ImGui.MenuItem("Undo transform", "Ctrl+Z", false, UndoRedo.CanUndo))
+            if (ImGui.MenuItem("Undo", "Ctrl+Z", false, UndoRedo.CanUndo))
             {
-                UndoRedo.Undo();
+                Execute(() => { UndoRedo.Undo(); EditorLevelManager.RefreshDirty(); });
             }
 
-            if (ImGui.MenuItem("Redo transform", "Ctrl+Y", false, UndoRedo.CanRedo))
+            if (ImGui.MenuItem("Redo", "Ctrl+Y", false, UndoRedo.CanRedo))
             {
-                UndoRedo.Redo();
+                Execute(() => { UndoRedo.Redo(); EditorLevelManager.RefreshDirty(); });
             }
 
             if (ImGui.MenuItem("Duplicate object", "Ctrl+D", false, CanDuplicateSelection && !ObjectManipulator.IsDragging))
@@ -483,6 +492,9 @@ public static class Editor
         }
         if (ImGui.BeginMenu("View"))
         {
+            if (ImGui.MenuItem("Post processing", "", PostProcessSettings.Enabled))
+                PostProcessSettings.Enabled = !PostProcessSettings.Enabled;
+
             var grid = SceneGrid.Show;
 
             if (ImGui.MenuItem("Grid", "", grid))

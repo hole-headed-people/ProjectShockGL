@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using ProjectShockGL.Rendering;
 
 namespace ProjectShockGL.Core;
@@ -19,6 +19,8 @@ public class BillboardComponent : RenderComponent
             Texture = Texture,
             Size = UseParentScale ? new Vector2(parentScale.X, parentScale.Y) * Scale : new Vector2(Scale),
             Position = Parent.Transform.Position + Offset,
+            Shader = Shader,
+            ShaderParameters = Shader == null ? null : ShaderParameters.Snapshot(),
             Lit = Lit,
             IgnoreDepth = IgnoreDepth,
             RenderOrder = RenderOrder

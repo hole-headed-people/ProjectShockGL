@@ -1,0 +1,40 @@
+using System.Numerics;
+using ProjectShockGL;
+using ProjectShockGL.Core;
+using ProjectShockGL.Placeables;
+using ProjectShockGL.Tools;
+var count = 0;
+void Check(bool ok) { if (!ok) throw new Exception($"Check {count+1} failed"); count++; }
+Check(MathHelper.MoveTowards(Vector3.Zero,new Vector3(10,0,0),2) == new Vector3(2,0,0));
+Check(MathHelper.MoveTowards(Vector3.Zero,Vector3.One,10) == Vector3.One);
+Check(MathHelper.MoveTowards(Vector3.One,Vector3.One,0) == Vector3.One);
+var world = new World(); var game = new Game();
+typeof(Game).GetProperty("Instance")!.SetValue(null,game);
+typeof(Game).GetProperty("World")!.SetValue(game,world);
+try {
+ var target = world.Spawn<Entity>(); target.Name = "target";
+ var mover = world.Spawn<InterpMovement>(); mover.TargetName = "target";
+ mover.Speed = 2; mover.Position = new Vector3(4,0,0); mover.SnapDistance = 0;
+ world.Update(0); mover.Move(); world.Update(.5f);
+ Check(target.Transform.Position == new Vector3(1,0,0));
+ world.Update(.5f); Check(target.Transform.Position == new Vector3(2,0,0));
+ mover.Stop(); world.Update(1); Check(target.Transform.Position.X == 2);
+ mover.Move(); world.Update(.5f); Check(target.Transform.Position.X == 3);
+ world.Update(10); Check(target.Transform.Position == mover.Position);
+ world.Update(1); Check(target.Transform.Position == mover.Position);
+ mover.Move(true); world.Update(2); Check(target.Transform.Position == Vector3.Zero);
+ mover.Position = new Vector3(2,0,0); mover.IsLoop = true; mover.Move();
+ world.Update(1); Check(target.Transform.Position.X == 2);
+ world.Update(1); Check(target.Transform.Position == Vector3.Zero);
+ world.Clear();
+ var brush = world.Spawn<BrushBox>(); brush.Name = "brush";
+ var brushMover = world.Spawn<InterpMovement>(); brushMover.TargetName = "brush";
+ brushMover.Speed = 2; brushMover.Position = new Vector3(2,0,0);
+ world.Update(0); brushMover.Move(); world.Update(1);
+ Check(brush.IsStatic && !brush.Movable && brush.Transform.Position == Vector3.Zero);
+ brush.Movable = true; brushMover.Move(); world.Update(1);
+ Check(!brush.IsStatic && brush.Transform.Position.X == 2);
+ brush.Movable = false; brushMover.Move(true); world.Update(1);
+ Check(brush.Transform.Position.X == 2);
+} finally { world.Clear(); }
+Console.WriteLine($"PASS: {count} movement checks");

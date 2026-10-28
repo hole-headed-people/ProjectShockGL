@@ -7,6 +7,8 @@ namespace ProjectDungeon.Game;
 
 public class ShockPlayer : Player
 {
+    private const float MouseSensitivity = 0.05f;
+    
     protected override void OnGameInput()
     {
         base.OnGameInput();
@@ -46,10 +48,7 @@ public class ShockPlayer : Player
 
         if (Input.IsKeyDown(Key.F))
         {
-            //if (Physics.Raycast(_camera.Transform.Position, _camera.Transform.Forward, 2f, Layers.Get("Default"), out var hit))
-            //{
-            //    Console.Write($"{hit.Object} Hit!");
-            //}
+            character.Interact();
         }
         
         character.Move(new Vector3(horizontalAxis, 0f, verticalAxis));
@@ -57,7 +56,7 @@ public class ShockPlayer : Player
         var lookVector = Input.MouseDeltaPosition;
         lookVector.X *= -1f;
         
-        character.Turn(lookVector.X);
-        character.LookAt(lookVector.Y);
+        character.Turn(lookVector.X * MouseSensitivity);
+        character.LookAt(lookVector.Y * MouseSensitivity);
     }
 }

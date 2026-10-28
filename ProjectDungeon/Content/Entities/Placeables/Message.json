@@ -1,5 +1,5 @@
 ﻿{
-  "Class": "ProjectDungeon.Placeables.Message, ProjectDungeon",
+  "Class": "ProjectShockGL.Placeables.Message, ProjectShockGL",
   "Parameters": {
     "DebugBillboard": "Editor/Message"
   }

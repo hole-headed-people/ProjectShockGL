@@ -54,14 +54,27 @@ public class Renderer : IDisposable
     private readonly int _litPointLightConeCosines;
 
     private readonly Mesh _quadMesh;
+    
     private Matrix4x4 _frameProjection;
     private Matrix4x4 _frameView;
+    
     private bool _isUI;
     private bool _uiCullFace;
     private bool _uiDepthTest;
+    
     private readonly RenderPreviewSettings? _preview;
+    
     private bool _frameFogEnabled;
     private bool _frameForceUnlit;
+    
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+    
+    private Camera _frameCamera = null!;
+    
+    private float _frameTime;
+    private bool _frameEnvironmentEnabled;
+    
+    private PostProcessor? _postProcessor;
 
     public Renderer(GL gl, int screenWidth, int screenHeight, RenderPreviewSettings? preview = null)
     {
@@ -148,7 +161,12 @@ public class Renderer : IDisposable
 
     public void BeginFrame(Camera camera)
     {
+        _frameCamera = camera;
+        _frameTime = (float)_clock.Elapsed.TotalSeconds;
+        
         var environmentEnabled = _preview?.EnvironmentEnabled ?? true;
+        
+        _frameEnvironmentEnabled = environmentEnabled;
 
         _frameFogEnabled = environmentEnabled && Environment.IsFogEnabled;
         _frameForceUnlit = _preview?.Unlit ?? false;
@@ -189,7 +207,7 @@ public class Renderer : IDisposable
 
         _gl.Uniform1(_litTexture, 0);
 
-        if (Light.Main is { IsActive: true, IsDestroyed: false })
+        if (Light.Main is { IsActive: true, IsDestroyed: false, IsEditorVisible: true })
         {
             var mainLightDirection = Light.Main.Transform.Forward;
 
@@ -206,6 +224,7 @@ public class Renderer : IDisposable
         }
 
         var ambient = environmentEnabled ? Environment.AmbientColor : Color.White;
+        
         _gl.Uniform3(_litAmbientColor, ambient.R, ambient.G, ambient.B);
 
         _gl.Uniform3(_litCameraPos, camera.Transform.Position.X, camera.Transform.Position.Y, camera.Transform.Position.Z);
@@ -223,7 +242,7 @@ public class Renderer : IDisposable
         var directions = new float[maxPointLights * 3];
         var coneCosines = new float[maxPointLights * 2];
 
-        var activeLights = Light.All.Where(light => light.IsActive && !light.IsDestroyed).Take(maxPointLights).ToArray();
+        var activeLights = Light.All.Where(light => light.IsActive && !light.IsDestroyed && light.IsEditorVisible).Take(maxPointLights).ToArray();
         var count = activeLights.Length;
 
         for (var i = 0; i < count; i++)
@@ -245,7 +264,7 @@ public class Renderer : IDisposable
             directions[i * 3 + 1] = direction.Y;
             directions[i * 3 + 2] = direction.Z;
             coneCosines[i * 2] = MathF.Cos(light.InnerAngle * MathF.PI / 360f);
-            // Values below -1 identify ordinary point lights; they have no angular attenuation.
+            
             coneCosines[i * 2 + 1] = light.Type == LightType.Spot
                 ? MathF.Cos(light.OuterAngle * MathF.PI / 360f) : -2f;
         }
@@ -275,6 +294,22 @@ public class Renderer : IDisposable
             fixed (float* c = coneCosines)
                 _gl.Uniform2(_litPointLightConeCosines, (uint)count, c);
         }
+    }
+
+    public void BeginWorld()
+    {
+        if (!PostProcessSettings.Enabled)
+        {
+            return;
+        }
+        
+        _postProcessor ??= new PostProcessor(_gl);
+        _postProcessor.Begin(_screenWidth, _screenHeight);
+    }
+
+    public void EndWorld()
+    {
+        _postProcessor?.End(_frameTime);
     }
 
     public void EndFrame()
@@ -346,18 +381,19 @@ public class Renderer : IDisposable
     }
 
     public void DrawQuadMesh(Texture texture, Matrix4x4 model, Color color, bool lit = false, bool ignoreDepth = false,
-        Vector4? uvRect = null)
+        Vector4? uvRect = null, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
     {
-        DrawMeshInternal(_quadMesh, texture, model, color, lit, ignoreDepth, uvRect);
+        DrawMeshInternal(_quadMesh, texture, model, color, lit, ignoreDepth, uvRect, shader, shaderParameters);
     }
 
-    public void DrawMesh(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit = false, bool ignoreDepth = false)
+    public void DrawMesh(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit = false, bool ignoreDepth = false,
+        ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
     {
-        DrawMeshInternal(mesh, texture, model, color, lit, ignoreDepth);
+        DrawMeshInternal(mesh, texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters);
     }
 
     private void DrawMeshInternal(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit,
-        bool ignoreDepth = false, Vector4? uvRect = null)
+        bool ignoreDepth = false, Vector4? uvRect = null, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
     {
         if (_frameForceUnlit)
         {
@@ -368,15 +404,23 @@ public class Renderer : IDisposable
         {
             lit = false;
             ignoreDepth = true;
+            shader = null;
         }
 
-        var program = lit ? _litProgram : _unlitProgram;
-        var modelLoc = lit ? _litModel : _unlitModel;
-        var colorLoc = lit ? _litColor : _unlitColor;
+        var program = shader?.Handle ?? (lit ? _litProgram : _unlitProgram);
+        var modelLoc = shader?.Location("uModel") ?? (lit ? _litModel : _unlitModel);
+        var colorLoc = shader?.Location("uColor") ?? (lit ? _litColor : _unlitColor);
 
         _gl.UseProgram(program);
+        
+        if (shader != null)
+        {
+            shader.Apply(shaderParameters);
+            
+            SetCustomFrameUniforms(shader, uvRect);
+        }
 
-        if (!lit)
+        if (!lit && shader == null)
         {
             var uv = uvRect ?? new Vector4(0, 0, 1, 1);
 
@@ -407,6 +451,55 @@ public class Renderer : IDisposable
         if (!_isUI)
         {
             _gl.Enable(EnableCap.DepthTest);
+        }
+    }
+
+    private void SetCustomFrameUniforms(ShaderProgram shader, Vector4? uvRect)
+    {
+        shader.Write("uProjection", _frameProjection);
+        shader.Write("uView", _frameView);
+        shader.Write("uTexture", 0);
+        shader.Write("uTime", _frameTime);
+        shader.Write("uUvRect", uvRect ?? new Vector4(0, 0, 1, 1));
+        shader.Write("uAlphaCutoff", 0.5f);
+        shader.Write("uCameraPos", _frameCamera.Transform.Position);
+        shader.Write("uFogColor", new Vector3(Environment.FogColor.R, Environment.FogColor.G, Environment.FogColor.B));
+        shader.Write("uFogNear", Environment.FogNear);
+        shader.Write("uFogFar", Environment.FogFar);
+        shader.Write("uFogEnabled", _frameFogEnabled ? 1 : 0);
+        shader.Write("uForceUnlit", _frameForceUnlit ? 1 : 0);
+        
+        var ambient = _frameEnvironmentEnabled ? Environment.AmbientColor : Color.White;
+        
+        shader.Write("uAmbientColor", new Vector3(ambient.R, ambient.G, ambient.B));
+        
+        var main = Light.Main;
+        var mainEnabled = main is { IsActive: true, IsDestroyed: false, IsEditorVisible: true };
+        
+        shader.Write("uMainLightEnabled", mainEnabled ? 1f : 0f);
+        shader.Write("uLightDirection", mainEnabled ? main!.Transform.Forward : Vector3.Zero);
+        shader.Write("uLightColor", mainEnabled ? new Vector3(main!.Color.R, main.Color.G, main.Color.B) : Vector3.Zero);
+        shader.Write("uLightIntensity", mainEnabled ? main!.Intensity : 0f);
+
+        if (shader.Location("uPointLightCount") < 0)
+        {
+            return;
+        }
+        
+        var lights = Light.All.Where(l => l.IsActive && !l.IsDestroyed && l.IsEditorVisible).Take(16).ToArray();
+        shader.Write("uPointLightCount", lights.Length);
+        
+        for (var i = 0; i < lights.Length; i++)
+        {
+            var light = lights[i];
+            
+            shader.Write($"uPointLightPositions[{i}]", light.Transform.Position);
+            shader.Write($"uPointLightColors[{i}]", new Vector3(light.Color.R, light.Color.G, light.Color.B));
+            shader.Write($"uPointLightIntensities[{i}]", light.Intensity);
+            shader.Write($"uPointLightRadii[{i}]", light.Radius);
+            shader.Write($"uPointLightDirections[{i}]", light.Transform.Forward);
+            shader.Write($"uPointLightConeCosines[{i}]", new Vector2(MathF.Cos(light.InnerAngle * MathF.PI / 360f),
+                light.Type == LightType.Spot ? MathF.Cos(light.OuterAngle * MathF.PI / 360f) : -2f));
         }
     }
 
@@ -443,6 +536,7 @@ public class Renderer : IDisposable
         catch
         {
             _gl.DeleteProgram(program);
+            
             throw;
         }
     }
@@ -460,7 +554,7 @@ public class Renderer : IDisposable
         
         _unlitProgram = _litProgram = 0;
         
-        Cleanup.Run(_quadMesh.Dispose,
+        Cleanup.Run(() => _postProcessor?.Dispose(), _quadMesh.Dispose,
             () =>
             {
                 if (unlit != 0)
@@ -477,3 +571,4 @@ public class Renderer : IDisposable
             });
     }
 }
+

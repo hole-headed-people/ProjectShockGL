@@ -1,4 +1,4 @@
-﻿using ImGuiNET;
+using ImGuiNET;
 using ProjectShockGL;
 using ProjectShockGL.Core;
 
@@ -8,7 +8,8 @@ public static class Palette
 {
     private static bool _isGeometryTab = true;
     
-    private static int _selectedIndex;
+    private static string _selected = "";
+    private static string _search = "";
     
     private static string[] _items = [];
     private static string _currentType = "";
@@ -26,7 +27,7 @@ public static class Palette
         if (ImGui.Button("Geometry"))
         {
             _isGeometryTab = true;
-            _selectedIndex = 0;
+            _selected = "";
             _items = [];
             _currentType = "";
         }
@@ -36,7 +37,7 @@ public static class Palette
         if (ImGui.Button("Entity"))
         {
             _isGeometryTab = false;
-            _selectedIndex = 0;
+            _selected = "";
             _items = [];
             _currentType = "";
         }
@@ -46,23 +47,7 @@ public static class Palette
         {
             Editor.Execute(() =>
             {
-                ObjectManipulator.Commit();
-                
-                var world = ProjectShockGL.Core.Game.Instance.World;
-                var names = world.GetAllObjects(true).Select(obj => obj.Name).ToHashSet();
-                var suffix = 1;
-
-                while (names.Contains($"BrushBox_{suffix}"))
-                {
-                    suffix++;
-                }
-                
-                var brush = world.Spawn<BrushBox>();
-                brush.Name = $"BrushBox_{suffix}";
-                
-                Selection.Object = brush;
-                
-                UndoRedo.Clear();
+                var brush = SceneObjects.Create(PlaceableType.BrushBox);
                 Editor.Report($"Created: {brush.Name}");
             });
         }
@@ -78,23 +63,22 @@ public static class Palette
                 : Content.GetAllEntityNames();
             
             _currentType = expectedType;
-            _selectedIndex = 0;
+            _selected = "";
         }
         
-        if (_items.Length > 0)
+        ImGui.SetNextItemWidth(-1);
+        ImGui.InputTextWithHint("##search", "Search assets...", ref _search, 256);
+        if (ImGui.Button("Refresh"))
         {
-            ImGui.SetNextItemWidth(-1);
-
-            if (ImGui.ListBox("##items", ref _selectedIndex, _items, _items.Length)){}
+            _items = _isGeometryTab ? Content.GetAllGeometryNames() : Content.GetAllEntityNames();
+            if (!_items.Contains(_selected)) _selected = "";
         }
-        else
-        {
-            ImGui.Text("No assets found");
-        }
-
+        ImGui.BeginChild("##assets", new System.Numerics.Vector2(0, Math.Max(80, ImGui.GetContentRegionAvail().Y - 65)));
+        AssetFolders.Draw(_items, _search, path => path == _selected, path => _selected = path);
+        ImGui.EndChild();
         ImGui.Separator();
         
-        var canCreate = _items.Length > 0;
+        var canCreate = _items.Contains(_selected);
 
         if (!canCreate)
         {
@@ -105,30 +89,8 @@ public static class Palette
         {
             Editor.Execute(() =>
             {
-                ObjectManipulator.Commit();
-                
-                var name = _items[_selectedIndex];
-                
-                ProjectShockGL.Core.Object? obj = _isGeometryTab ? Geometry.Create(name) : Entity.Create(name);
-
-                if (obj == null)
-                {
-                    throw new InvalidOperationException($"Cannot create asset '{name}'.");
-                }
-                
-                var names = ProjectShockGL.Core.Game.Instance.World.GetAllObjects(true).Select(item => item.Name).ToHashSet();
-                var suffix = 1;
-
-                while (names.Contains($"{name}_{suffix}"))
-                {
-                    suffix++;
-                }
-                
-                obj.Name = $"{name}_{suffix}";
-                
-                Selection.Object = obj;
-                UndoRedo.Clear();
-                
+                var name = _selected;
+                var obj = SceneObjects.Create(_isGeometryTab ? PlaceableType.Geometry : PlaceableType.Entity, name);
                 Editor.Report($"Created: {obj.Name}");
             });
         }
@@ -141,3 +103,4 @@ public static class Palette
         ImGui.End();
     }
 }
+

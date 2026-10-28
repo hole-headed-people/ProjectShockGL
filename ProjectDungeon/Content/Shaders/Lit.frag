@@ -9,6 +9,7 @@ out vec4 FragColor;
 
 uniform sampler2D uTexture;
 uniform vec4 uColor;
+uniform bool uForceUnlit;
 
 uniform float uMainLightEnabled;
 uniform vec3 uLightDirection; 
@@ -73,6 +74,8 @@ void main()
         vec3 light = uPointLightColors[i] * uPointLightIntensities[i] * atten * diff * baseColor;
         finalColor += light;
     }
+
+    if (uForceUnlit) finalColor = baseColor;
 
     if (uFogEnabled)
     {

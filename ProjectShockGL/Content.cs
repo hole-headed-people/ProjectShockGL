@@ -1,4 +1,5 @@
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using ProjectShockGL.Core;
 using ProjectShockGL.Rendering;
 using ProjectShockGL.Tools;
@@ -24,10 +25,12 @@ public static class Content
     private static readonly Dictionary<string, Texture> Textures = new();
     private static readonly Dictionary<(string Name, int Size), Font> Fonts = new();
     private static readonly Dictionary<string, Shader> Shaders = new();
+    private static readonly Dictionary<(string Vertex, string Fragment), ShaderProgram> Programs = new();
     private static readonly Dictionary<string, Mesh> Meshes = new();
     private static readonly Dictionary<string, GeometryData> Geometries = new();
     private static readonly Dictionary<string, EntityData> Entities = new();
     private static readonly Dictionary<string, Level> Levels = new();
+    private static readonly Dictionary<string, PostProcessProfile> PostProcessProfiles = new();
     
     private static Texture? _whiteTexture;
     
@@ -166,6 +169,74 @@ public static class Content
         return loadedShader;
     }
     
+    public static ShaderProgram LoadShaderProgram(string vertexName, string? fragmentName = null)
+    {
+        fragmentName ??= vertexName;
+        
+        var key = (vertexName, fragmentName);
+
+        if (Programs.TryGetValue(key, out var cached) && cached.Handle != 0)
+        {
+            return cached;
+        }
+        
+        var vertex = LoadShader(vertexName, ShaderType.VertexShader)
+            ?? throw new FileNotFoundException($"Vertex shader '{vertexName}.vert' was not found.");
+        
+        var fragment = LoadShader(fragmentName, ShaderType.FragmentShader)
+            ?? throw new FileNotFoundException($"Fragment shader '{fragmentName}.frag' was not found.");
+        
+        var program = new ShaderProgram(_gl, vertex, fragment);
+        
+        Programs[key] = program;
+        return program;
+    }
+
+    public static PostProcessProfile? LoadPostProcessProfile(string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        if (PostProcessProfiles.TryGetValue(name, out var cached))
+        {
+            return cached;
+        }
+        
+        var path = System.IO.Path.Combine(Path, "PostProcessProfiles", name + ".json");
+
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+        
+        try
+        {
+            var json = JObject.Parse(File.ReadAllText(path), new JsonLoadSettings
+            {
+                DuplicatePropertyNameHandling = DuplicatePropertyNameHandling.Error
+            });
+            
+            var profile = json.ToObject<PostProcessProfile>(JsonSerializer.Create(new JsonSerializerSettings
+            {
+                MissingMemberHandling = MissingMemberHandling.Error,
+                DateParseHandling = DateParseHandling.None
+            })) ?? throw new InvalidDataException("The profile is empty.");
+
+            if (string.IsNullOrWhiteSpace(profile.VertexShader) || string.IsNullOrWhiteSpace(profile.FragmentShader) ||
+                profile.Parameters == null)
+            {
+                throw new InvalidDataException("The profile needs shader names and a Parameters dictionary.");
+            }
+            
+            PostProcessProfiles.Add(name, profile);
+            
+            return profile;
+        }
+        catch (Exception error) when (error is JsonException or InvalidDataException)
+        {
+            throw new InvalidDataException($"Cannot load postprocess profile '{path}': {error.Message}", error);
+        }
+    }
+
     public static Mesh? LoadMesh(string name)
     {
         if (Meshes.TryGetValue(name, out var mesh))
@@ -306,8 +377,8 @@ public static class Content
             return [];
         }
 
-        return Directory.GetFiles(dir, "*.json")
-            .Select(System.IO.Path.GetFileNameWithoutExtension)
+        return Directory.GetFiles(dir, "*.json", SearchOption.AllDirectories)
+            .Select(file => System.IO.Path.ChangeExtension(System.IO.Path.GetRelativePath(dir, file), null)!.Replace('\\', '/'))
             .OfType<string>()
             .ToArray();
     }
@@ -321,16 +392,19 @@ public static class Content
             return [];
         }
 
-        return Directory.GetFiles(dir, "*.json")
-            .Select(System.IO.Path.GetFileNameWithoutExtension)
+        return Directory.GetFiles(dir, "*.json", SearchOption.AllDirectories)
+            .Select(file => System.IO.Path.ChangeExtension(System.IO.Path.GetRelativePath(dir, file), null)!.Replace('\\', '/'))
             .OfType<string>()
             .ToArray();
     }
     
     public static void UnloadAll()
     {
+        PostProcessSettings.Reset();
+        PostProcessProfiles.Clear();
         var resources = Fonts.Values.Cast<IDisposable>()
-            .Concat(Shaders.Values).Concat(Textures.Values).Concat(Meshes.Values).ToList();
+            .Concat(Programs.Values).Concat(Shaders.Values).Concat(Textures.Values).Concat(Meshes.Values).ToList();
+        Programs.Clear();
         if (_whiteTexture != null) resources.Add(_whiteTexture);
 
         Fonts.Clear();
@@ -349,3 +423,5 @@ public static class Content
         return new Mesh(_gl, vertices, indices);
     }
 }
+
+

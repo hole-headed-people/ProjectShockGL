@@ -1,0 +1,13 @@
+{
+  "Enabled": true,
+  "VertexShader": "PostProcess",
+  "FragmentShader": "PostProcess",
+  "Parameters": {
+    "uVignetteStrength": 0.45,
+    "uVignetteRadius": 0.6,
+    "uVignetteSoftness": 0.5,
+    "uGrainStrength": 0.05,
+    "uGrainSize": 1.0,
+    "uChromaticAberrationPixels": 5.0
+  }
+}

@@ -339,6 +339,54 @@ Run("Objects spawned during Start still start and update in the same runtime fra
     world.Clear();
 });
 
+Run("World rendering separates debug components from the postprocessed world", () =>
+{
+    var debugProperty = typeof(Application).GetProperty(nameof(Application.IsDebug))!;
+    var previous = Application.IsDebug;
+    var world = new World();
+    try
+    {
+        var obj = world.Spawn<GameObject>();
+        var normal = obj.AddComponent<CountingRenderComponent>();
+        var debug = obj.AddComponent<CountingRenderComponent>();
+        debug.IsDebug = true;
+        world.Update(0, simulate: false);
+        var queue = new ProjectShockGL.Rendering.RenderQueue();
+        debugProperty.SetValue(null, true);
+        world.Render(queue, debugOnly: false);
+        Check(normal.Renders == 1 && debug.Renders == 0);
+        world.Render(queue, debugOnly: true);
+        Check(normal.Renders == 1 && debug.Renders == 1);
+        debugProperty.SetValue(null, false);
+        world.Render(queue, debugOnly: true);
+        Check(debug.Renders == 1);
+    }
+    finally
+    {
+        world.Clear();
+        debugProperty.SetValue(null, previous);
+    }
+});
+
+Run("Reordering active and pending objects preserves order and defers lifecycle until Update", () =>
+{
+    var world = new World();
+    var first = world.Spawn<TrackedObject>();
+    var second = world.Spawn<TrackedObject>();
+    world.Update(0,simulate:false);
+    var pending = world.Spawn<TrackedObject>();
+    world.MoveToIndex(pending,1);
+    Check(world.GetAllObjects(true).SequenceEqual(new[] { first,pending,second }));
+    Check(first.Starts==0 && second.Starts==0 && pending.Starts==0);
+    world.Update(0);
+    Check(first.Starts==1 && second.Starts==1 && pending.Starts==1);
+    world.MoveToIndex(second,0);
+    world.Update(0);
+    Check(world.GetAllObjects().SequenceEqual(new[] { second,first,pending }));
+    Check(second.Starts==1 && second.Updates==2 && pending.Updates==2);
+    world.Clear();
+});
+
 static void Run(string name, Action test)
 {
     test();
@@ -428,4 +476,9 @@ public sealed class ThrowingDestroyObject : GameObject
     public Component Part = null!;
     public override void Create() => Part = AddComponent<Component>();
     public override void Destroy() { Destroys++; throw new InvalidOperationException("before base.Destroy"); }
+}
+public sealed class CountingRenderComponent : RenderComponent
+{
+    public int Renders;
+    public override void Render(ProjectShockGL.Rendering.RenderQueue queue) => Renders++;
 }

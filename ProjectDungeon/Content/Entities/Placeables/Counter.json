@@ -1,0 +1,6 @@
+﻿{
+  "Class": "ProjectShockGL.Placeables.Counter, ProjectShockGL",
+  "Parameters": {
+    "DebugBillboard": "Editor/Counter"
+  }
+}

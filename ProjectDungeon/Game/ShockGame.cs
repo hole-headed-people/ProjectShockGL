@@ -1,13 +1,11 @@
-﻿using System.Numerics;
-using ProjectDungeon.Core;
-using ProjectDungeon.Placeables;
-using ProjectShockGL;
-using Silk.NET.Input;
-using ProjectShockGL.Core;
-
-namespace ProjectDungeon.Game;
+﻿namespace ProjectDungeon.Game;
 
 public class ShockGame : Core.Game
 {
-    
+    protected override void Load()
+    {
+        base.Load();
+        
+        ProjectShockGL.Rendering.PostProcessSettings.Apply("Default");
+    }
 }

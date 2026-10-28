@@ -5,6 +5,8 @@ namespace ProjectShockGL.Core;
 
 public class Object
 {
+    private readonly List<Coroutine> _coroutines = [];
+    
     private readonly List<RenderComponent> _renderComponents = [];
     private readonly List<Component> _components = [];
 
@@ -22,6 +24,9 @@ public class Object
     public int Layer { get; set; } = 1;
     public int CollidesWith { get; set; } = ~0;
 
+    public List<string> EditorGroups { get; } = [];
+    public bool IsEditorVisible => !Application.IsEditor || !EditorGroups.Any(World.HiddenEditorGroups.Contains);
+    
     public bool IsStatic
     {
         get => _isStatic;
@@ -32,8 +37,14 @@ public class Object
                 return;
             }
             
-            _isStatic = value;
+            ConfigureStatic(value);
         }
+    }
+
+    protected void ConfigureStatic(bool value)
+    {
+        _isStatic = value;
+        _cachedWorldBounds = null;
     }
 
     public bool IsActive => _isActive;
@@ -85,7 +96,7 @@ public class Object
         }
     }
 
-    public virtual void Update(float deltaTime)
+    public virtual void Update(float deltaSeconds)
     {
         foreach (var component in _components.ToArray())
         {
@@ -100,7 +111,7 @@ public class Object
 
                 if (!IsDestroyed && IsActive && !component.IsDestroyed && component.IsEnabled)
                 {
-                    component.Update(deltaTime);
+                    component.Update(deltaSeconds);
                 }
             }
         }
@@ -108,15 +119,20 @@ public class Object
         _components.RemoveAll(c => c.IsDestroyed);
     }
 
-    public void Render(RenderQueue queue)
+    public void Render(RenderQueue queue, bool? debugOnly = null)
     {
-        if (IsDestroyed || !IsActive || _renderComponents.Count <= 0)
+        if (IsDestroyed || !IsActive || !IsEditorVisible || _renderComponents.Count <= 0)
         {
             return;
         }
         
         foreach (var component in _renderComponents)
         {
+            if (debugOnly.HasValue && component.IsDebug != debugOnly.Value)
+            {
+                continue;
+            }
+            
             if (!component.IsDestroyed && component.IsEnabled && (!component.IsDebug || Application.IsDebug))
             {
                 component.Render(queue);
@@ -165,6 +181,7 @@ public class Object
         }
         
         IsDestroyed = true;
+        StopAllCoroutines();
         List<Exception> errors = [];
         
         if (_isActive)
@@ -207,6 +224,52 @@ public class Object
         if (errors.Count > 0)
         {
             throw new AggregateException("Object cleanup failed.", errors);
+        }
+    }
+    
+    internal Coroutine[] CaptureCoroutines()
+    {
+        return _coroutines.ToArray();
+    }
+
+    internal void RemoveCoroutine(Coroutine coroutine)
+    {
+        _coroutines.Remove(coroutine);
+    }
+
+    public Coroutine StartCoroutine(System.Collections.IEnumerator routine)
+    {
+        ArgumentNullException.ThrowIfNull(routine);
+        ObjectDisposedException.ThrowIf(IsDestroyed, this);
+
+        if (Application.IsEditor)
+        {
+            throw new InvalidOperationException("Coroutines run only in game mode.");
+        }
+        
+        var coroutine = new Coroutine(this, routine);
+        
+        _coroutines.Add(coroutine);
+        coroutine.Tick(0, 0, true);
+        
+        return coroutine;
+    }
+
+    public void StopCoroutine(Coroutine? coroutine)
+    {
+        if (coroutine != null && coroutine.Owner != this)
+        {
+            throw new ArgumentException("Coroutine belongs to another object.", nameof(coroutine));
+        }
+        
+        coroutine?.Stop();
+    }
+
+    public void StopAllCoroutines()
+    {
+        foreach (var coroutine in _coroutines.ToArray())
+        {
+            coroutine.Stop();
         }
     }
     

@@ -1,19 +1,19 @@
-﻿using System.Numerics;
+using System.Numerics;
 using ImGuiNET;
 using ProjectShockGL;
 using ProjectShockGL.Core;
 using ProjectShockGL.Rendering;
 using ProjectShockGL.Tools;
+using Object = ProjectShockGL.Core.Object;
 
 namespace ProjectShockGLEditor;
 
 public static class Inspector
 {
-    private static Vector3 _dragStartPosition;
-    private static Quaternion _dragStartRotation;
-    private static Vector3 _dragStartScale;
-    private static Vector3 _brushSizeStart;
-    
+    private static Object _frameObject = null!;
+    private static string _before = "";
+    private static string _textureSearch = "";
+
     public static void Draw()
     {
         if (!ImGui.Begin("Inspector", ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize |
@@ -34,11 +34,18 @@ public static class Inspector
             return;
         }
         
+        _frameObject = obj;
+        _before = InspectorState.Capture(obj);
+        
+        ImGui.PushID(obj.GetHashCode());
         ImGui.TextUnformatted(obj.GetType().Name);
+        
         var isActive = obj.IsActive;
+        
         if (ImGui.Checkbox("IsActive", ref isActive))
         {
             obj.SetActive(isActive);
+            Changed("IsActive", true);
         }
 
         if (ImGui.Button("Focus (F)"))
@@ -57,6 +64,7 @@ public static class Inspector
         if (duplicate)
         {
             Editor.DuplicateSelection();
+            ImGui.PopID();
             ImGui.End();
             return;
         }
@@ -66,6 +74,7 @@ public static class Inspector
         if (ImGui.Button("Delete"))
         {
             Editor.DeleteSelection();
+            ImGui.PopID();
             ImGui.End();
             return;
         }
@@ -74,72 +83,45 @@ public static class Inspector
 
         // Position
         var pos = obj.Transform.Position;
-        var beforePosition = pos;
         
         if (ImGui.DragFloat3("Position", ref pos, 0.1f))
         {
             obj.Transform.Position = pos;
+            Changed("Position");
         }
 
-        if (ImGui.IsItemActivated())
-        {
-            _dragStartPosition = beforePosition;
-        }
-
-        if (ImGui.IsItemDeactivatedAfterEdit() && _dragStartPosition != obj.Transform.Position)
-        {
-            UndoRedo.Register(new PropertyChangeAction<Vector3>(
-                v => obj.Transform.Position = v,
-                _dragStartPosition,
-                obj.Transform.Position));
-        }
-
+        Finish("Position");
+        
         // Rotation
         var euler = QuaternionHelper.ToEulerDegrees(obj.Transform.Rotation);
-        var beforeRotation = obj.Transform.Rotation;
         
         if (ImGui.DragFloat3("Rotation", ref euler, 0.1f))
         {
             obj.Transform.Rotation = QuaternionHelper.FromEulerDegrees(euler);
+            Changed("Rotation");
         }
 
-        if (ImGui.IsItemActivated())
-        {
-            _dragStartRotation = beforeRotation;
-        }
-
-        if (ImGui.IsItemDeactivatedAfterEdit() && _dragStartRotation != obj.Transform.Rotation)
-        {
-            UndoRedo.Register(new PropertyChangeAction<Quaternion>(
-                q => obj.Transform.Rotation = q,
-                _dragStartRotation,
-                obj.Transform.Rotation));
-        }
-
+        Finish("Rotation");
+        
         // Scale
         var scale = obj.Transform.Scale;
-        var beforeScale = scale;
         
         if (ImGui.DragFloat3("Scale", ref scale, 0.1f))
         {
             obj.Transform.Scale = Vector3.Max(new Vector3(0.01f), scale);
+            Changed("Scale");
         }
-
-        if (ImGui.IsItemActivated())
-        {
-            _dragStartScale = beforeScale;
-        }
-
-        if (ImGui.IsItemDeactivatedAfterEdit() && _dragStartScale != obj.Transform.Scale)
-        {
-            UndoRedo.Register(new PropertyChangeAction<Vector3>(
-                s => obj.Transform.Scale = s,
-                _dragStartScale,
-                obj.Transform.Scale));
-        }
+        
+        Finish("Scale");
         
         if (obj is BrushBox brush)
         {
+            var movable = brush.Movable;
+            if (ImGui.Checkbox("Movable", ref movable))
+            {
+                brush.Movable = movable;
+                Changed("Movable", true);
+            }
             ImGui.Separator();
             ImGui.TextUnformatted("BrushBox");
             
@@ -148,70 +130,67 @@ public static class Inspector
             if (ImGui.InputText("Name", ref brushName, 128))
             {
                 brush.Name = brushName;
+                Changed("Name");
             }
             
+            Finish("Name");
+            
             var size = brush.Size;
-            var beforeSize = size;
 
             if (ImGui.DragFloat3("Size", ref size, 0.1f))
             {
                 brush.Size = Vector3.Max(new Vector3(0.01f), size);
+                Changed("Size");
             }
-
-            if (ImGui.IsItemActivated())
-            {
-                _brushSizeStart = beforeSize;
-            }
-
-            if (ImGui.IsItemDeactivatedAfterEdit() && _brushSizeStart != brush.Size)
-            {
-                UndoRedo.Register(new PropertyChangeAction<Vector3>(v => brush.Size = v, _brushSizeStart, brush.Size));
-            }
+            
+            Finish("Size");
             
             var density = brush.TextureScale;
 
             if (ImGui.DragFloat("Texture scale", ref density, 0.05f, 0.01f, 1000))
             {
                 brush.TextureScale = Math.Clamp(density, 0.01f, 1000);
+                Changed("TextureScale");
             }
+            
+            Finish("TextureScale");
             
             ImGui.TextUnformatted("Texture scale = repeats per world unit");
             
             if (ImGui.BeginCombo("Texture", $"{brush.TextureName} ({brush.TextureFormat})"))
             {
-                if (ImGui.Selectable("WhitePixel", brush.TextureName == "WhitePixel"))
+                ImGui.SetNextItemWidth(-1);
+                
+                ImGui.InputTextWithHint("##textureSearch", "Search textures...", ref _textureSearch, 256);
+                
+                if ("WhitePixel".Contains(_textureSearch.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                    ImGui.Selectable("WhitePixel", brush.TextureName == "WhitePixel"))
                 {
                     brush.TextureName = "WhitePixel";
+                    Changed("Texture", true);
                 }
                 
-                var directory = System.IO.Path.Combine(Content.Path, "Textures");
+                var directory = Path.Combine(Content.Path, "Textures");
                 
-                if (Directory.Exists(directory))
-                {
-                    foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories).Order())
+                var textures = Directory.Exists(directory)
+                    ? Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+                        .Where(file => Path.GetExtension(file).ToLowerInvariant() is ".png" or ".jpg")
+                        .Select(file => Path.GetRelativePath(directory, file).Replace('\\', '/')).ToArray()
+                    : [];
+                
+                AssetFolders.Draw(textures, _textureSearch,
+                    path => brush.TextureName.Replace('\\', '/') == path[..^Path.GetExtension(path).Length] &&
+                        brush.TextureFormat == (Path.GetExtension(path).Equals(".png", StringComparison.OrdinalIgnoreCase) ? TextureFormat.Png : TextureFormat.Jpeg),
+                    path => Editor.Execute(() =>
                     {
-                        var extension = Path.GetExtension(file).ToLowerInvariant();
-                        
-                        if (extension is not (".jpg" or ".png"))
-                        {
-                            continue;
-                        }
-                        
-                        var relative = Path.GetRelativePath(directory, file);
-                        var textureName = relative[..^extension.Length];
-                        var format = extension == ".png" ? TextureFormat.Png : TextureFormat.Jpeg;
-                        
-                        if (ImGui.Selectable(relative, brush.TextureName == textureName && brush.TextureFormat == format))
-                        {
-                            Editor.Execute(() =>
-                            {
-                                _ = Content.LoadTexture(textureName, format) ?? throw new FileNotFoundException(relative);
-                                brush.TextureName = textureName;
-                                brush.TextureFormat = format;
-                            });
-                        }
-                    }
-                }
+                        var extension = Path.GetExtension(path);
+                        var name = path[..^extension.Length];
+                        var format = extension.Equals(".png", StringComparison.OrdinalIgnoreCase) ? TextureFormat.Png : TextureFormat.Jpeg;
+                        _ = Content.LoadTexture(name, format) ?? throw new FileNotFoundException(path);
+                        brush.TextureName = name;
+                        brush.TextureFormat = format;
+                        Changed("Texture", true);
+                    }));
                 
                 ImGui.EndCombo();
             }
@@ -221,13 +200,18 @@ public static class Inspector
             if (ImGui.ColorEdit4("Color", ref color))
             {
                 brush.Color = new Color(color.X, color.Y, color.Z, color.W);
+                
+                Changed("Color");
             }
+            
+            Finish("Color");
             
             var lit = brush.Lit;
 
             if (ImGui.Checkbox("Lit", ref lit))
             {
                 brush.Lit = lit;
+                Changed("Lit", true);
             }
         }
 
@@ -242,7 +226,10 @@ public static class Inspector
             if (ImGui.InputText("Name", ref name, 64))
             {
                 entity.Name = name;
+                Changed("Name");
             }
+            
+            Finish("Name");
             
             //Properties
             
@@ -255,14 +242,18 @@ public static class Inspector
                 
                 var value = prop.GetValue(entity)!;
                 var type = prop.PropertyType;
+                
+                ImGui.PushID("Property/" + prop.Name);
 
                 if (type == typeof(float))
                 {
                     var f = (float)value;
                     
-                    if (ImGui.DragFloat(prop.Name, ref f, 0.01f))
+                    if (ImGui.DragFloat(prop.Name, ref f, 0.001f))
                     {
                         prop.SetValue(entity, f);
+                        
+                        Changed("Property/" + prop.Name, type == typeof(bool) || type.IsEnum);
                     }
                 }
                 else if (type == typeof(int))
@@ -272,6 +263,8 @@ public static class Inspector
                     if (ImGui.DragInt(prop.Name, ref i))
                     {
                         prop.SetValue(entity, i);
+                        
+                        Changed("Property/" + prop.Name, type == typeof(bool) || type.IsEnum);
                     }
                 }
                 else if (type == typeof(bool))
@@ -281,6 +274,8 @@ public static class Inspector
                     if (ImGui.Checkbox(prop.Name, ref b))
                     {
                         prop.SetValue(entity, b);
+                        
+                        Changed("Property/" + prop.Name, type == typeof(bool) || type.IsEnum);
                     }
                 }
                 else if (type == typeof(string))
@@ -290,15 +285,19 @@ public static class Inspector
                     if (ImGui.InputText(prop.Name, ref s, 256))
                     {
                         prop.SetValue(entity, s);
+                        
+                        Changed("Property/" + prop.Name, type == typeof(bool) || type.IsEnum);
                     }
                 }
                 else if (type == typeof(Vector3))
                 {
                     var v = (Vector3)value;
 
-                    if (ImGui.DragFloat3(prop.Name, ref v))
+                    if (ImGui.DragFloat3(prop.Name, ref v, 0.001f))
                     {
                         prop.SetValue(entity, v);
+                        
+                        Changed("Property/" + prop.Name, type == typeof(bool) || type.IsEnum);
                     }
                 }
                 else if (type == typeof(Color))
@@ -309,6 +308,8 @@ public static class Inspector
                     if (ImGui.ColorEdit4(prop.Name, ref vec4))
                     {
                         prop.SetValue(entity, new Color(vec4.X, vec4.Y, vec4.Z, vec4.W));
+                        
+                        Changed("Property/" + prop.Name, type == typeof(bool) || type.IsEnum);
                     }
                 }
                 else if (type.IsEnum)
@@ -319,13 +320,20 @@ public static class Inspector
                     if (ImGui.Combo(prop.Name, ref current, names, names.Length))
                     {
                         prop.SetValue(entity, Enum.Parse(type, names[current]));
+                        
+                        Changed("Property/" + prop.Name, type == typeof(bool) || type.IsEnum);
                     }
                 }
+                
+                Finish("Property/" + prop.Name);
+                
+                ImGui.PopID();
             }
             
             if (entity is Light { Type: LightType.Spot } spot)
             {
                 ImGui.Separator();
+                
                 ImGui.TextUnformatted("Spot cone (full angles, degrees)");
                 
                 var innerAngle = spot.InnerAngle;
@@ -333,14 +341,21 @@ public static class Inspector
                 if (ImGui.SliderFloat("Inner angle", ref innerAngle, 0, 179))
                 {
                     spot.InnerAngle = innerAngle;
+                    
+                    Changed("InnerAngle");
                 }
+                
+                Finish("InnerAngle");
                 
                 var outerAngle = spot.OuterAngle;
 
                 if (ImGui.SliderFloat("Outer angle", ref outerAngle, 0.1f, 179))
                 {
                     spot.OuterAngle = outerAngle;
+                    Changed("OuterAngle");
                 }
+                
+                Finish("OuterAngle");
                 
                 ImGui.TextUnformatted("Yellow: outer | Cyan: inner | White: direction");
             }
@@ -361,15 +376,19 @@ public static class Inspector
                 if (ImGui.InputText("Event", ref eventName, 64))
                 {
                     output.Event = eventName;
+                    Changed($"Output/{i}/Event");
                 }
 
+                Finish($"Output/{i}/Event");
                 var targetName = output.TargetName;
                 
                 if (ImGui.InputText("Target", ref targetName, 64))
                 {
                     output.TargetName = targetName;
+                    Changed($"Output/{i}/Target");
                 }
 
+                Finish($"Output/{i}/Target");
                 var target = ProjectShockGL.Core.Game.Instance.World.Find(output.TargetName);
 
                 if (target != null)
@@ -385,6 +404,7 @@ public static class Inspector
                             if (ImGui.Selectable("<None>", string.IsNullOrEmpty(output.Input)))
                             {
                                 output.Input = string.Empty;
+                                Changed($"Output/{i}/Input", true);
                             }
 
                             foreach (var inputName in inputNames)
@@ -394,6 +414,7 @@ public static class Inspector
                                 if (ImGui.Selectable(inputName, selected))
                                 {
                                     output.Input = inputName;
+                                    Changed($"Output/{i}/Input", true);
                                 }
 
                                 if (selected)
@@ -412,7 +433,9 @@ public static class Inspector
                         if (ImGui.InputText("Input", ref input, 64))
                         {
                             output.Input = input;
+                            Changed($"Output/{i}/Input");
                         }
+                        Finish($"Output/{i}/Input");
                     }
                 }
                 else
@@ -422,7 +445,9 @@ public static class Inspector
                     if (ImGui.InputText("Input", ref input, 64))
                     {
                         output.Input = input;
+                        Changed($"Output/{i}/Input");
                     }
+                    Finish($"Output/{i}/Input");
                 }
 
                 var parameter = output.Parameter;
@@ -430,11 +455,14 @@ public static class Inspector
                 if (ImGui.InputText("Parameter", ref parameter, 64))
                 {
                     output.Parameter = parameter;
+                    Changed($"Output/{i}/Parameter");
                 }
 
+                Finish($"Output/{i}/Parameter");
                 if (ImGui.Button("Remove"))
                 {
                     entity.Outputs.RemoveAt(i);
+                    Changed("Outputs", true);
                     i--;
                 }
 
@@ -445,9 +473,34 @@ public static class Inspector
             if (ImGui.Button("Add Output"))
             {
                 entity.Outputs.Add(new OutputData());
+                Changed("Outputs", true);
             }
         }
 
+        ImGui.PopID();
         ImGui.End();
     }
+    private static void Changed(string field, bool discrete = false)
+    {
+        var obj = _frameObject;
+        var after = InspectorState.Capture(obj);
+        
+        UndoRedo.RecordEdit(obj, field, _before, after, state => InspectorState.Apply(obj, state),
+            editing: !discrete && ImGui.IsItemActive());
+        
+        _before = after;
+    }
+
+    private static void Finish(string field)
+    {
+        var obj = _frameObject;
+        
+        if (ImGui.IsItemDeactivated())
+        {
+            UndoRedo.RecordEdit(obj, field, _before, _before,
+                state => InspectorState.Apply(obj, state), editing: false);
+        }
+    }
 }
+
+

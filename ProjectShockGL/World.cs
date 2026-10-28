@@ -14,6 +14,8 @@ public class World
     private int _cachedObjectsVersion = -1;
     private int _objectsVersion;
     private int _clearVersion;
+    
+    public static HashSet<string> HiddenEditorGroups { get; } = new(StringComparer.Ordinal);
 
     public World()
     {
@@ -21,8 +23,10 @@ public class World
         _spawnedObjects = [];
     }
 
-    public void Update(float deltaSeconds, bool simulate = true)
+    public void Update(float deltaSeconds, bool simulate = true, float? unscaledDeltaSeconds = null)
     {
+        var routines = simulate ? GetAllObjects(true).SelectMany(obj => obj.CaptureCoroutines()).ToArray() : [];
+        
         while (_spawnedObjects.Count > 0)
         {
             var obj = _spawnedObjects.Dequeue();
@@ -75,20 +79,25 @@ public class World
                 obj.Update(deltaSeconds);
             }
         }
-        
+
+        foreach (var routine in routines)
+        {
+            routine.Tick(deltaSeconds, unscaledDeltaSeconds ?? deltaSeconds);
+        }
+
         if (_objects.RemoveAll(obj => obj.IsDestroyed) > 0)
         {
             _objectsVersion++;
         }
     }
 
-    public void Render(RenderQueue queue)
+    public void Render(RenderQueue queue, bool? debugOnly = null)
     {
         foreach (var obj in _objects)
         {
             if (!obj.IsDestroyed && obj.IsActive)
             {
-                obj.Render(queue);
+                obj.Render(queue, debugOnly);
             }
         }
     }
@@ -167,6 +176,40 @@ public class World
         }
         
         obj.Release();
+    }
+    
+    public void MoveToIndex(Object obj, int index)
+    {
+        var active = _objects.Where(item => !item.IsDestroyed).ToList();
+        var pending = _spawnedObjects.Where(item => !item.IsDestroyed).ToList();
+
+        if (!active.Remove(obj) && !pending.Remove(obj))
+        {
+            throw new InvalidOperationException("The object is not in this world.");
+        }
+        
+        index = Math.Clamp(index, 0, active.Count + pending.Count);
+
+        if (index <= active.Count)
+        {
+            active.Insert(index, obj);
+        }
+        else
+        {
+            pending.Insert(index - active.Count, obj);
+        }
+        
+        _objects.Clear();
+        _objects.AddRange(active);
+        _spawnedObjects.Clear();
+
+        foreach (var item in pending)
+        {
+            _spawnedObjects.Enqueue(item);
+        }
+        
+        _objectsVersion++;
+        _cachedObjectsArray = null;
     }
 
     public void Clear()

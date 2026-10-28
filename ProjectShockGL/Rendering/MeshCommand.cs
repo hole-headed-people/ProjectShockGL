@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 
 namespace ProjectShockGL.Rendering;
 
@@ -10,6 +10,8 @@ public class MeshCommand : RenderCommand
     public Vector3 Scale { get; set; }
     public Texture? Texture { get; set; }
     public Color Color { get; set; }
+    public ShaderProgram? Shader { get; set; }
+    public ShaderParameters? ShaderParameters { get; set; }
     public bool Lit { get; set; }
     public bool IgnoreDepth { get; set; }
 
@@ -17,7 +19,7 @@ public class MeshCommand : RenderCommand
     {
         if (Mesh != null && Texture != null)
         {
-            graphics.DrawMesh(Mesh, Position, Rotation, Scale, Texture, Color, Lit, IgnoreDepth);
+            graphics.DrawMesh(Mesh, Position, Rotation, Scale, Texture, Color, Lit, IgnoreDepth, Shader, ShaderParameters);
         }
     }
 }

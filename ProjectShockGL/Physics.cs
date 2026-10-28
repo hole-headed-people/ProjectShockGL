@@ -102,6 +102,17 @@ public class Physics
         try
         {
             var snapshot = _colliders.ToArray();
+            if (!Application.IsEditor)
+            {
+                foreach (var controller in snapshot.OfType<CharacterController>())
+                {
+                    if (_registered.Contains(controller) && Enabled(controller))
+                    {
+                        controller.ResolveOverlaps(snapshot.Where(other => _registered.Contains(other) && Enabled(other)));
+                    }
+                }
+            }
+            
             var current = new Dictionary<(Collider, Collider), bool>();
 
             for (var i = 0; i < snapshot.Length; i++)

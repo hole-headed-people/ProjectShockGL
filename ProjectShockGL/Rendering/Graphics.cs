@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 
 namespace ProjectShockGL.Rendering;
 
@@ -22,6 +22,7 @@ public class Graphics
     public void BeginDraw(Camera camera)
     {
         _camera = camera;
+        
         Renderer.BeginFrame(camera);
     }
 
@@ -77,7 +78,8 @@ public class Graphics
         Renderer.DrawQuadMesh(texture, model, color, ignoreDepth: ignoreDepth);
     }
     
-    public void DrawLine(Vector3 from, Vector3 to, Texture texture, Color color, float thickness = 0.05f, bool lit = false, bool ignoreDepth = false)
+    public void DrawLine(Vector3 from, Vector3 to, Texture texture, Color color, float thickness = 0.05f, bool lit = false,
+        bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
     {
         var dir = to - from;
         var length = dir.Length();
@@ -106,7 +108,7 @@ public class Graphics
             center.X,            center.Y,            center.Z,            1f
         );
 
-        Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth);
+        Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters);
     }
     
     public void DrawBoxWireframe(
@@ -139,25 +141,25 @@ public class Graphics
         }
     }
 
-    public void DrawQuad(Vector3 position, Quaternion rotation, Vector2 size, Texture texture, Color color, bool lit = false, bool ignoreDepth = false)
+    public void DrawQuad(Vector3 position, Quaternion rotation, Vector2 size, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
     {
         var model = Matrix4x4.CreateScale(size.X, size.Y, 1f)
                     * Matrix4x4.CreateFromQuaternion(rotation)
                     * Matrix4x4.CreateTranslation(position);
 
-        Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth);
+        Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters);
     }
 
-    public void DrawMesh(Mesh mesh, Vector3 position, Quaternion rotation, Vector3 scale, Texture texture, Color color, bool lit = false, bool ignoreDepth = false)
+    public void DrawMesh(Mesh mesh, Vector3 position, Quaternion rotation, Vector3 scale, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
     {
         var model = Matrix4x4.CreateScale(scale)
                   * Matrix4x4.CreateFromQuaternion(rotation)
                   * Matrix4x4.CreateTranslation(position);
 
-        Renderer.DrawMesh(mesh, texture, model, color, lit, ignoreDepth);
+        Renderer.DrawMesh(mesh, texture, model, color, lit, ignoreDepth, shader, shaderParameters);
     }
 
-    public void DrawBillboard(Vector3 position, Vector2 size, Texture texture, Color color, bool lit = false, bool ignoreDepth = false)
+    public void DrawBillboard(Vector3 position, Vector2 size, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
     {
         var right = _camera.Transform.Right * size.X;
         var up = _camera.Transform.Up * size.Y;
@@ -170,12 +172,22 @@ public class Graphics
             position.X, position.Y, position.Z, 1f
         );
 
-        Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth);
+        Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters);
     }
 
     public void EndDraw()
     {
         Renderer.EndFrame();
+    }
+
+    public void BeginWorld()
+    {
+        Renderer.BeginWorld();
+    }
+
+    public void EndWorld()
+    {
+        Renderer.EndWorld();
     }
 
     public void BeginUI(Vector2 size)

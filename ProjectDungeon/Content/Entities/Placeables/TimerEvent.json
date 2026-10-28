@@ -1,0 +1,6 @@
+﻿{
+  "Class": "ProjectShockGL.Placeables.TimerEvent, ProjectShockGL",
+  "Parameters": {
+    "DebugBillboard": "Editor/Timer"
+  }
+}

@@ -21,6 +21,8 @@ public class LineRenderer : RenderComponent
             From = LineStart,
             To = LineEnd,
             Texture = Texture,
+            Shader = Shader,
+            ShaderParameters = Shader == null ? null : ShaderParameters.Snapshot(),
             Lit = Lit,
             IgnoreDepth = IgnoreDepth,
             RenderOrder = RenderOrder

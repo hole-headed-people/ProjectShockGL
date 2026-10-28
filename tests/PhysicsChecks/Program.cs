@@ -581,6 +581,93 @@ Run("Controller validates stair height and slope angles", scene =>
     controller.SlopeLimit = 89;
 });
 
+Run("Moving boxes push an idle controller and repeated updates remain stable", scene =>
+{
+    var controller = scene.Body(Vector3.Zero).AddComponent<CharacterController>();
+    var box = scene.Body(new Vector3(-3, 0, 0)).AddComponent<BoxCollider>();
+    box.HalfExtents = new Vector3(0.5f, 2, 2);
+    Physics.Update();
+    Near(controller.Parent.Transform.Position, Vector3.Zero);
+    for (var i = 0; i < 10; i++)
+    {
+        box.Parent.Transform.Position = new Vector3(-0.8f + i * 0.1f, 0, 0);
+        Physics.Update();
+    }
+    Check(controller.Parent.Transform.Position.X > 1f);
+    NearFloat(controller.Parent.Transform.Position.Y, 0);
+    var position = controller.Parent.Transform.Position;
+    for (var i = 0; i < 20; i++) Physics.Update();
+    Near(controller.Parent.Transform.Position, position);
+});
+
+Run("Idle recovery supports rotated boxes, spheres, capsules and deep overlap", scene =>
+{
+    var controller = scene.Body(Vector3.Zero).AddComponent<CharacterController>();
+    var box = scene.Body(Vector3.Zero).AddComponent<BoxCollider>();
+    box.HalfExtents = new Vector3(1, 3, 2);
+    box.Parent.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, .7f);
+    Physics.Update();
+    var (a, b) = controller.GetWorldSegment();
+    Check(!PhysicsHelper.CapsuleIntersectsCollider(a, b, controller.WorldRadius - .011f, box));
+    box.Parent.SetActive(false);
+    controller.Parent.Transform.Position = Vector3.Zero;
+    var sphere = scene.Sphere(new Vector3(.4f, 0, 0));
+    Physics.Update();
+    Check(controller.Parent.Transform.Position.X < -.5f);
+    sphere.Parent.SetActive(false);
+    controller.Parent.Transform.Position = Vector3.Zero;
+    var capsule = scene.Body(new Vector3(.4f, 0, 0)).AddComponent<CapsuleCollider>();
+    Physics.Update();
+    Check(controller.Parent.Transform.Position.X < -.5f);
+});
+
+Run("Idle recovery respects filters, disabled owners and controller state", scene =>
+{
+    var controller = scene.Body(Vector3.Zero).AddComponent<CharacterController>();
+    var own = controller.Parent.AddComponent<BoxCollider>();
+    var box = scene.Body(new Vector3(.4f, 0, 0)).AddComponent<BoxCollider>();
+    box.IsTrigger = true;
+    Physics.Update(); Near(controller.Parent.Transform.Position, Vector3.Zero);
+    box.IsTrigger = false; box.IsEnabled = false;
+    Physics.Update(); Near(controller.Parent.Transform.Position, Vector3.Zero);
+    box.IsEnabled = true; box.Parent.SetActive(false);
+    Physics.Update(); Near(controller.Parent.Transform.Position, Vector3.Zero);
+    box.Parent.SetActive(true); box.Parent.Layer = 2; controller.CollisionMask = 1;
+    Physics.Update(); Near(controller.Parent.Transform.Position, Vector3.Zero);
+    controller.CollisionMask = -1; box.Parent.CollidesWith = 0;
+    Physics.Update(); Near(controller.Parent.Transform.Position, Vector3.Zero);
+    box.Parent.CollidesWith = -1; controller.IsEnabled = false;
+    Physics.Update(); Near(controller.Parent.Transform.Position, Vector3.Zero);
+    controller.IsEnabled = true; controller.Parent.SetActive(false);
+    Physics.Update(); Near(controller.Parent.Transform.Position, Vector3.Zero);
+    controller.Parent.SetActive(true); Physics.Update();
+    Check(controller.Parent.Transform.Position.X < 0);
+});
+
+Run("Idle recovery preserves floor support and does not run in editor", scene =>
+{
+    var floor = scene.Body(new Vector3(0, -1.5f, 0)).AddComponent<BoxCollider>();
+    floor.HalfExtents = new Vector3(10, .5f, 10);
+    var controller = scene.Body(Vector3.Zero).AddComponent<CharacterController>();
+    controller.Move(new Vector3(0, -.1f, 0));
+    Check(controller.IsGrounded);
+    var box = scene.Body(new Vector3(-.7f, 0, 0)).AddComponent<BoxCollider>();
+    box.HalfExtents = new Vector3(.5f, 2, 2);
+    var before = controller.Parent.Transform.Position;
+    var property = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+    var editor = Application.IsEditor;
+    try
+    {
+        property.SetValue(null, true);
+        Physics.Update();
+        Near(controller.Parent.Transform.Position, before);
+    }
+    finally { property.SetValue(null, editor); }
+    Physics.Update();
+    Check(controller.Parent.Transform.Position.X > before.X && controller.IsGrounded);
+    NearFloat(controller.Parent.Transform.Position.Y, before.Y);
+});
+
 Console.WriteLine("All physics checks passed.");
 
 static void Run(string name, Action<Scene> test)

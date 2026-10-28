@@ -65,11 +65,13 @@ public static class EditorLevelManager
                 Name = obj.Name, Path = path,
                 
                 IsActive = obj.IsActive,
+                EditorGroups = obj.EditorGroups.ToArray(),
                 
                 Type = obj is BrushBox ? PlaceableType.BrushBox : obj is Geometry ? PlaceableType.Geometry : PlaceableType.Entity,
                 
                 Brush = obj is BrushBox brush ? new BrushBoxData
                 {
+                    Movable = brush.Movable,
                     Size = brush.Size, Texture = brush.TextureName, TextureFormat = brush.TextureFormat,
                     TextureScale = brush.TextureScale, Color = brush.Color, Lit = brush.Lit
                 } : null,
@@ -99,6 +101,7 @@ public static class EditorLevelManager
         return new Level
         {
             Environment = ProjectShockGL.Environment.Capture(),
+            Groups = SceneGroups.Capture(),
             Placeables = result.ToArray()
         };
     }
@@ -154,23 +157,55 @@ public static class EditorLevelManager
         {
             Name = name, Path = snapshot.Path, Type = snapshot.Type,
             IsActive = snapshot.IsActive,
+            EditorGroups = snapshot.EditorGroups,
             Brush = snapshot.Brush,
             Position = snapshot.Position, Rotation = snapshot.Rotation, Scale = snapshot.Scale,
             Properties = snapshot.Properties, Outputs = snapshot.Outputs
         };
         
+        return CreatePlacement(duplicate);
+    }
+
+    public static Object CreatePlacement(Placeable placement)
+    {
+        var world = ProjectShockGL.Core.Game.Instance.World;
+        var existing = world.GetAllObjects(true).ToHashSet();
+
         try
         {
-            return LevelManager.CreateObject(world, duplicate);
+            return LevelManager.CreateObject(world, placement);
         }
-        catch
+        catch (Exception error)
         {
-            foreach (var created in world.GetAllObjects(true).Where(obj => !existing.Contains(obj)))
-            {
-                created.Destroy();
-            }
-            
+            RollbackCreated(existing, error);
             throw;
+        }
+    }
+
+    internal static void RollbackCreated(HashSet<Object> existing, Exception creationError)
+    {
+        List<Exception> errors = [creationError];
+        
+        foreach (var created in ProjectShockGL.Core.Game.Instance.World.GetAllObjects(true).Where(obj => !existing.Contains(obj)))
+        {
+            try
+            {
+                ProjectShockGL.Core.Game.Instance.World.Destroy(created);
+                
+                if (!created.IsDestroyed)
+                {
+                    created.Destroy();
+                }
+            }
+            catch (Exception cleanupError)
+            {
+                errors.Add(cleanupError);
+            }
+        }
+
+        if (errors.Count > 1)
+        {
+            throw new AggregateException("Object creation and cleanup failed.", errors);
         }
     }
 
@@ -225,6 +260,7 @@ public static class EditorLevelManager
         
         ObjectManipulator.Cancel();
         LevelManager.Load(level);
+        SceneGroups.Load(level.Groups);
         Selection.Object = null;
         UndoRedo.Clear();
         
@@ -239,6 +275,7 @@ public static class EditorLevelManager
     {
         ObjectManipulator.Cancel();
         LevelManager.Load(new Level());
+        SceneGroups.Load([]);
         
         Selection.Object = null;
         UndoRedo.Clear();

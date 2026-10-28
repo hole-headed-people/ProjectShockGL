@@ -6,6 +6,8 @@ namespace ProjectShockGL.Core;
 public class Game
 {
     private RenderQueue _renderQueue = null!;
+    private TimerManager _timerManager = null!;
+    
     public World World { get; private set; } = null!;
     public UIManager UIManager { get; private set; } = null!;
     
@@ -43,6 +45,7 @@ public class Game
         Application.Load += Instance.Load;
         Application.Update += Instance.Update;
         Application.Render += Instance.Render;
+        Application.RenderOverlay += Instance.RenderDebug;
         Application.RenderUI += Instance.RenderUI;
         Application.Resized += Instance.OnResized;
         Application.Unload += Instance.Unload;
@@ -52,31 +55,53 @@ public class Game
 
     protected virtual void Load()
     {
-        _renderQueue = new RenderQueue();
+        _renderQueue = new RenderQueue();        
+        _timerManager = TimerManager.Create();
         
         World = new World();
         
         Layers.Load();
         Physics.Initialize();
 
+        PostProcessSettings.Apply(Settings.GetString("Game", "PostProcessingProfile", "Default"));
+        
         UIManager = new UIManager();
         UIManager.Initialize();
     }
 
-    protected virtual void Update(float deltaTime)
+    protected virtual void Update(float deltaSeconds)
     {
-        World.Update(deltaTime, simulate: !Application.IsEditor);
+        var gameDeltaSeconds = deltaSeconds * Time.DeltaSeconds;
+        
+        World.Update(gameDeltaSeconds, !Application.IsEditor, deltaSeconds);
         
         if (!Application.IsEditor)
         {
-            Physics.Update();
-            UIManager.Update(deltaTime);
+            _timerManager.Update(gameDeltaSeconds, deltaSeconds);
+
+            if (gameDeltaSeconds > 0f)
+            {
+                Physics.Update();
+            }
+            
+            UIManager.Update(deltaSeconds);
         }
     }
     
     protected virtual void Render(Graphics graphics)
     {
-        World.Render(_renderQueue);
+        World.Render(_renderQueue, false);
+        _renderQueue.Flush(graphics);
+    }
+
+    private void RenderDebug(Graphics graphics)
+    {
+        if (!Application.IsDebug)
+        {
+            return;
+        }
+        
+        World.Render(_renderQueue, true);
         _renderQueue.Flush(graphics);
     }
     

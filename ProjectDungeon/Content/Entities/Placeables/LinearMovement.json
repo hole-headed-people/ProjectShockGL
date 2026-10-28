@@ -1,0 +1,6 @@
+﻿{
+  "Class": "ProjectShockGL.Placeables.LinearMovement, ProjectShockGL",
+  "Parameters": {
+    "DebugBillboard": "Editor/LinearMovement"
+  }
+}

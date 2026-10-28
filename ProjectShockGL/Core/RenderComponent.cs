@@ -8,6 +8,8 @@ namespace ProjectShockGL.Core;
 public class RenderComponent : Component
 {
     public Color Color { get; set; } = Color.White;
+    public ShaderProgram? Shader { get; set; }
+    public ShaderParameters ShaderParameters { get; } = new();
     public Vector3 Offset { get; set; }
     public float Scale { get; set; } = 1f;
     public bool UseParentScale { get; set; } = true;

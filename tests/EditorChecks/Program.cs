@@ -386,11 +386,11 @@ Run("Duplicate selection copies a pending entity and detaches properties and out
     Check(Game.Instance.World.GetAllObjects(true).Length == 2 && EditorLevelManager.IsDirty);
 });
 
-Run("Repeated duplication reserves unique pending names and clears transform history", () =>
+Run("Repeated duplication reserves unique pending names and retains undo history", () =>
 {
     UndoRedo.Register(new PropertyChangeAction<int>(_ => { }, 0, 1));
     Editor.DuplicateSelection();
-    Check(Selection.Object!.Name == "switch_3" && !UndoRedo.CanUndo && !UndoRedo.CanRedo);
+    Check(Selection.Object!.Name == "switch_3" && UndoRedo.CanUndo && !UndoRedo.CanRedo);
     Editor.DuplicateSelection();
     Check(Selection.Object!.Name == "switch_4");
     var objects = Game.Instance.World.GetAllObjects(true);
@@ -833,7 +833,9 @@ Run("Player camera keeps spawn direction and character owns its flashlight", () 
     Check(Vector3.Distance(camera.Transform.Forward, expected) < 0.0001f);
     character.Turn(1);
     world.Update(0);
-    Check(Vector3.Distance(camera.Transform.Forward, expected) < 0.002f);
+    var turnedForward = Vector3.Transform(-Vector3.UnitZ,
+        Quaternion.CreateFromYawPitchRoll(1.2f + MathF.PI / 180f, 0.2f, 0));
+    Check(Vector3.Distance(camera.Transform.Forward, turnedForward) < 0.0001f);
     var light = world.Find<Light>()!;
     Check(light.IsActive);
     character.SetActive(false);
@@ -845,8 +847,589 @@ Run("Player camera keeps spawn direction and character owns its flashlight", () 
     world.Clear();
 });
 
+Run("Inspector property edits share chronological history with transforms and coalesce a drag", () =>
+{
+    EditorLevelManager.NewLevel();
+    var obj = Entity.Create("Check")!;
+    Selection.Object = obj;
+    obj.Transform.Position = new Vector3(2,3,4);
+    UndoRedo.Register(new PropertyChangeAction<Vector3>(v => obj.Transform.Position = v, Vector3.Zero, obj.Transform.Position));
+    RecordInspector(obj, "Number", () => ((CheckEntity)obj).Number = 10, editing: true);
+    RecordInspector(obj, "Number", () => ((CheckEntity)obj).Number = 20, editing: true);
+    Check(UndoRedo.CanUndo);
+    UndoRedo.Undo(); // Also finalizes an input that still has focus.
+    Check(((CheckEntity)obj).Number == 0 && obj.Transform.Position == new Vector3(2,3,4));
+    UndoRedo.Undo();
+    Check(obj.Transform.Position == Vector3.Zero && !UndoRedo.CanUndo);
+    UndoRedo.Redo();
+    UndoRedo.Redo();
+    Check(((CheckEntity)obj).Number == 20 && obj.Transform.Position == new Vector3(2,3,4));
+});
+
+Run("Separate Inspector fields and selection changes end pending transactions", () =>
+{
+    EditorLevelManager.NewLevel();
+    var obj = (CheckEntity)Entity.Create("Check")!;
+    Selection.Object = obj;
+    RecordInspector(obj, "Number", () => obj.Number = 2, editing: true);
+    RecordInspector(obj, "Name", () => obj.Name = "new name", editing: true);
+    Selection.Object = Entity.Create("Check");
+    UndoRedo.Undo();
+    Check(obj.Name == "" && obj.Number == 2);
+    UndoRedo.Undo();
+    Check(obj.Number == 0);
+    RecordInspector(obj, "Number", () => obj.Number = 3);
+    Check(!UndoRedo.CanRedo);
+    UndoRedo.Clear();
+    RecordInspector(obj, "Name", () => obj.Name = "pending", editing: true);
+    UndoRedo.Clear();
+    Check(!UndoRedo.CanUndo && !UndoRedo.CanRedo);
+});
+
+Run("Returning an Inspector edit to its original value produces no action and preserves redo", () =>
+{
+    EditorLevelManager.NewLevel();
+    var obj = (CheckEntity)Entity.Create("Check")!;
+    RecordInspector(obj, "Number", () => obj.Number = 1);
+    UndoRedo.Undo();
+    RecordInspector(obj, "Name", () => obj.Name = "temporary", editing: true);
+    RecordInspector(obj, "Name", () => obj.Name = "", editing: false);
+    Check(!UndoRedo.CanUndo && UndoRedo.CanRedo);
+    UndoRedo.Redo();
+    Check(obj.Number == 1);
+});
+
+Run("Inspector snapshots restore all BrushBox data, paired texture fields and collider size", () =>
+{
+    EditorLevelManager.NewLevel();
+    var brush = Game.Instance.World.Spawn<BrushBox>();
+    var before = InspectorState.Capture(brush);
+    RecordInspector(brush, "Brush settings", () => {
+        brush.Name = "wall"; brush.Size = new Vector3(4,5,6); brush.TextureScale = 3;
+        brush.TextureName = "paint"; brush.TextureFormat = TextureFormat.Png;
+        brush.Color = Color.Red; brush.Lit = false; brush.SetActive(false);
+    });
+    var after = InspectorState.Capture(brush);
+    UndoRedo.Undo();
+    Check(InspectorState.Capture(brush) == before && brush.Collider is BoxCollider box && box.HalfExtents == Vector3.One * 0.5f);
+    UndoRedo.Redo();
+    Check(InspectorState.Capture(brush) == after && ((BoxCollider)brush.Collider!).HalfExtents == new Vector3(2,2.5f,3));
+});
+
+Run("Spotlight undo restores linked inner and outer angles and light registration", () =>
+{
+    EditorLevelManager.NewLevel();
+    var light = Game.Instance.World.Spawn<Light>();
+    light.Type = LightType.Spot;
+    light.InnerAngle = 30;
+    light.OuterAngle = 45;
+    RecordInspector(light, "InnerAngle", () => light.InnerAngle = 70);
+    Check(light.InnerAngle == 70 && light.OuterAngle == 70);
+    UndoRedo.Undo();
+    Check(light.InnerAngle == 30 && light.OuterAngle == 45);
+    UndoRedo.Redo();
+    Check(light.InnerAngle == 70 && light.OuterAngle == 70);
+    RecordInspector(light, "Type", () => light.Type = LightType.Directional);
+    Check(Light.Main == light && !Light.All.Contains(light));
+    UndoRedo.Undo();
+    Check(light.Type == LightType.Spot && Light.Main != light && Light.All.Contains(light));
+});
+
+Run("Outputs and mutable Editable values are deep snapshots across repeated undo and redo", () =>
+{
+    EditorLevelManager.NewLevel();
+    var obj = (CheckEntity)Entity.Create("Check")!;
+    RecordInspector(obj, "Outputs", () => obj.Outputs.Add(new OutputData {
+        Event = "Enter", TargetName = "door", Input = "Open", Parameter = "1"
+    }));
+    RecordInspector(obj, "Output/0/Input", () => obj.Outputs[0].Input = "Close");
+    UndoRedo.Undo();
+    Check(obj.Outputs.Single().Input == "Open");
+    UndoRedo.Undo();
+    Check(obj.Outputs.Count == 0);
+    UndoRedo.Redo();
+    UndoRedo.Redo();
+    Check(obj.Outputs.Single().Input == "Close");
+    RecordInspector(obj, "Outputs", () => obj.Outputs.Clear());
+    UndoRedo.Undo();
+    Check(obj.Outputs.Single().TargetName == "door" && obj.Outputs[0].Parameter == "1");
+    RecordInspector(obj, "Values", () => obj.Values.Add(7));
+    UndoRedo.Undo();
+    Check(obj.Values.Count == 0);
+    UndoRedo.Redo();
+    obj.Values[0] = 99;
+    UndoRedo.Undo();
+    UndoRedo.Redo();
+    Check(obj.Values.SequenceEqual(new[] { 7 }));
+});
+
+Run("Undoing Inspector data restores the saved dirty state and does not resurrect destroyed owners", () =>
+{
+    EditorLevelManager.NewLevel();
+    var obj = (CheckEntity)Entity.Create("Check")!;
+    var path = Path.Combine(testRoot, "inspector-undo.map");
+    EditorLevelManager.SaveCurrentLevel(path);
+    RecordInspector(obj, "IsActive", () => obj.SetActive(false));
+    EditorLevelManager.RefreshDirty();
+    Check(EditorLevelManager.IsDirty);
+    UndoRedo.Undo();
+    EditorLevelManager.RefreshDirty();
+    Check(obj.IsActive && !EditorLevelManager.IsDirty);
+    UndoRedo.Redo();
+    EditorLevelManager.RefreshDirty();
+    Check(!obj.IsActive && EditorLevelManager.IsDirty);
+    obj.Destroy();
+    UndoRedo.Undo();
+    Check(obj.IsDestroyed);
+});
+
+Run("A failed history action remains available instead of being lost", () =>
+{
+    UndoRedo.Clear();
+    UndoRedo.Register(new PropertyChangeAction<int>(_ => throw new InvalidOperationException("test"), 1, 2));
+    Throws(UndoRedo.Undo);
+    Check(UndoRedo.CanUndo && !UndoRedo.CanRedo);
+    UndoRedo.Clear();
+});
+
+RunScene("Creation of entity, geometry and BrushBox is undoable, repeatable and preserves selection", () =>
+{
+    var world = Game.Instance.World;
+    var previous = Entity.Create("Check")!;
+    previous.Name = "previous";
+    Selection.Object = previous;
+    foreach (var (type,path) in new[] { (PlaceableType.Entity,"Check"), (PlaceableType.Geometry,"Box"), (PlaceableType.BrushBox,"") })
+    {
+        var created = SceneObjects.Create(type,path);
+        var reference = EditorObjectReference.Get(created);
+        var originalState = InspectorState.Capture(created);
+        var originalName = created.Name;
+        world.Update(0,simulate:false);
+        UndoRedo.Undo();
+        Check(created.IsDestroyed && Selection.Object == previous && world.GetAllObjects(true).Length == 1);
+        UndoRedo.Redo();
+        var restored = reference.Current;
+        Check(!ReferenceEquals(created,restored) && !restored.IsDestroyed && Selection.Object == restored);
+        Check(restored.Name == originalName && InspectorState.Capture(restored) == originalState);
+        UndoRedo.Undo();
+    }
+});
+
+RunScene("Delete undo keeps order, dirty state and deferred Start for active and pending placements", () =>
+{
+    foreach (var activate in new[] { false,true })
+    {
+        EditorLevelManager.NewLevel();
+        var world = Game.Instance.World;
+        var first = SceneObjects.Create(PlaceableType.Entity,"Check");
+        var middle = SceneObjects.Create(PlaceableType.Entity,"Check");
+        var last = SceneObjects.Create(PlaceableType.Entity,"Check");
+        var reference = EditorObjectReference.Get(middle);
+        middle.Transform.Position = new Vector3(2,3,4);
+        middle.Transform.Rotation = Quaternion.CreateFromYawPitchRoll(0.2f,0.3f,0.4f);
+        if (activate) world.Update(0,simulate:false);
+        var path = Path.Combine(testRoot, "delete-order-" + activate + ".map");
+        EditorLevelManager.SaveCurrentLevel(path);
+        var before = JsonConvert.SerializeObject(EditorLevelManager.CaptureCurrentLevel(),JsonHelper.GetSettings());
+        SceneObjects.Delete(middle);
+        Check(middle.IsDestroyed && EditorLevelManager.IsDirty);
+        UndoRedo.Undo();
+        var restored = (CheckEntity)reference.Current;
+        Check(world.GetAllObjects(true).SequenceEqual(new[] { first,restored,last }));
+        Check(Selection.Object == restored && restored.Starts == 0);
+        Check(JsonConvert.SerializeObject(EditorLevelManager.CaptureCurrentLevel(),JsonHelper.GetSettings()) == before);
+        EditorLevelManager.RefreshDirty();
+        Check(!EditorLevelManager.IsDirty && Physics.OverlapSphereAll(Vector3.Zero,100,Layers.Everything).Length == 3);
+        world.Update(0,simulate:false);
+        Check(restored.Starts == 0 && world.GetAllObjects().Contains(restored));
+        UndoRedo.Redo();
+        EditorLevelManager.RefreshDirty();
+        Check(restored.IsDestroyed && EditorLevelManager.IsDirty);
+        UndoRedo.Undo();
+        Check(world.GetAllObjects(true)[1] == reference.Current && reference.Current != restored);
+    }
+});
+
+RunScene("Older Inspector and gizmo actions follow the restored instance through full undo/redo chains", () =>
+{
+    var world = Game.Instance.World;
+    var obj = (CheckEntity)SceneObjects.Create(PlaceableType.Entity,"Check");
+    var reference = EditorObjectReference.Get(obj);
+    var originalName = obj.Name;
+    RecordInspector(obj,"Number",()=>obj.Number=5);
+    var size = new Vector2(1280,768);
+    var eye = new Vector3(5,4,6);
+    var forward = Vector3.Normalize(-eye);
+    var vp = Matrix4x4.CreateLookAt(eye,Vector3.Zero,Vector3.UnitY) * Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI/3,size.X/size.Y,0.1f,100);
+    ObjectManipulator.Mode = ManipulationMode.Move;
+    ObjectManipulator.Local = false;
+    Check(GizmoMath.Project(Vector3.UnitX,vp,size,out var start));
+    Check(GizmoMath.Project(Vector3.UnitX*1.6f,vp,size,out var end));
+    ObjectManipulator.BeginDrag(obj,0,start,2,forward,vp,size);
+    ObjectManipulator.ApplyDrag(end,vp,size,false);
+    ObjectManipulator.Commit();
+    var moved = obj.Transform.Position;
+    Check(moved.Length()>0.1f);
+    RecordInspector(obj,"Name",()=>obj.Name="renamed");
+    SceneObjects.Delete(obj);
+    for (var cycle=0; cycle<3; cycle++)
+    {
+        UndoRedo.Undo();
+        Check(reference.Current is CheckEntity { Number:5, Name:"renamed" });
+        UndoRedo.Undo();
+        Check(reference.Current.Name==originalName && reference.Current.Transform.Position==moved);
+        UndoRedo.Undo();
+        Check(reference.Current.Transform.Position==Vector3.Zero);
+        UndoRedo.Undo();
+        Check(((CheckEntity)reference.Current).Number==0);
+        UndoRedo.Undo();
+        Check(world.GetAllObjects(true).Length==0 && !UndoRedo.CanUndo);
+        UndoRedo.Redo();
+        Check(reference.Current.Name==originalName);
+        UndoRedo.Redo();
+        Check(((CheckEntity)reference.Current).Number==5);
+        UndoRedo.Redo();
+        Check(reference.Current.Transform.Position==moved);
+        UndoRedo.Redo();
+        Check(reference.Current.Name=="renamed");
+        UndoRedo.Redo();
+        Check(world.GetAllObjects(true).Length==0 && !UndoRedo.CanRedo);
+    }
+});
+
+RunScene("Duplication redo restores the same independent data, name and self-targeted outputs", () =>
+{
+    var source = (CheckEntity)SceneObjects.Create(PlaceableType.Entity,"Check");
+    RecordInspector(source,"setup",()=> {
+        source.Name="logic_1"; source.Number=7; source.Values.Add(1); source.SetActive(false);
+        source.Outputs.Add(new OutputData { Event="Enter",TargetName=source.Name,Input="SetActive",Parameter="true" });
+    });
+    var clone = (CheckEntity)SceneObjects.Duplicate(source);
+    var reference = EditorObjectReference.Get(clone);
+    Check(clone.Name=="logic_2" && clone.Outputs[0].TargetName==clone.Name);
+    var state = InspectorState.Capture(clone);
+    UndoRedo.Undo();
+    Check(clone.IsDestroyed && Selection.Object==source && !source.IsDestroyed);
+    UndoRedo.Redo();
+    var restored = (CheckEntity)reference.Current;
+    Check(InspectorState.Capture(restored)==state && !restored.IsActive);
+    Check(!ReferenceEquals(source.Values,restored.Values) && !ReferenceEquals(source.Outputs[0],restored.Outputs[0]));
+    RecordInspector(restored,"Number",()=>restored.Number=20);
+    SceneObjects.Delete(restored);
+    UndoRedo.Undo();
+    UndoRedo.Undo();
+    Check(((CheckEntity)reference.Current).Number==7 && source.Number==7);
+});
+
+RunScene("Pending edits precede creation and a new creation discards the redo branch", () =>
+{
+    var obj = (CheckEntity)SceneObjects.Create(PlaceableType.Entity,"Check");
+    RecordInspector(obj,"Number",()=>obj.Number=3,editing:true);
+    var brush = SceneObjects.Create(PlaceableType.BrushBox);
+    UndoRedo.Undo();
+    Check(brush.IsDestroyed && Selection.Object==obj && obj.Number==3);
+    UndoRedo.Undo();
+    Check(obj.Number==0);
+    var replacement = SceneObjects.Create(PlaceableType.BrushBox);
+    Check(!UndoRedo.CanRedo && !replacement.IsDestroyed && Game.Instance.World.GetAllObjects(true).Length==2);
+});
+
+RunScene("Failed creation/duplication preserves the scene, selection, collider count and redo", () =>
+{
+    var obj = (CheckEntity)SceneObjects.Create(PlaceableType.Entity,"Check");
+    RecordInspector(obj,"Number",()=>obj.Number=3);
+    UndoRedo.Undo();
+    var world = Game.Instance.World;
+    var before = world.GetAllObjects(true);
+    var colliders = Physics.OverlapSphereAll(Vector3.Zero,100,Layers.Everything).Length;
+    Throws(()=>SceneObjects.Create(PlaceableType.Entity,"Broken"));
+    Check(world.GetAllObjects(true).SequenceEqual(before) && Selection.Object==obj && UndoRedo.CanRedo);
+    Check(Physics.OverlapSphereAll(Vector3.Zero,100,Layers.Everything).Length==colliders);
+    var rejected = (RejectingEntity)Entity.Create("Rejecting")!;
+    rejected.Name="rejected";
+    rejected.Value=5;
+    var withRejected = world.GetAllObjects(true);
+    var withRejectedColliders = Physics.OverlapSphereAll(Vector3.Zero,100,Layers.Everything).Length;
+    RejectingEntity.RejectWrites=true;
+    try { Throws(()=>SceneObjects.Duplicate(rejected)); }
+    finally { RejectingEntity.RejectWrites=false; }
+    Check(world.GetAllObjects(true).SequenceEqual(withRejected) && Selection.Object==obj && UndoRedo.CanRedo);
+    Check(Physics.OverlapSphereAll(Vector3.Zero,100,Layers.Everything).Length==withRejectedColliders);
+});
+
+RunScene("Failed deletion restore can be retried without orphaned colliders or lost older edits", () =>
+{
+    var obj = (RejectingEntity)SceneObjects.Create(PlaceableType.Entity,"Rejecting");
+    var reference = EditorObjectReference.Get(obj);
+    RecordInspector(obj,"Value",()=>obj.Value=9);
+    SceneObjects.Delete(obj);
+    RejectingEntity.RejectWrites=true;
+    try { Throws(UndoRedo.Undo); }
+    finally { RejectingEntity.RejectWrites=false; }
+    Check(UndoRedo.CanUndo && !UndoRedo.CanRedo && Game.Instance.World.GetAllObjects(true).Length==0);
+    Check(Physics.OverlapSphereAll(Vector3.Zero,100,Layers.Everything).Length==0);
+    UndoRedo.Undo();
+    Check(((RejectingEntity)reference.Current).Value==9);
+    UndoRedo.Undo();
+    Check(((RejectingEntity)reference.Current).Value==0);
+});
+
+RunScene("Light deletion and restoration keep registries correct over repeated cycles", () =>
+{
+    var light = (Light)SceneObjects.Create(PlaceableType.Entity,"Light");
+    var reference = EditorObjectReference.Get(light);
+    RecordInspector(light,"Spot",()=> {light.Type=LightType.Spot;light.InnerAngle=20;light.OuterAngle=40;light.SetActive(false);});
+    SceneObjects.Delete(light);
+    for (var i=0;i<4;i++)
+    {
+        Check(Light.All.Count==0);
+        UndoRedo.Undo();
+        var restored = (Light)reference.Current;
+        Check(!restored.IsActive && restored.InnerAngle==20 && restored.OuterAngle==40 && Light.All.Single()==restored);
+        UndoRedo.Redo();
+    }
+    UndoRedo.Undo();
+    UndoRedo.Undo();
+    Check(((Light)reference.Current).Type==LightType.Point && reference.Current.IsActive);
+});
+
+RunScene("A failing Destroy callback still records deletion and permits full restoration", () =>
+{
+    File.WriteAllText(Path.Combine(testRoot,"Entities","ThrowDestroy.json"),
+        "{\"Class\":\"ThrowingDeleteEntity, EditorChecks\",\"Parameters\":{}}");
+    var obj = SceneObjects.Create(PlaceableType.Entity,"ThrowDestroy");
+    var reference = EditorObjectReference.Get(obj);
+    try { Throws(()=>SceneObjects.Delete(obj)); }
+    finally { ThrowingDeleteEntity.RejectDestroy=false; }
+    Check(obj.IsDestroyed && Game.Instance.World.GetAllObjects(true).Length==0 && UndoRedo.CanUndo);
+    Check(Physics.OverlapSphereAll(Vector3.Zero,100,Layers.Everything).Length==0);
+    UndoRedo.Undo();
+    Check(!reference.Current.IsDestroyed && Selection.Object==reference.Current);
+    Check(Physics.OverlapSphereAll(Vector3.Zero,100,Layers.Everything).Length==1);
+});
+
+RunScene("Changing levels clears object history and cannot restore objects from the old scene", () =>
+{
+    var obj = SceneObjects.Create(PlaceableType.Entity,"Check");
+    SceneObjects.Delete(obj);
+    EditorLevelManager.NewLevel();
+    Check(!UndoRedo.CanUndo && !UndoRedo.CanRedo);
+    UndoRedo.Undo();
+    Check(Game.Instance.World.GetAllObjects(true).Length==0);
+});
+
+RunScene("Groups preserve activity, membership, visibility and scene undo", () =>
+{
+    var obj = SceneObjects.Create(PlaceableType.BrushBox);
+    var group = new EditorGroupData { Id = "room", Name = "Room", Visible = false };
+    SceneGroups.Load([group]);
+    UndoRedo.Clear();
+    SceneGroups.Change(() => obj.EditorGroups.Add("room"));
+    Check(!obj.IsEditorVisible && obj.IsActive);
+    UndoRedo.Undo(); Check(obj.IsEditorVisible && obj.IsActive);
+    UndoRedo.Redo(); Check(!obj.IsEditorVisible && obj.IsActive);
+    var editorProperty = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+    try
+    {
+        editorProperty.SetValue(null, false);
+        Check(obj.IsEditorVisible && obj.IsActive);
+    }
+    finally { editorProperty.SetValue(null, true); }
+    var copy = SceneObjects.Duplicate(obj);
+    Check(copy.EditorGroups.SequenceEqual(obj.EditorGroups) && !copy.IsEditorVisible);
+    SceneObjects.Delete(obj);
+    UndoRedo.Undo();
+    var restored = Selection.Object!;
+    Check(restored.EditorGroups.Contains("room") && !restored.IsEditorVisible && restored.IsActive);
+    var level = EditorLevelManager.CaptureCurrentLevel();
+    Check(level.Groups.Single().Id == "room" && !level.Groups.Single().Visible);
+    Check(level.Placeables.All(p => p.EditorGroups.Contains("room")));
+    var path = Path.Combine(AppContext.BaseDirectory, $"groups-{Guid.NewGuid():N}.map");
+    try
+    {
+        EditorLevelManager.SaveCurrentLevel(path);
+        EditorLevelManager.NewLevel();
+        Check(SceneGroups.Capture().Length == 0 && World.HiddenEditorGroups.Count == 0);
+        EditorLevelManager.OpenLevel(path);
+        Check(SceneGroups.Capture().Single().Name == "Room");
+        Check(ProjectShockGL.Core.Game.Instance.World.GetAllObjects(true).All(o => !o.IsEditorVisible && o.IsActive));
+        Check(!EditorLevelManager.IsDirty);
+    }
+    finally { File.Delete(path); }
+});
+
+RunScene("Brush Movable survives Inspector undo, duplication and level data", () =>
+{
+    var brush = (BrushBox)SceneObjects.Create(PlaceableType.BrushBox);
+    Check(!brush.Movable && brush.IsStatic);
+    var before = InspectorState.Capture(brush);
+    brush.Movable = true;
+    var after = InspectorState.Capture(brush);
+    InspectorState.Apply(brush, before); Check(!brush.Movable && brush.IsStatic);
+    InspectorState.Apply(brush, after); Check(brush.Movable && !brush.IsStatic);
+    var duplicate = (BrushBox)SceneObjects.Duplicate(brush);
+    Check(duplicate.Movable && !duplicate.IsStatic);
+    var placement = EditorLevelManager.CaptureLevel([brush]).Placeables.Single();
+    Check(placement.Brush!.Movable);
+    var restored = (BrushBox)EditorLevelManager.CreatePlacement(placement);
+    Check(restored.Movable && !restored.IsStatic);
+});
+
+if (args.Contains("--imgui"))
+{
+    var context = ImGuiNET.ImGui.CreateContext();
+    try
+    {
+        var io = ImGuiNET.ImGui.GetIO();
+        unsafe { io.NativePtr->IniFilename = null; io.NativePtr->LogFilename = null; }
+        io.DisplaySize = new Vector2(600,1000);
+        io.DeltaTime = 1f/60;
+        io.Fonts.GetTexDataAsRGBA32(out IntPtr pixels, out int width, out int height, out int bytesPerPixel);
+        io.Fonts.SetTexID((IntPtr)1);
+        void Frame(Action draw, float x = -100, float y = -100, bool down = false)
+        {
+            io.AddMousePosEvent(x,y);
+            io.AddMouseButtonEvent(0,down);
+            ImGuiNET.ImGui.NewFrame();
+            ImGuiNET.ImGui.SetNextWindowPos(Vector2.Zero);
+            ImGuiNET.ImGui.SetNextWindowSize(new Vector2(400,900));
+            draw();
+            ImGuiNET.ImGui.Render();
+        }
+        Run("Real ImGui Inspector checkbox and a multi-frame numeric drag undo before the earlier transform", () =>
+        {
+            EditorLevelManager.NewLevel();
+            var obj = (CheckEntity)Entity.Create("Check")!;
+            Selection.Object = obj;
+            Frame(Inspector.Draw);
+            var clicked = false;
+            for (var y = 45; y <= 62 && !clicked; y += 3)
+            {
+                Frame(Inspector.Draw,15,y,true);
+                Frame(Inspector.Draw,15,y,false);
+                clicked = !obj.IsActive;
+            }
+            Check(clicked && UndoRedo.CanUndo);
+            UndoRedo.Undo();
+            Check(obj.IsActive && !UndoRedo.CanUndo);
+            UndoRedo.Redo();
+            Check(!obj.IsActive);
+            obj.SetActive(true);
+            UndoRedo.Clear();
+            obj.Transform.Position = Vector3.One;
+            UndoRedo.Register(new PropertyChangeAction<Vector3>(v => obj.Transform.Position=v,Vector3.Zero,Vector3.One));
+            for (var y = 200; y <= 245 && obj.Number == 0; y += 3)
+            {
+                Frame(Inspector.Draw,30,y,true);
+                Frame(Inspector.Draw,70,y,true);
+                Frame(Inspector.Draw,110,y,true);
+                Frame(Inspector.Draw,110,y,false);
+            }
+            Check(obj.Number != 0);
+            var number = obj.Number;
+            UndoRedo.Undo();
+            Check(obj.Number == 0 && obj.Transform.Position == Vector3.One);
+            UndoRedo.Undo();
+            Check(obj.Transform.Position == Vector3.Zero && !UndoRedo.CanUndo);
+            UndoRedo.Redo();
+            UndoRedo.Redo();
+            Check(obj.Number == number);
+        });
+        Run("Real ImGui text editing is one history action after leaving the field", () =>
+        {
+            EditorLevelManager.NewLevel();
+            var obj = (CheckEntity)Entity.Create("Check")!;
+            Selection.Object = obj;
+            Frame(Inspector.Draw);
+            for (var y = 180; y <= 210 && !io.WantTextInput; y += 3)
+            {
+                Frame(Inspector.Draw,30,y,true);
+                Frame(Inspector.Draw,30,y,false);
+            }
+            Check(io.WantTextInput);
+            foreach (var ch in "Door-01")
+            {
+                io.AddInputCharacter(ch);
+                Frame(Inspector.Draw);
+            }
+            Check(obj.Name == "Door-01");
+            Frame(Inspector.Draw,350,500,true);
+            Frame(Inspector.Draw,350,500,false);
+            UndoRedo.Undo();
+            Check(obj.Name == "" && !UndoRedo.CanUndo);
+            UndoRedo.Redo();
+            Check(obj.Name == "Door-01");
+        });
+        RunScene("Real Palette creation and Inspector deletion participate in the same history", () =>
+        {
+            var world = Game.Instance.World;
+            Frame(Palette.Draw);
+            for (var y=48;y<=78 && world.GetAllObjects(true).Length==0;y+=3)
+            {
+                Frame(Palette.Draw,20,y,true);
+                Frame(Palette.Draw,20,y,false);
+            }
+            var brush = Selection.Object as BrushBox;
+            Check(brush != null && UndoRedo.CanUndo);
+            var reference = EditorObjectReference.Get(brush!);
+            UndoRedo.Undo();
+            Check(world.GetAllObjects(true).Length==0 && brush!.IsDestroyed);
+            UndoRedo.Redo();
+            Check(Selection.Object==reference.Current && !reference.Current.IsDestroyed);
+            Frame(Inspector.Draw);
+            for(var y=65;y<=85 && world.GetAllObjects(true).Length>0;y+=3)
+            {
+                Frame(Inspector.Draw,185,y,true);
+                Frame(Inspector.Draw,185,y,false);
+            }
+            Check(world.GetAllObjects(true).Length==0);
+            UndoRedo.Undo();
+            Check(Selection.Object==reference.Current && world.GetAllObjects(true).Length==1);
+            UndoRedo.Undo();
+            Check(world.GetAllObjects(true).Length==0);
+        });
+        Run("Real ImGui Environment checkbox joins the same undo history", () =>
+        {
+            UndoRedo.Clear();
+            var open = true;
+            void DrawEnvironment() => EnvironmentWindow.Draw(ref open);
+            Frame(DrawEnvironment);
+            var fog = Environment.IsFogEnabled;
+            for (var y = 65; y <= 100 && Environment.IsFogEnabled == fog; y += 3)
+            {
+                Frame(DrawEnvironment,15,y,true);
+                Frame(DrawEnvironment,15,y,false);
+            }
+            Check(Environment.IsFogEnabled != fog && UndoRedo.CanUndo);
+            UndoRedo.Undo();
+            Check(Environment.IsFogEnabled == fog && !UndoRedo.CanUndo);
+            UndoRedo.Redo();
+            Check(Environment.IsFogEnabled != fog);
+        });
+    }
+    finally { ImGuiNET.ImGui.DestroyContext(context); }
+}
+
 Game.Instance.World.Clear();
 Console.WriteLine("All editor checks passed.");
+
+static void RunScene(string name, Action test)
+{
+    Run(name,()=> {
+        var property = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+        var previous = Application.IsEditor;
+        property.SetValue(null,true);
+        try { EditorLevelManager.NewLevel(); test(); }
+        finally { EditorLevelManager.NewLevel(); property.SetValue(null,previous); }
+    });
+}
+
+static void RecordInspector(GameObject obj, string field, Action change, bool editing = false)
+{
+    var before = InspectorState.Capture(obj);
+    change();
+    UndoRedo.RecordEdit(obj, field, before, InspectorState.Capture(obj), state => InspectorState.Apply(obj,state), editing);
+}
 
 static bool SameEnvironment(EnvironmentData a, EnvironmentData b) =>
     a.AmbientColor.Equals(b.AmbientColor) && a.IsFogEnabled == b.IsFogEnabled &&
@@ -861,7 +1444,20 @@ static void Throws(Action action)
     throw new Exception("Expected operation to fail");
 }
 
-public sealed class CheckGame : Game { public void LoadForTest() => Load(); public void UpdateForTest() => Update(0); }
+public sealed class CheckGame : Game
+{
+    // Tool fixtures have no GPU context; the normal Game.Load now also loads a postprocess program.
+    public void LoadForTest()
+    {
+        typeof(Game).GetProperty(nameof(World))!.SetValue(this, new World());
+        Layers.Load();
+        Physics.Initialize();
+        var ui = new ProjectShockGL.UI.UIManager();
+        ui.Initialize();
+        typeof(Game).GetProperty(nameof(UIManager))!.SetValue(this, ui);
+    }
+    public void UpdateForTest() => Update(0);
+}
 public class CheckEntity : Entity
 {
     public int Starts;
@@ -899,3 +1495,10 @@ public sealed class RuntimeProbe : Entity
     public override void Update(float dt) { base.Update(dt); Updates++; }
     public override void OnTriggerEnter(GameObject other) => Enters++;
 }
+
+public sealed class ThrowingDeleteEntity : CheckEntity
+{
+    public static bool RejectDestroy = true;
+    public override void Destroy() { if (RejectDestroy) throw new InvalidOperationException("Destroy before base.Destroy"); base.Destroy(); }
+}
+

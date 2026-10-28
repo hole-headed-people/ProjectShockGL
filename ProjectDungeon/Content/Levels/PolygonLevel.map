@@ -1,16 +1,16 @@
 {
   "Environment": {
     "AmbientColor": [
-      0.0,
-      0.0,
-      0.0,
+      1.0,
+      1.0,
+      1.0,
       1.0
     ],
     "IsFogEnabled": false,
     "FogColor": [
-      0.0,
-      0.0,
-      0.0,
+      0.5,
+      0.5,
+      0.5,
       1.0
     ],
     "FogNear": 1.0,
@@ -22,15 +22,19 @@
       "Path": "BrushBox",
       "Type": 2,
       "IsActive": true,
+      "EditorGroups": [
+        "5b41ec942b22496584fc5bd64ecf0749"
+      ],
       "Brush": {
+        "Movable": false,
         "Size": [
           1.0,
           1.0,
           1.0
         ],
-        "Texture": "Test",
+        "Texture": "Default",
         "TextureFormat": 1,
-        "TextureScale": 0.15,
+        "TextureScale": 1.0,
         "Color": [
           1.0,
           1.0,
@@ -42,7 +46,7 @@
       "Position": [
         0.0,
         0.0,
-        0.0
+        3.2531142
       ],
       "Rotation": {
         "X": 0.0,
@@ -52,9 +56,9 @@
         "IsIdentity": true
       },
       "Scale": [
-        7.0208187,
-        0.19430065,
-        21.497065
+        8.7283,
+        0.30353463,
+        15.906639
       ],
       "Outputs": [],
       "Properties": {}
@@ -64,15 +68,19 @@
       "Path": "BrushBox",
       "Type": 2,
       "IsActive": true,
+      "EditorGroups": [
+        "5b41ec942b22496584fc5bd64ecf0749"
+      ],
       "Brush": {
+        "Movable": false,
         "Size": [
           1.0,
           1.0,
           1.0
         ],
-        "Texture": "Test",
+        "Texture": "Default",
         "TextureFormat": 1,
-        "TextureScale": 0.15,
+        "TextureScale": 1.0,
         "Color": [
           1.0,
           1.0,
@@ -82,9 +90,9 @@
         "Lit": true
       },
       "Position": [
-        -3.3762648,
-        2.0530128,
-        0.0
+        -0.62599885,
+        0.6931844,
+        3.7277431
       ],
       "Rotation": {
         "X": 0.0,
@@ -94,9 +102,9 @@
         "IsIdentity": true
       },
       "Scale": [
-        0.26311472,
-        4.0028415,
-        21.457062
+        7.5055313,
+        1.1537604,
+        1.8785067
       ],
       "Outputs": [],
       "Properties": {}
@@ -106,15 +114,19 @@
       "Path": "BrushBox",
       "Type": 2,
       "IsActive": true,
+      "EditorGroups": [
+        "5b41ec942b22496584fc5bd64ecf0749"
+      ],
       "Brush": {
+        "Movable": false,
         "Size": [
           1.0,
           1.0,
           1.0
         ],
-        "Texture": "Test",
+        "Texture": "Default",
         "TextureFormat": 1,
-        "TextureScale": 0.15,
+        "TextureScale": 1.0,
         "Color": [
           1.0,
           1.0,
@@ -124,181 +136,36 @@
         "Lit": true
       },
       "Position": [
-        3.3910882,
-        2.0836754,
-        0.0
+        1.8879776,
+        0.042963147,
+        1.9811091
       ],
       "Rotation": {
-        "X": 0.0,
+        "X": -0.28882033,
         "Y": 0.0,
         "Z": 0.0,
-        "W": 1.0,
-        "IsIdentity": true
-      },
-      "Scale": [
-        0.26311472,
-        4.0360746,
-        21.557491
-      ],
-      "Outputs": [],
-      "Properties": {}
-    },
-    {
-      "Name": "PlayerStart_1",
-      "Path": "PlayerStart",
-      "Type": 1,
-      "IsActive": true,
-      "Brush": null,
-      "Position": [
-        0.0,
-        1.1195091,
-        -8.903137
-      ],
-      "Rotation": {
-        "X": 0.0,
-        "Y": 0.71896446,
-        "Z": 0.0,
-        "W": 0.69504684,
+        "W": 0.95738333,
         "IsIdentity": false
       },
       "Scale": [
-        1.0,
-        1.0,
-        1.0
-      ],
-      "Outputs": [],
-      "Properties": {}
-    },
-    {
-      "Name": "BrushBox_4",
-      "Path": "BrushBox",
-      "Type": 2,
-      "IsActive": true,
-      "Brush": {
-        "Size": [
-          1.0,
-          1.0,
-          1.0
-        ],
-        "Texture": "Test",
-        "TextureFormat": 1,
-        "TextureScale": 0.15,
-        "Color": [
-          1.0,
-          1.0,
-          1.0,
-          1.0
-        ],
-        "Lit": true
-      },
-      "Position": [
-        0.0,
-        3.969252,
-        0.0
-      ],
-      "Rotation": {
-        "X": 0.0,
-        "Y": 0.0,
-        "Z": 0.0,
-        "W": 1.0,
-        "IsIdentity": true
-      },
-      "Scale": [
-        7.0208187,
-        0.19430065,
-        21.497065
-      ],
-      "Outputs": [],
-      "Properties": {}
-    },
-    {
-      "Name": "Cube_1",
-      "Path": "Cube",
-      "Type": 0,
-      "IsActive": true,
-      "Brush": null,
-      "Position": [
-        -1.8345141,
-        1.0473863,
-        7.2606783
-      ],
-      "Rotation": {
-        "X": 0.0,
-        "Y": 0.27478138,
-        "Z": 0.0,
-        "W": 0.9615068,
-        "IsIdentity": false
-      },
-      "Scale": [
-        1.0,
-        1.0,
-        1.0
-      ],
-      "Outputs": [],
-      "Properties": {}
-    },
-    {
-      "Name": "Cube_2",
-      "Path": "Cube",
-      "Type": 0,
-      "IsActive": true,
-      "Brush": null,
-      "Position": [
-        1.5427661,
-        1.0199981,
-        -2.4805098
-      ],
-      "Rotation": {
-        "X": 0.0,
-        "Y": 0.00651747,
-        "Z": 0.0,
-        "W": 0.9999788,
-        "IsIdentity": false
-      },
-      "Scale": [
-        1.0,
-        1.0,
-        1.0
-      ],
-      "Outputs": [],
-      "Properties": {}
-    },
-    {
-      "Name": "Cube_3",
-      "Path": "Cube",
-      "Type": 0,
-      "IsActive": true,
-      "Brush": null,
-      "Position": [
-        1.5427661,
-        1.0473863,
-        4.0411925
-      ],
-      "Rotation": {
-        "X": 0.0,
-        "Y": 0.00651747,
-        "Z": 0.0,
-        "W": 0.9999788,
-        "IsIdentity": false
-      },
-      "Scale": [
-        1.0,
-        1.0,
-        1.0
+        1.591249,
+        1.1537604,
+        2.6977088
       ],
       "Outputs": [],
       "Properties": {}
     },
     {
       "Name": "Light_1",
-      "Path": "Light",
+      "Path": "Placeables/Light",
       "Type": 1,
       "IsActive": true,
+      "EditorGroups": [],
       "Brush": null,
       "Position": [
-        1.6766825,
-        2.141862,
-        7.7834387
+        0.9381614,
+        4.1425934,
+        -0.110054374
       ],
       "Rotation": {
         "X": 0.0,
@@ -317,26 +184,27 @@
         "Type": 1,
         "Color": [
           1.0,
-          0.58823526,
-          0.0,
+          0.7745098,
+          0.7745098,
           1.0
         ],
-        "Intensity": 0.3,
+        "Intensity": 1.0,
         "Radius": 10.0,
         "InnerAngle": 30.0,
         "OuterAngle": 45.0
       }
     },
     {
-      "Name": "Message_1",
-      "Path": "Message",
+      "Name": "PlayerStart_1",
+      "Path": "Placeables/PlayerStart",
       "Type": 1,
       "IsActive": true,
+      "EditorGroups": [],
       "Brush": null,
       "Position": [
-        -2.188199,
-        0.9024358,
-        5.0487776
+        0.0,
+        1.1352572,
+        -1.7444266
       ],
       "Rotation": {
         "X": 0.0,
@@ -354,15 +222,200 @@
       "Properties": {}
     },
     {
-      "Name": "BeginPlayEvent_1",
-      "Path": "BeginPlayEvent",
+      "Name": "BrushBox_4",
+      "Path": "BrushBox",
+      "Type": 2,
+      "IsActive": true,
+      "EditorGroups": [
+        "5b41ec942b22496584fc5bd64ecf0749"
+      ],
+      "Brush": {
+        "Movable": true,
+        "Size": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "Texture": "Default",
+        "TextureFormat": 1,
+        "TextureScale": 1.0,
+        "Color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "Lit": true
+      },
+      "Position": [
+        -3.2126722,
+        -1.2574185,
+        0.0050349236
+      ],
+      "Rotation": {
+        "X": 0.0,
+        "Y": 0.0,
+        "Z": 0.0,
+        "W": 1.0,
+        "IsIdentity": true
+      },
+      "Scale": [
+        2.270808,
+        3.5040293,
+        5.510099
+      ],
+      "Outputs": [],
+      "Properties": {}
+    },
+    {
+      "Name": "BrushBox_5",
+      "Path": "BrushBox",
+      "Type": 2,
+      "IsActive": true,
+      "EditorGroups": [
+        "5b41ec942b22496584fc5bd64ecf0749"
+      ],
+      "Brush": {
+        "Movable": false,
+        "Size": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "Texture": "Default",
+        "TextureFormat": 1,
+        "TextureScale": 1.0,
+        "Color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "Lit": true
+      },
+      "Position": [
+        -1.0376725,
+        1.1791774,
+        3.7268088
+      ],
+      "Rotation": {
+        "X": -0.20422682,
+        "Y": -0.67697227,
+        "Z": -0.20422682,
+        "W": 0.67697227,
+        "IsIdentity": false
+      },
+      "Scale": [
+        1.8712835,
+        1.1537604,
+        2.6977088
+      ],
+      "Outputs": [],
+      "Properties": {}
+    },
+    {
+      "Name": "BrushBox_6",
+      "Path": "BrushBox",
+      "Type": 2,
+      "IsActive": true,
+      "EditorGroups": [
+        "5b41ec942b22496584fc5bd64ecf0749"
+      ],
+      "Brush": {
+        "Movable": false,
+        "Size": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "Texture": "Default",
+        "TextureFormat": 1,
+        "TextureScale": 1.0,
+        "Color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "Lit": true
+      },
+      "Position": [
+        -3.1080263,
+        1.827595,
+        3.7277431
+      ],
+      "Rotation": {
+        "X": 0.0,
+        "Y": 0.0,
+        "Z": 0.0,
+        "W": 1.0,
+        "IsIdentity": true
+      },
+      "Scale": [
+        2.5231643,
+        1.1537604,
+        1.8785067
+      ],
+      "Outputs": [],
+      "Properties": {}
+    },
+    {
+      "Name": "BrushBox_7",
+      "Path": "BrushBox",
+      "Type": 2,
+      "IsActive": true,
+      "EditorGroups": [
+        "5b41ec942b22496584fc5bd64ecf0749"
+      ],
+      "Brush": {
+        "Movable": false,
+        "Size": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "Texture": "Default",
+        "TextureFormat": 1,
+        "TextureScale": 1.0,
+        "Color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "Lit": true
+      },
+      "Position": [
+        0.0,
+        1.2601736,
+        -3.7271926
+      ],
+      "Rotation": {
+        "X": 0.0,
+        "Y": 0.0,
+        "Z": 0.0,
+        "W": 1.0,
+        "IsIdentity": true
+      },
+      "Scale": [
+        8.7283,
+        2.2945685,
+        1.8785067
+      ],
+      "Outputs": [],
+      "Properties": {}
+    },
+    {
+      "Name": "LinearMovement_1",
+      "Path": "Placeables/LinearMovement",
       "Type": 1,
       "IsActive": true,
+      "EditorGroups": [],
       "Brush": null,
       "Position": [
-        0.49895394,
-        0.84007335,
-        15.054711
+        -5.9063053,
+        0.0,
+        0.0
       ],
       "Rotation": {
         "X": 0.0,
@@ -376,15 +429,148 @@
         1.0,
         1.0
       ],
+      "Outputs": [],
+      "Properties": {
+        "Speed": 1.007,
+        "SnapDistance": 0.02,
+        "IsLoop": false,
+        "StartOnAwake": false,
+        "IsRelative": true,
+        "Position": [
+          0.0,
+          1.921,
+          0.0
+        ],
+        "TargetName": "BrushBox_4"
+      }
+    },
+    {
+      "Name": "TestInteractive_1",
+      "Path": "Placeables/TestInteractive",
+      "Type": 1,
+      "IsActive": true,
+      "EditorGroups": [],
+      "Brush": null,
+      "Position": [
+        3.5202963,
+        0.5072673,
+        7.8494678
+      ],
+      "Rotation": {
+        "X": 0.0,
+        "Y": 1.0,
+        "Z": 0.0,
+        "W": 0.0,
+        "IsIdentity": false
+      },
+      "Scale": [
+        0.3534547,
+        0.3534547,
+        0.3534547
+      ],
       "Outputs": [
         {
-          "Event": "OnBeginPlay",
-          "TargetName": "Message_1",
-          "Input": "Print",
-          "Parameter": "TestTestTest"
+          "Event": "OnInteract",
+          "TargetName": "LinearMovement_1",
+          "Input": "Move",
+          "Parameter": "false"
         }
       ],
+      "Properties": {
+        "IsInteractable": true
+      }
+    },
+    {
+      "Name": "BrushBox_8",
+      "Path": "BrushBox",
+      "Type": 2,
+      "IsActive": true,
+      "EditorGroups": [
+        "5b41ec942b22496584fc5bd64ecf0749"
+      ],
+      "Brush": {
+        "Movable": false,
+        "Size": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "Texture": "Default",
+        "TextureFormat": 1,
+        "TextureScale": 1.0,
+        "Color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "Lit": true
+      },
+      "Position": [
+        -0.628234,
+        2.6526225,
+        4.7680545
+      ],
+      "Rotation": {
+        "X": 0.0,
+        "Y": 0.0,
+        "Z": 0.0,
+        "W": 1.0,
+        "IsIdentity": true
+      },
+      "Scale": [
+        7.5636015,
+        5.1532226,
+        0.31328973
+      ],
+      "Outputs": [],
       "Properties": {}
+    },
+    {
+      "Name": "Light_2",
+      "Path": "Placeables/Light",
+      "Type": 1,
+      "IsActive": true,
+      "EditorGroups": [],
+      "Brush": null,
+      "Position": [
+        -0.38198757,
+        3.4431844,
+        7.991307
+      ],
+      "Rotation": {
+        "X": 0.0,
+        "Y": 0.0,
+        "Z": 0.0,
+        "W": 1.0,
+        "IsIdentity": true
+      },
+      "Scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "Outputs": [],
+      "Properties": {
+        "Type": 1,
+        "Color": [
+          0.7621107,
+          0.75490195,
+          1.0,
+          1.0
+        ],
+        "Intensity": 1.0,
+        "Radius": 10.0,
+        "InnerAngle": 30.0,
+        "OuterAngle": 45.0
+      }
+    }
+  ],
+  "Groups": [
+    {
+      "Id": "5b41ec942b22496584fc5bd64ecf0749",
+      "Name": "Static",
+      "Visible": true
     }
   ]
 }

@@ -54,4 +54,43 @@ public class Entity : Object
         
         return entity;
     }
+
+    public void InvokeEvent(string name)
+    {
+        InvokeEventCore(name, null, false);
+    }
+
+    public void InvokeEvent(string name, object? value)
+    {
+        InvokeEventCore(name, value, true);
+    }
+
+    private void InvokeEventCore(string name, object? value, bool hasValue)
+    {
+        foreach (var output in Outputs.ToArray())
+        {
+            if (output.Event != name)
+            {
+                continue;
+            }
+
+            var target = Game.Instance.World.Find(output.TargetName);
+
+            if (target == null)
+            {
+                Console.WriteLine($"Trigger target not found: {output.TargetName}");
+                
+                continue;
+            }
+
+            if (hasValue)
+            {
+                InputInvoker.Invoke(target, output.Input, output.Parameter, value);
+            }
+            else
+            {
+                InputInvoker.Invoke(target, output.Input, output.Parameter);
+            }
+        }
+    }
 }

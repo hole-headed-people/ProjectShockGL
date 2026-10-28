@@ -16,6 +16,7 @@ public class Placeable
     public string Path { get; init; } = string.Empty;
     public PlaceableType Type { get; init; }
     public bool IsActive { get; init; } = true;
+    public string[] EditorGroups { get; init; } = [];
     public BrushBoxData? Brush { get; init; }
     public Vector3 Position { get; init; }
     public Quaternion Rotation { get; init; } = Quaternion.Identity;

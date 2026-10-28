@@ -1,0 +1,6 @@
+﻿{
+  "Class": "ProjectShockGL.Placeables.LevelLoader, ProjectShockGL",
+  "Parameters": {
+    "DebugBillboard": "Editor/LevelLoader"
+  }
+}

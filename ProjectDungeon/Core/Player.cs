@@ -10,18 +10,16 @@ public enum InputMode
     UI
 }
 
-public class Player : Core_Object
+public class Player : Controller
 {
     private InputMode _inputMode;
     private bool _isInputEnabled;
-    
-    private Character? _character;
 
-    public override void Update(float deltaTime)
+    public override void Update(float deltaSeconds)
     {
-        base.Update(deltaTime);
+        base.Update(deltaSeconds);
 
-        if (_character == null || !_isInputEnabled)
+        if (GetCharacter() == null || !_isInputEnabled)
         {
             return;
         }
@@ -41,21 +39,6 @@ public class Player : Core_Object
     protected virtual void OnGameInput(){}
     protected virtual void OnUIInput(){}
     protected virtual void OnGameOrUIInput(){}
-    
-    protected virtual void OnCharacterRemoved(Character character){}
-    protected virtual void OnCharacterAdded(Character character){}
-    
-    public void SetCharacter(Character character)
-    {
-        if (_character != null)
-        {
-            OnCharacterRemoved(_character);
-        }
-        
-        _character = character;
-        
-        OnCharacterAdded(_character);
-    }
 
     public void SetInputMode(InputMode mode)
     {
@@ -67,10 +50,5 @@ public class Player : Core_Object
     public void SetInputEnabled(bool isEnabled)
     {
         _isInputEnabled = isEnabled;
-    }
-
-    public Character? GetCharacter()
-    {
-        return _character;
     }
 }

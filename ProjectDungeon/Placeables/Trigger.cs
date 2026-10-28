@@ -1,4 +1,4 @@
-﻿using ProjectDungeon.Game;
+﻿using ProjectDungeon.Core;
 using ProjectShockGL;
 using ProjectShockGL.Core;
 using Object = ProjectShockGL.Core.Object;
@@ -7,6 +7,10 @@ namespace ProjectDungeon.Placeables;
 
 public class Trigger : Entity
 {
+    [Editable] public bool CanTriggeredByPlayer { get; set; }
+    [Editable] public bool CanTriggeredByObject { get; set; }
+    [Editable] public string ObjectName { get; set; } = "";
+    
     public override void Create()
     {
         base.Create();
@@ -21,28 +25,10 @@ public class Trigger : Entity
     {
         base.OnTriggerEnter(other);
 
-        if (other is not ShockPlayerCharacter)
+        if ((CanTriggeredByPlayer && other is Character character && character.GetController() is Player) ||
+            (CanTriggeredByObject && !string.IsNullOrEmpty(ObjectName) && other.Name == ObjectName))
         {
-            return;
-        }
-
-        foreach (var output in Outputs)
-        {
-            if (output.Event != "OnTriggerEnter")
-            {
-                continue;
-            }
-
-            var target = ProjectShockGL.Core.Game.Instance.World.Find(output.TargetName);
-
-            if (target == null)
-            {
-                Console.WriteLine($"Trigger target not found: {output.TargetName}");
-                
-                continue;
-            }
-            
-            InputInvoker.Invoke(target, output.Input, output.Parameter);
+            InvokeEvent("OnTriggerEnter");
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using ProjectShockGL.Rendering;
 
 namespace ProjectShockGL.Core;
@@ -20,6 +20,8 @@ public class QuadComponent : RenderComponent
             Rotation = Parent.Transform.Rotation,
             Size = UseParentScale ? new Vector2(parentScale.X, parentScale.Y) * Scale : new Vector2(Scale),
             Texture = Texture,
+            Shader = Shader,
+            ShaderParameters = Shader == null ? null : ShaderParameters.Snapshot(),
             Lit = Lit,
             IgnoreDepth = IgnoreDepth,
             RenderOrder = RenderOrder

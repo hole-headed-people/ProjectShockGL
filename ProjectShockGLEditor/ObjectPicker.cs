@@ -29,7 +29,7 @@ public static class ObjectPicker
 
         foreach (var obj in objects)
         {
-            if (!obj.IsActive || obj.IsDestroyed)
+            if (!obj.IsActive || obj.IsDestroyed || !obj.IsEditorVisible)
             {
                 continue;
             }

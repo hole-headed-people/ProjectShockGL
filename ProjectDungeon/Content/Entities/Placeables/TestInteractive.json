@@ -1,0 +1,6 @@
+﻿{
+  "Class": "ProjectDungeon.Placeables.TestInteractive, ProjectDungeon",
+  "Parameters": {
+    "DebugBillboard": "Editor/Entity"
+  }
+}

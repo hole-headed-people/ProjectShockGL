@@ -50,7 +50,135 @@ public class CharacterController : CapsuleCollider
     public bool IsGrounded { get; private set; }
     public Vector3 GroundNormal { get; private set; }
     public Vector3 LastDisplacement { get; private set; }
+    
+    internal void ResolveOverlaps(IEnumerable<Collider> colliders)
+    {
+        if (IsTrigger || IsDestroyed || !IsEnabled || Parent.IsDestroyed || !Parent.IsActive)
+        {
+            return;
+        }
+        
+        var radius = WorldRadius;
 
+        if (!float.IsFinite(radius) || radius <= 0f)
+        {
+            return;
+        }
+        
+        radius -= MathF.Min(SkinWidth, radius * 0.1f);
+        
+        var obstacles = colliders.Where(other => other.Parent != Parent && !other.IsTrigger &&
+            (CollisionMask & Parent.CollidesWith & other.Parent.Layer) != 0 &&
+            (other.Parent.CollidesWith & Parent.Layer) != 0).ToArray();
+        
+        var margin = MathF.Max(radius * 0.0001f, 0.000001f);
+        var corrected = false;
+        
+        for (var iteration = 0; iteration < 8; iteration++)
+        {
+            var moved = false;
+            
+            foreach (var obstacle in obstacles)
+            {
+                var (a, b) = GetWorldSegment();
+                
+                if (!PhysicsHelper.IsFinite(a) || !PhysicsHelper.IsFinite(b) ||
+                    !PhysicsHelper.CapsuleIntersectsCollider(a, b, radius, obstacle))
+                {
+                    continue;
+                }
+                
+                var bounds = obstacle.GetWorldBounds();
+                var limit = Vector3.Distance(Vector3.Min(Vector3.Min(a, b), bounds.min),
+                    Vector3.Max(Vector3.Max(a, b), bounds.max)) + radius * 2;
+
+                if (!float.IsFinite(limit) || limit <= 0)
+                {
+                    continue;
+                }
+                
+                var directions = new List<Vector3> { PhysicsHelper.CapsuleContactNormal(a, b, obstacle) };
+                var rotation = obstacle is BoxCollider ? obstacle.Parent.Transform.Rotation : Quaternion.Identity;
+                
+                foreach (var axis in new[] { Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ })
+                {
+                    var direction = Vector3.Transform(axis, rotation);
+                    
+                    directions.Add(direction);
+                    directions.Add(-direction);
+                }
+                
+                var best = float.PositiveInfinity;
+                var correction = Vector3.Zero;
+                
+                foreach (var candidate in directions)
+                {
+                    if (!PhysicsHelper.TryNormalize(candidate, out var direction))
+                    {
+                        continue;
+                    }
+
+                    if (PhysicsHelper.CapsuleIntersectsCollider(a + direction * limit, b + direction * limit, radius,
+                            obstacle))
+                    {
+                        continue;
+                    }
+                    
+                    var low = 0f;
+                    var high = limit;
+                    
+                    for (var j = 0; j < 24; j++)
+                    {
+                        var mid = (low + high) * 0.5f;
+                        
+                        if (PhysicsHelper.CapsuleIntersectsCollider(a + direction * mid, b + direction * mid, radius,
+                                obstacle))
+                        {
+                            low = mid;
+                        }
+
+                        else
+                        {
+                            high = mid;
+                        }
+                    }
+
+                    if (high >= best)
+                    {
+                        continue;
+                    }
+                    
+                    best = high;
+                    correction = direction * (high + margin);
+                }
+
+                if (!float.IsFinite(best))
+                {
+                    continue;
+                }
+                
+                Parent.Transform.Position += correction;
+                
+                _stairSupportPosition = null;
+                
+                moved = true;
+                corrected = true;
+            }
+
+            if (!moved)
+            {
+                break;
+            }
+        }
+        
+        if (corrected)
+        {
+            var displacement = LastDisplacement;
+            
+            Move(Vector3.Zero);
+            LastDisplacement = displacement;
+        }
+    }
 
     public CollisionFlags Move(Vector3 displacement)
     {

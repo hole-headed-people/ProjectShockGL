@@ -15,16 +15,13 @@ public static class Application
     public static event Action<GL, IWindow, IInputContext>? LoadGl;
 
     public static event Action? Load;
-    
     public static event Action<float>? Update;
-
     public static event Action<float>? BeforeRender;
     public static event Action<Graphics>? Render;
+    public static event Action<Graphics>? RenderOverlay;
     public static event Action<Graphics>? RenderUI;
     public static event Action<float>? AfterRender;
-
     public static event Action<Vector2D<int>>? Resized;
-    
     public static event Action? Unload;
     public static event Func<bool>? Closing;
     
@@ -45,7 +42,6 @@ public static class Application
     private static bool _closeApproved;
     private static bool _hasUnloaded;
     
-    public static double Time { get; private set; }
     public static double Fps { get; private set; }
     public static double FrameTimeMs { get; private set; }
     public static bool IsEditor { get; private set; }
@@ -134,7 +130,9 @@ public static class Application
         Input.Initialize(_inputContext);
         Content.Initialize(_gl);
         
-        _renderer = new Renderer(_gl, _window.Size.X, _window.Size.Y, IsEditor ? EditorPreview : null);
+        _renderer = new Renderer(_gl, _window.FramebufferSize.X, _window.FramebufferSize.Y,
+            IsEditor ? EditorPreview : null);
+        
         _graphics = new Graphics(_renderer);
         
         Camera.Initialize(_window);
@@ -182,14 +180,39 @@ public static class Application
             }
         }
 
-        Time += deltaTime;
+        AdvanceTime(deltaTime);
         Update?.Invoke((float)deltaTime);
         
         Input.Update();
     }
 
+    private static void AdvanceTime(double deltaTime)
+    {
+        if (!double.IsFinite(deltaTime) || deltaTime < 0 || deltaTime > float.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(deltaTime));
+        }
+
+        var scaled = deltaTime * Time.TimeScale;
+
+        if (scaled > float.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(deltaTime));
+        }
+        
+        Time.UnscaledDeltaSeconds = (float)deltaTime;
+        Time.DeltaSeconds = (float)scaled;
+        Time.UnscaledElapsedTime += deltaTime;
+        Time.ElapsedTime += scaled;
+    }
+
     private static void OnRender(double deltaTime)
     {
+        if (_window.FramebufferSize.X <= 0 || _window.FramebufferSize.Y <= 0)
+        {
+            return;
+        }
+        
         _frameCount++;
         _fpsTimer += deltaTime;
 
@@ -206,7 +229,11 @@ public static class Application
 
         BeforeRender?.Invoke((float)deltaTime);
         
-        Render?.Invoke(_graphics);
+        _graphics.BeginWorld();
+        try { Render?.Invoke(_graphics); }
+        finally { _graphics.EndWorld(); }
+
+        RenderOverlay?.Invoke(_graphics);
 
         RenderUI?.Invoke(_graphics);
 

@@ -5,6 +5,7 @@ namespace ProjectShockGL.Core;
 
 public sealed class BrushBoxData
 {
+    public bool Movable { get; init; }
     public Vector3 Size { get; init; } = Vector3.One;
     public string Texture { get; init; } = "WhitePixel";
     public TextureFormat TextureFormat { get; init; } = TextureFormat.Jpeg;

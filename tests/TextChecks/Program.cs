@@ -140,6 +140,185 @@ void Render()
     Check((uint)gl.GetInteger(GetPName.CurrentProgram) == unlitProgram && gl.IsEnabled(EnableCap.DepthTest));
     graphics.EndDraw();
     Console.WriteLine("PASS: DrawLine2D depth override keeps the line unlit and restores depth testing");
+    var deformation = Content.LoadShaderProgram("Deform", "Unlit");
+    Check(ReferenceEquals(deformation, Content.LoadShaderProgram("Deform", "Unlit")));
+    Throws<FileNotFoundException>(() => Content.LoadShaderProgram("MissingVertex", "Unlit"));
+    var settings = new ShaderParameters();
+    Throws<ArgumentException>(() => settings.Set("uModel", Matrix4x4.Identity));
+    settings.Set("uAmplitude", 0f);
+    settings.Set("uSpeed", 0f);
+    settings.Set("uFrequency", 3f);
+    settings.Set("unusedOptionalParameter", 5f);
+    var effectWorld = new World();
+    var effectObject = effectWorld.Spawn<ProjectShockGL.Core.Object>();
+    effectObject.Transform.Position = new Vector3(0, 0, -3);
+    var effectMesh = effectObject.AddComponent<ProjectShockGL.Core.MeshComponent>();
+    effectMesh.Mesh = Content.LoadMesh("Cube");
+    effectMesh.Texture = Content.GetWhitePixel();
+    effectMesh.Shader = deformation;
+    effectMesh.ShaderParameters.Set("uAmplitude", 0f);
+    effectMesh.ShaderParameters.Set("uSpeed", 0f);
+    effectMesh.ShaderParameters.Set("uFrequency", 3f);
+    effectWorld.Update(0, simulate: false);
+    Camera.Active.Orthographic = true;
+    Camera.Active.OrthoSize = 4;
+    float ReadFloat(string name)
+    {
+        unsafe
+        {
+            float result;
+            gl.GetUniform(deformation.Handle, gl.GetUniformLocation(deformation.Handle, name), &result);
+            return result;
+        }
+    }
+    byte[] DrawEffect(float amplitude)
+    {
+        effectMesh.ShaderParameters.Set("uAmplitude", amplitude);
+        var queue = new RenderQueue();
+        graphics.BeginDraw(Camera.Active);
+        effectWorld.Render(queue);
+        // A queued draw owns a snapshot, even if the component changes before Flush.
+        effectMesh.ShaderParameters.Set("uAmplitude", 9f);
+        queue.Flush(graphics);
+        Near(ReadFloat("uAmplitude"), amplitude);
+        gl.Finish();
+        var image = new byte[640 * 240 * 4];
+        unsafe { fixed (byte* pixels = image) gl.ReadPixels(0, 0, 640, 240, PixelFormat.Rgba, PixelType.UnsignedByte, pixels); }
+        Check(gl.GetError() == GLEnum.NoError);
+        return image;
+    }
+    var straightImage = DrawEffect(0f);
+    var deformedImage = DrawEffect(0.6f);
+    var changedPixels = 0;
+    for (var i = 0; i < straightImage.Length; i += 4)
+        if (straightImage[i] != deformedImage[i]) changedPixels++;
+    Check(changedPixels > 200);
+    // Draw a second object with independent values, then omit the amplitude entirely.
+    graphics.DrawMesh(effectMesh.Mesh!, effectObject.Transform.Position, Quaternion.Identity, Vector3.One,
+        effectMesh.Texture!, Color.White, shader: deformation, shaderParameters: settings);
+    Near(ReadFloat("uAmplitude"), 0);
+    graphics.DrawMesh(effectMesh.Mesh!, effectObject.Transform.Position, Quaternion.Identity, Vector3.One,
+        effectMesh.Texture!, Color.White, shader: deformation);
+    Near(ReadFloat("uAmplitude"), 0.2f); // GLSL initializer, not the previous object's value.
+    var wrongType = new ShaderParameters();
+    wrongType.Set("uAmplitude", new Vector4(1));
+    Throws<ArgumentException>(() => graphics.DrawMesh(effectMesh.Mesh!, effectObject.Transform.Position,
+        Quaternion.Identity, Vector3.One, effectMesh.Texture!, Color.White,
+        shader: deformation, shaderParameters: wrongType));
+    // Both vertex/fragment combinations must link and draw, including the standard lighting uniforms.
+    var litDeformation = Content.LoadShaderProgram("Deform", "Lit");
+    graphics.DrawMesh(effectMesh.Mesh!, effectObject.Transform.Position, Quaternion.Identity, Vector3.One,
+        effectMesh.Texture!, Color.White, shader: litDeformation, shaderParameters: settings);
+    Check(gl.GetError() == GLEnum.NoError);
+    var shaderEnvironment = ProjectShockGL.Environment.Capture();
+    try
+    {
+        ProjectShockGL.Environment.Apply(new ProjectShockGL.Core.EnvironmentData { AmbientColor = Color.Black, IsFogEnabled = false });
+        byte[] CustomLitPixel()
+        {
+            graphics.BeginDraw(Camera.Active);
+            graphics.DrawMesh(effectMesh.Mesh!, effectObject.Transform.Position, Quaternion.Identity, Vector3.One,
+                effectMesh.Texture!, Color.White, shader: litDeformation, shaderParameters: settings);
+            gl.Finish();
+            var pixel = new byte[4];
+            unsafe { fixed (byte* data = pixel) gl.ReadPixels(320, 120, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+            return pixel;
+        }
+        Check(CustomLitPixel()[0] < 10);
+        preview.Unlit = true;
+        Check(CustomLitPixel()[0] > 240);
+        preview.Unlit = false;
+        preview.EnvironmentEnabled = false;
+        Check(CustomLitPixel()[0] > 240);
+        Check(gl.GetError() == GLEnum.NoError);
+    }
+    finally
+    {
+        preview.Unlit = false;
+        preview.EnvironmentEnabled = true;
+        ProjectShockGL.Environment.Apply(shaderEnvironment);
+    }
+    Console.WriteLine("PASS: Custom Lit shader respects editor Unlit and Environment overrides");
+    effectWorld.Clear();
+    Check(deformation.Handle != 0 && gl.IsProgram(deformation.Handle));
+    Camera.Active.Orthographic = false;
+    Console.WriteLine("PASS: Custom vertex deformation changes pixels, isolates parameters, snapshots queued draws and supports Lit/Unlit");
+    var demoWorld = new World();
+    var demo = (ProjectDungeon.Placeables.DeformationExample)ProjectShockGL.Core.Entity.Create("DeformationExample", demoWorld)!;
+    demo.Amplitude = 0.45f;
+    demo.Speed = 1.25f;
+    demo.Frequency = 4;
+    var placement = new ProjectShockGL.Core.Placeable
+    {
+        Type = ProjectShockGL.Core.PlaceableType.Entity, Path = demo.Path,
+        Properties = EditableProperties.Get(demo.GetType()).ToDictionary(p => p.Name, p => p.GetValue(demo)!)
+    };
+    var json = Newtonsoft.Json.JsonConvert.SerializeObject(placement, ProjectShockGL.Tools.JsonHelper.GetSettings());
+    var loadedPlacement = Newtonsoft.Json.JsonConvert.DeserializeObject<ProjectShockGL.Core.Placeable>(json,
+        ProjectShockGL.Tools.JsonHelper.GetSettings())!;
+    var loadedDemo = (ProjectDungeon.Placeables.DeformationExample)LevelManager.CreateObject(demoWorld, loadedPlacement);
+    Check(loadedDemo.Amplitude == 0.45f && loadedDemo.Speed == 1.25f && loadedDemo.Frequency == 4);
+    Check(ReferenceEquals(demo.GetComponent<ProjectShockGL.Core.MeshComponent>()!.Shader,
+        loadedDemo.GetComponent<ProjectShockGL.Core.MeshComponent>()!.Shader));
+    loadedDemo.Amplitude = 0;
+    Check(demo.Amplitude == 0.45f);
+    demoWorld.Clear();
+    Console.WriteLine("PASS: DeformationExample asset creates, serializes editable parameters and restores independent instances");
+    using (var vertex = new Shader(gl, ShaderType.VertexShader, """
+        #version 330 core
+        layout(location=0) in vec3 aPosition;
+        uniform mat4 uProjection, uView, uModel;
+        uniform mat4 effectTransform = mat4(1.0);
+        uniform vec2 effectOffset;
+        uniform vec3 effectBias;
+        void main() { gl_Position=uProjection*uView*uModel*effectTransform*vec4(aPosition+effectBias+vec3(effectOffset,0),1); }
+        """))
+    using (var fragment = new Shader(gl, ShaderType.FragmentShader, """
+        #version 330 core
+        uniform vec4 effectTint;
+        uniform bool effectEnabled;
+        uniform int effectCount;
+        uniform float effectGain;
+        out vec4 FragColor;
+        void main() { FragColor=effectEnabled ? effectTint*effectGain*float(effectCount) : vec4(0); }
+        """))
+    using (var parameterProgram = (ShaderProgram)Activator.CreateInstance(typeof(ShaderProgram),
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance, null,
+        new object[] { gl, vertex, fragment }, null)!)
+    {
+        var values = new ShaderParameters();
+        values.Set("effectTransform", Matrix4x4.CreateScale(0.5f));
+        values.Set("effectOffset", new Vector2(0.1f, 0.2f));
+        values.Set("effectBias", new Vector3(0.3f, 0.4f, 0.5f));
+        values.Set("effectTint", new Color(0.2f, 0.4f, 0.6f, 1));
+        values.Set("effectEnabled", true);
+        values.Set("effectCount", 2);
+        values.Set("effectGain", 0.5f);
+        graphics.BeginDraw(Camera.Active);
+        graphics.DrawQuad(new Vector3(0, 0, -3), Quaternion.Identity, Vector2.One,
+            Content.GetWhitePixel(), Color.White, shader: parameterProgram, shaderParameters: values);
+        float[] ReadValues(string name)
+        {
+            var result = new float[16];
+            unsafe { fixed (float* data = result) gl.GetUniform(parameterProgram.Handle, gl.GetUniformLocation(parameterProgram.Handle, name), data); }
+            return result;
+        }
+        Near(ReadValues("effectOffset")[1], 0.2f);
+        Near(ReadValues("effectBias")[2], 0.5f);
+        Near(ReadValues("effectTint")[2], 0.6f);
+        Near(ReadValues("effectCount")[0], 2);
+        Near(ReadValues("effectEnabled")[0], 1);
+        Near(ReadValues("effectTransform")[0], 0.5f);
+        values.Remove("effectTransform");
+        values.Clear();
+        graphics.DrawBillboard(new Vector3(0, 0, -3), Vector2.One, Content.GetWhitePixel(), Color.White,
+            shader: parameterProgram, shaderParameters: values);
+        Near(ReadValues("effectTransform")[0], 1); // GLSL mat4 initializer restored.
+        Near(ReadValues("effectEnabled")[0], 0);
+        Near(ReadValues("effectTint")[2], 0);
+        Check(gl.GetError() == GLEnum.NoError);
+    }
+    Console.WriteLine("PASS: Typed uniforms support vectors, Color, matrix, bool and int, and Clear restores GLSL defaults");
     var lightWorld = new World();
     for (var i = 0; i < 17; i++) lightWorld.Spawn<ProjectShockGL.Core.Light>().SetActive(false);
     var point = lightWorld.Spawn<ProjectShockGL.Core.Light>();
@@ -397,7 +576,7 @@ void Render()
     canvas.Destroy();
     Check(!font.IsDisposed);
     Content.UnloadAll();
-    Check(font.IsDisposed);
+    Check(font.IsDisposed && deformation.Handle == 0 && litDeformation.Handle == 0);
     Check(gl.GetError() == GLEnum.NoError);
     Console.WriteLine("PASS: Hidden OpenGL rendering, clipping, font cache and lifetime");
 }

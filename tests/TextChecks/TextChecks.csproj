@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../ProjectShockGL/ProjectShockGL.csproj" />
+    <ProjectReference Include="../../ProjectDungeon/ProjectDungeon.csproj" />
   </ItemGroup>
 </Project>

@@ -172,6 +172,7 @@ public static class LevelManager
         }
 
         obj.Name = placeable.Name;
+        obj.EditorGroups.AddRange(placeable.EditorGroups ?? []);
         
         if (obj is Entity entity)
         {
@@ -233,6 +234,7 @@ public static class LevelManager
         var brush = world.Spawn<BrushBox>();
         
         brush.Size = data.Size;
+        brush.Movable = data.Movable;
         brush.TextureName = data.Texture;
         brush.TextureFormat = data.TextureFormat;
         brush.TextureScale = data.TextureScale;

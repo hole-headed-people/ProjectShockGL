@@ -56,7 +56,15 @@ public static class ObjectManipulator
             
             if (after != _before)
             {
-                UndoRedo.Register(new PropertyChangeAction<TransformState>(state => state.Apply(target.Transform), _before, after));
+                var reference = EditorObjectReference.Get(target);
+                
+                UndoRedo.Register(new PropertyChangeAction<TransformState>(state =>
+                {
+                    if (!reference.Current.IsDestroyed)
+                    {
+                        state.Apply(reference.Current.Transform);
+                    }
+                }, _before, after));
             }
         }
         
@@ -73,7 +81,7 @@ public static class ObjectManipulator
         
         var target = Selection.Object;
 
-        if (target == null || target.IsDestroyed)
+        if (target == null || target.IsDestroyed || !target.IsEditorVisible)
         {
             return false;
         }

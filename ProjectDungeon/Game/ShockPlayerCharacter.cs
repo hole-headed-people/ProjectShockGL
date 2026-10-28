@@ -9,8 +9,8 @@ namespace ProjectDungeon.Game;
 
 public class ShockPlayerCharacter : Character
 {
-    private const float MouseSensitivity = 0.05f;
-
+    private float _speed = 1.2f;
+    
     private Vector2 _lookVector;
     
     private Vector3 _inputDirection;
@@ -37,7 +37,7 @@ public class ShockPlayerCharacter : Character
         base.Start();
 
         _camera = Camera.Active;
-        _camera.ClearColor = Color.Black;
+        _camera.ClearColor = Color.White;
         _camera.Fov = 50f * MathHelper.Deg2Rad;
 
         _characterController = AddComponent<CharacterController>();
@@ -56,8 +56,9 @@ public class ShockPlayerCharacter : Character
 
         _light = ProjectShockGL.Core.Game.Instance.World.Spawn<Light>();
         
-        _light.Intensity = 1f;
+        _light.Intensity = 0f;
         _light.Radius = 10f;
+        _light.OuterAngle = 90f;
         _light.Type = LightType.Spot;
         _light.Color = Color.White;
         
@@ -65,11 +66,11 @@ public class ShockPlayerCharacter : Character
         _light.Transform.Rotation = _camera.Transform.Rotation;
     }
 
-    public override void Update(float deltaTime)
+    public override void Update(float deltaSeconds)
     {
-        base.Update(deltaTime);
+        base.Update(deltaSeconds);
         
-        UpdateMovement(deltaTime);
+        UpdateMovement(deltaSeconds);
         UpdateRotation();
 
         if (_light != null)
@@ -86,6 +87,13 @@ public class ShockPlayerCharacter : Character
         base.OnActiveChanged(isActive);
         
         _light?.SetActive(isActive);
+    }
+
+    protected override void OnControlling(Controller controller)
+    {
+        base.OnControlling(controller);
+        
+        Console.WriteLine(controller is Player);
     }
 
     public override void Destroy()
@@ -106,8 +114,8 @@ public class ShockPlayerCharacter : Character
         
         _velocity.Y -= 9.8f * deltaTime;
         
-        var desiredMove = new Vector3(worldDir.X * 3f * deltaTime, _velocity.Y * deltaTime,
-            worldDir.Z * 3f * deltaTime);
+        var desiredMove = new Vector3(worldDir.X * _speed * deltaTime, _velocity.Y * deltaTime,
+            worldDir.Z * _speed * deltaTime);
         
         var collisions = _characterController.Move(desiredMove);
         
@@ -122,8 +130,9 @@ public class ShockPlayerCharacter : Character
     {
         if (_lookVector != Vector2.Zero)
         {
-            _yaw += _lookVector.X * MouseSensitivity;
-            _pitch -= _lookVector.Y * MouseSensitivity;
+            _yaw += _lookVector.X;
+            _pitch -= _lookVector.Y;
+            
             _pitch = Math.Clamp(_pitch, -89f, 89f);
 
             _camera.Transform.Rotation = Quaternion.CreateFromYawPitchRoll(
@@ -149,5 +158,18 @@ public class ShockPlayerCharacter : Character
     public void LookAt(float angle)
     {
         _lookVector.Y = angle;
+    }
+
+    public void Interact()
+    {
+        if (!Physics.Raycast(_camera.Transform.Position, _camera.Transform.Forward, 1f, Layers.Get("Default"), out var hit))
+        {
+             return;   
+        }
+
+        if (hit.Object is Interactive interactive && interactive.IsInteractable)
+        {
+            interactive.Interact(this);
+        }
     }
 }
