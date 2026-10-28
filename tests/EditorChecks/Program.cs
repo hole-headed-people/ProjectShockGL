@@ -1275,6 +1275,19 @@ RunScene("Brush Movable survives Inspector undo, duplication and level data", ()
     Check(restored.Movable && !restored.IsStatic);
 });
 
+RunScene("Palette creation uses short unique names while retaining nested asset paths", () =>
+{
+    var folder = Path.Combine(testRoot, "Entities", "Logic");
+    Directory.CreateDirectory(folder);
+    File.Copy(Path.Combine(testRoot, "Entities", "Check.json"), Path.Combine(folder, "Check.json"), true);
+    var first = (Entity)SceneObjects.Create(PlaceableType.Entity, "Logic/Check");
+    var second = (Entity)SceneObjects.Create(PlaceableType.Entity, "Check");
+    Check(first.Name == "Check_1" && first.Path == "Logic/Check");
+    Check(second.Name == "Check_2");
+    UndoRedo.Undo(); UndoRedo.Redo();
+    Check(Selection.Object!.Name == "Check_2");
+});
+
 if (args.Contains("--imgui"))
 {
     var context = ImGuiNET.ImGui.CreateContext();
@@ -1303,7 +1316,7 @@ if (args.Contains("--imgui"))
             Selection.Object = obj;
             Frame(Inspector.Draw);
             var clicked = false;
-            for (var y = 45; y <= 62 && !clicked; y += 3)
+            for (var y = 105; y <= 135 && !clicked; y += 3)
             {
                 Frame(Inspector.Draw,15,y,true);
                 Frame(Inspector.Draw,15,y,false);
@@ -1318,7 +1331,7 @@ if (args.Contains("--imgui"))
             UndoRedo.Clear();
             obj.Transform.Position = Vector3.One;
             UndoRedo.Register(new PropertyChangeAction<Vector3>(v => obj.Transform.Position=v,Vector3.Zero,Vector3.One));
-            for (var y = 200; y <= 245 && obj.Number == 0; y += 3)
+            for (var y = 170; y <= 205 && obj.Number == 0; y += 3)
             {
                 Frame(Inspector.Draw,30,y,true);
                 Frame(Inspector.Draw,70,y,true);
@@ -1341,7 +1354,7 @@ if (args.Contains("--imgui"))
             var obj = (CheckEntity)Entity.Create("Check")!;
             Selection.Object = obj;
             Frame(Inspector.Draw);
-            for (var y = 180; y <= 210 && !io.WantTextInput; y += 3)
+            for (var y = 145; y <= 175 && !io.WantTextInput; y += 3)
             {
                 Frame(Inspector.Draw,30,y,true);
                 Frame(Inspector.Draw,30,y,false);
@@ -1377,7 +1390,7 @@ if (args.Contains("--imgui"))
             UndoRedo.Redo();
             Check(Selection.Object==reference.Current && !reference.Current.IsDestroyed);
             Frame(Inspector.Draw);
-            for(var y=65;y<=85 && world.GetAllObjects(true).Length>0;y+=3)
+            for(var y=310;y<=560 && world.GetAllObjects(true).Length>0;y+=3)
             {
                 Frame(Inspector.Draw,185,y,true);
                 Frame(Inspector.Draw,185,y,false);
@@ -1501,4 +1514,5 @@ public sealed class ThrowingDeleteEntity : CheckEntity
     public static bool RejectDestroy = true;
     public override void Destroy() { if (RejectDestroy) throw new InvalidOperationException("Destroy before base.Destroy"); base.Destroy(); }
 }
+
 

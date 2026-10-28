@@ -205,7 +205,9 @@ public static class ObjectManipulator
 
         if (IsDragging)
         {
-            ApplyDrag(mouse, vp, screenSize, SnapEnabled || ImGui.GetIO().KeyShift);
+            ApplyDrag(mouse, vp, screenSize, SnapEnabled ||
+                ProjectShockGL.Input.IsKey(Silk.NET.Input.Key.ShiftLeft) ||
+                ProjectShockGL.Input.IsKey(Silk.NET.Input.Key.ShiftRight));
             
             return true;
         }

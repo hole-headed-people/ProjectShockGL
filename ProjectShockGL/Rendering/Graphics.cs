@@ -116,6 +116,12 @@ public class Graphics
         Color color,
         float thickness = 0.02f)
     {
+        DrawBoxWireframe(min, max, Matrix4x4.Identity, color, thickness);
+    }
+
+    public void DrawBoxWireframe(Vector3 min, Vector3 max, Matrix4x4 transform,
+        Color color, float thickness = 0.02f)
+    {
         var corners = new Vector3[]
         {
             new(min.X, min.Y, min.Z),
@@ -127,6 +133,9 @@ public class Graphics
             new(max.X, max.Y, max.Z),
             new(min.X, max.Y, max.Z),
         };
+
+        for (var i = 0; i < corners.Length; i++)
+            corners[i] = Vector3.Transform(corners[i], transform);
 
         var edges = new (int a, int b)[]
         {

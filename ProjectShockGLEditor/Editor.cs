@@ -161,8 +161,8 @@ public static class Editor
         
         if (Selection.Object is { IsDestroyed: false, IsEditorVisible: true } selected)
         {
-            var bounds = selected.GetWorldBounds();
-            graphics.DrawBoxWireframe(bounds.min, bounds.max, Color.White);
+            var bounds = selected.GetLocalBounds();
+            graphics.DrawBoxWireframe(bounds.min, bounds.max, selected.Transform.GetModelMatrix(), Color.White);
 
             if (selected is ProjectShockGL.Core.Light light)
             {
@@ -184,6 +184,7 @@ public static class Editor
         
         DrawMenuBar();
         DrawToolbar();
+        DrawSceneHints();
         DrawHierarchy();
         
         ImGui.SetNextWindowPos(new Vector2(0, 82 + (_windowSize.Y - 110) * 0.32f));
@@ -502,20 +503,6 @@ public static class Editor
                 SceneGrid.Show = !grid;
             }
             
-            var speed = SceneCamera.Speed;
-
-            if (ImGui.SliderFloat("Camera speed", ref speed, 1, 30))
-            {
-                SceneCamera.Speed = speed;
-            }
-            
-            var sensitivity = SceneCamera.MouseSensitivity;
-
-            if (ImGui.SliderFloat("Mouse sensitivity", ref sensitivity, 0.02f, 1))
-            {
-                SceneCamera.MouseSensitivity = sensitivity;
-            }
-            
             ImGui.EndMenu();
         }
         
@@ -611,13 +598,52 @@ public static class Editor
             }
             
             ImGui.SameLine();
+
+            if (ImGui.Button("Camera"))
+            {
+                ImGui.OpenPopup("Camera settings");
+            }
             
-            ImGui.TextUnformatted("| Shift: snap | Esc: cancel | RMB + WASD/QE: camera | F: focus");
+            if (ImGui.BeginPopup("Camera settings"))
+            {
+                var speed = SceneCamera.Speed;
+
+                if (ImGui.SliderFloat("Camera speed", ref speed, 1, 30))
+                {
+                    SceneCamera.Speed = speed;
+                }
+                
+                var sensitivity = SceneCamera.MouseSensitivity;
+
+                if (ImGui.SliderFloat("Mouse sensitivity", ref sensitivity, 0.02f, 1))
+                {
+                    SceneCamera.MouseSensitivity = sensitivity;
+                }
+            
+                ImGui.EndPopup();
+            }
         }
         
         ImGui.End();
     }
 
+    private static void DrawSceneHints()
+    {
+        var draw = ImGui.GetForegroundDrawList();
+        var position = SceneMin + new Vector2(10, 10);
+        
+        const string text = "Shift: snap | Esc: cancel\nRMB + WASD/QE: camera | F: focus";
+        
+        var size = ImGui.CalcTextSize(text);
+        
+        draw.PushClipRect(SceneMin, SceneMax, true);
+        
+        draw.AddRectFilled(position - new Vector2(5), position + size + new Vector2(5), 0xAA202020, 4);
+        draw.AddText(position, 0xFFE0E0E0, text);
+        
+        draw.PopClipRect();
+    }
+    
     private static void DrawStatus()
     {
         ImGui.SetNextWindowPos(new Vector2(0, _windowSize.Y - 28));
@@ -692,4 +718,5 @@ public static class Editor
         action?.Invoke();
     }
 }
+
 

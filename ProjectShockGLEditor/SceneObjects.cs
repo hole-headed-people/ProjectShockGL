@@ -7,7 +7,7 @@ public static class SceneObjects
 {
     public static Object Create(PlaceableType type, string path = "")
     {
-        var stem = type == PlaceableType.BrushBox ? "BrushBox" : path;
+        var stem = type == PlaceableType.BrushBox ? "BrushBox" : Path.GetFileName(path.Replace('\\', '/'));
         return CreateRecorded(() => EditorLevelManager.CreatePlacement(new Placeable
         {
             Type = type, Path = path, Name = UniqueName(stem)

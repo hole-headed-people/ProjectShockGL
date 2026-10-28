@@ -40,47 +40,6 @@ public static class Inspector
         ImGui.PushID(obj.GetHashCode());
         ImGui.TextUnformatted(obj.GetType().Name);
         
-        var isActive = obj.IsActive;
-        
-        if (ImGui.Checkbox("IsActive", ref isActive))
-        {
-            obj.SetActive(isActive);
-            Changed("IsActive", true);
-        }
-
-        if (ImGui.Button("Focus (F)"))
-        {
-            SceneCamera.Focus(obj);
-        }
-        
-        ImGui.SameLine();
-
-        ImGui.BeginDisabled(!Editor.CanDuplicateSelection || ObjectManipulator.IsDragging);
-        
-        var duplicate = ImGui.Button("Duplicate");
-        
-        ImGui.EndDisabled();
-        
-        if (duplicate)
-        {
-            Editor.DuplicateSelection();
-            ImGui.PopID();
-            ImGui.End();
-            return;
-        }
-
-        ImGui.SameLine();
-        
-        if (ImGui.Button("Delete"))
-        {
-            Editor.DeleteSelection();
-            ImGui.PopID();
-            ImGui.End();
-            return;
-        }
-        
-        ImGui.Separator();
-
         // Position
         var pos = obj.Transform.Position;
         
@@ -114,6 +73,14 @@ public static class Inspector
         
         Finish("Scale");
         
+        var isActive = obj.IsActive;
+        
+        if (ImGui.Checkbox("IsActive", ref isActive))
+        {
+            obj.SetActive(isActive);
+            Changed("IsActive", true);
+        }
+
         if (obj is BrushBox brush)
         {
             var movable = brush.Movable;
@@ -477,9 +444,45 @@ public static class Inspector
             }
         }
 
+        if (ImGui.Button("Focus (F)"))
+        {
+            SceneCamera.Focus(obj);
+        }
+        
+        ImGui.SameLine();
+
+        ImGui.BeginDisabled(!Editor.CanDuplicateSelection || ObjectManipulator.IsDragging);
+        
+        var duplicate = ImGui.Button("Duplicate");
+        
+        ImGui.EndDisabled();
+        
+        if (duplicate)
+        {
+            Editor.DuplicateSelection();
+            ImGui.PopID();
+            ImGui.End();
+            
+            return;
+        }
+
+        ImGui.SameLine();
+        
+        if (ImGui.Button("Delete"))
+        {
+            Editor.DeleteSelection();
+            ImGui.PopID();
+            ImGui.End();
+            
+            return;
+        }
+        
+        ImGui.Separator();
+
         ImGui.PopID();
         ImGui.End();
     }
+    
     private static void Changed(string field, bool discrete = false)
     {
         var obj = _frameObject;
@@ -502,5 +505,6 @@ public static class Inspector
         }
     }
 }
+
 
 
