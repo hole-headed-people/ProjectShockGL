@@ -4,10 +4,10 @@
   "FragmentShader": "PostProcess",
   "Parameters": {
     "uVignetteStrength": 0.45,
-    "uVignetteRadius": 0.6,
+    "uVignetteRadius": 0.3,
     "uVignetteSoftness": 0.5,
-    "uGrainStrength": 0.05,
+    "uGrainStrength": 0.0,
     "uGrainSize": 1.0,
-    "uChromaticAberrationPixels": 5.0
+    "uChromaticAberrationPixels": 0.0
   }
 }

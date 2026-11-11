@@ -9,7 +9,7 @@ using Texture = ProjectShockGL.Rendering.Texture;
 using Shader = ProjectShockGL.Rendering.Shader;
 
 var root = Path.GetFullPath(args.FirstOrDefault(a => !a.StartsWith("--")) ?? ".");
-var fontPath = Path.Combine(root, "ProjectDungeon/Content/Fonts/NotoSans-Regular.ttf");
+var fontPath = Path.Combine(root, "StarterContent/Fonts/NotoSans-Regular.ttf");
 var atlas = FontAtlas.Load(fontPath, 24);
 Run("Atlas contains Latin and every Russian letter including Yo", () =>
 {
@@ -104,7 +104,7 @@ void Render()
     window.Initialize();
     using var gl = window.CreateOpenGL();
     File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "GameSettings.ini"),
-        "[Content]\nCustomPath=" + Path.Combine(root, "ProjectDungeon/Content") + "\n");
+        "[Content]\nCustomPath=" + Path.Combine(root, "StarterContent") + "\n");
     Settings.Initialize();
     Content.Initialize(gl);
     var corruptTexture = Path.Combine(AppContext.BaseDirectory, "CorruptTexture.png");
@@ -244,7 +244,7 @@ void Render()
     Camera.Active.Orthographic = false;
     Console.WriteLine("PASS: Custom vertex deformation changes pixels, isolates parameters, snapshots queued draws and supports Lit/Unlit");
     var demoWorld = new World();
-    var demo = (ProjectDungeon.Placeables.DeformationExample)ProjectShockGL.Core.Entity.Create("DeformationExample", demoWorld)!;
+    var demo = (ProjectOxygenGL.Placeables.DeformationExample)ProjectShockGL.Core.Entity.Create("DeformationExample", demoWorld)!;
     demo.Amplitude = 0.45f;
     demo.Speed = 1.25f;
     demo.Frequency = 4;
@@ -256,7 +256,7 @@ void Render()
     var json = Newtonsoft.Json.JsonConvert.SerializeObject(placement, ProjectShockGL.Tools.JsonHelper.GetSettings());
     var loadedPlacement = Newtonsoft.Json.JsonConvert.DeserializeObject<ProjectShockGL.Core.Placeable>(json,
         ProjectShockGL.Tools.JsonHelper.GetSettings())!;
-    var loadedDemo = (ProjectDungeon.Placeables.DeformationExample)LevelManager.CreateObject(demoWorld, loadedPlacement);
+    var loadedDemo = (ProjectOxygenGL.Placeables.DeformationExample)LevelManager.CreateObject(demoWorld, loadedPlacement);
     Check(loadedDemo.Amplitude == 0.45f && loadedDemo.Speed == 1.25f && loadedDemo.Frequency == 4);
     Check(ReferenceEquals(demo.GetComponent<ProjectShockGL.Core.MeshComponent>()!.Shader,
         loadedDemo.GetComponent<ProjectShockGL.Core.MeshComponent>()!.Shader));

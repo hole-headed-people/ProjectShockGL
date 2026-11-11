@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using ProjectOxygenGL.Placeables;
 using ProjectShockGL;
 using ProjectShockGL.Core;
@@ -165,8 +165,8 @@ public class Game : ProjectShockGL.Core.Game
 
     private void CreatePlayer()
     {
-        var template = Settings.GetString("Game", "PlayerClass", "ProjectDungeon.Core.Player,ProjectDungeon");
-        var type = Type.GetType(template);
+        var template = Settings.GetString("Game", "PlayerClass", "");
+        var type = string.IsNullOrWhiteSpace(template) ? null : Type.GetType(template);
 
         if (type == null)
         {
@@ -179,8 +179,8 @@ public class Game : ProjectShockGL.Core.Game
     private void SpawnPlayerCharacter()
     {
         var template =
-            Settings.GetString("Game", "PlayerCharacterClass", "ProjectDungeon.Core.Character,ProjectDungeon");
-        var type = Type.GetType(template);
+            Settings.GetString("Game", "PlayerCharacterClass", "");
+        var type = string.IsNullOrWhiteSpace(template) ? null : Type.GetType(template);
 
         if (type == null)
         {

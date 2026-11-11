@@ -27,12 +27,10 @@
 | --- | --- |
 | [ProjectShockGL](ProjectShockGL) | Движок: окно, мир, компоненты, физические запросы, ресурсы, рендер и UI |
 | [ProjectShockGLEditor](ProjectShockGLEditor) | Редактор уровней на ImGui |
-| [ProjectDungeon](ProjectDungeon) | Необязательный пример игры со своей архитектурой |
+| [StarterContent](StarterContent) | Стартовые ресурсы для редактора и собственной игры |
 | [tests](tests) | Консольные проверки систем |
 
-ProjectDungeon показывает один из способов построения игры. Оно не является обязательным устройством игры на ProjectShockGL. Можно создать собственный игровой проект или решение со своими классами и правилами.
-
-Редактор ссылается на движок и ProjectOxygenGL — библиотеку конкретной игровой архитектуры. ProjectDungeon остаётся отдельным примером и не является зависимостью редактора. Для пользовательских классов игры добавьте небольшой проект запуска редактора в решение игры со ссылками на игру и ProjectShockGLEditor. Само ядро ProjectShockGL от игровых проектов не зависит.
+Редактор ссылается на движок и ProjectOxygenGL — библиотеку конкретной игровой архитектуры. Для пользовательских классов игры добавьте небольшой проект запуска редактора в решение игры со ссылками на игру и ProjectShockGLEditor. Само ядро ProjectShockGL от игровых проектов не зависит.
 
 ## Сборка и запуск
 
@@ -47,14 +45,10 @@ ProjectDungeon показывает один из способов постро�
 
 ```sh
 dotnet build ProjectShockGL.sln
-dotnet run --project ProjectShockGLEditor/ProjectShockGLEditor.csproj
+
 ```
 
-Запуск примера игры:
-
-```sh
-dotnet run --project ProjectDungeon/ProjectDungeon.csproj
-```
+Перед первым запуском редактора укажите абсолютный путь к папке StarterContent или Content своей игры в EditorSettings.ini. Затем запустите редактор командой `dotnet run --project ProjectShockGLEditor/ProjectShockGLEditor.csproj`.
 
 В Rider или Visual Studio можно выбрать соответствующий стартовый проект. Кнопки Play внутри редактора пока нет: редактор и игра запускаются отдельно. Предупреждение NU1701 относится к целевой платформе используемого пакета ini-parser.
 
@@ -110,13 +104,13 @@ Class=MyGame.MyGame, MyGame
 PostProcessingProfile=Default
 ```
 
-Базовый Game.Load загружает профиль постобработки, даже если эффекты вам не нужны. В Content должны быть необходимые стандартные шейдеры и валидный профиль Default; для отключения эффектов можно задать Enabled=false. Не начинайте с полностью пустой папки: используйте структуру ресурсов примера как основу. Для своего жизненного цикла загрузки можно переопределить Game, учитывая обязанности базового Load.
+Базовый Game.Load загружает профиль постобработки, даже если эффекты вам не нужны. В Content должны быть необходимые стандартные шейдеры и валидный профиль Default; для отключения эффектов можно задать Enabled=false. Не начинайте с полностью пустой папки: скопируйте содержимое StarterContent в Content своей игры. Для своего жизненного цикла загрузки можно переопределить Game, учитывая обязанности базового Load.
 
 ## Первый уровень
 
-Следующие шаги используют необязательный пример ProjectDungeon:
+Следующие шаги предполагают, что вы создали игру на ProjectOxygenGL и скопировали StarterContent в её Content:
 
-1. Укажите его Content в настройках редактора.
+1. Укажите Content игры в настройках редактора.
 2. Выберите File → New или File → Open.
 3. Нажмите Create BrushBox в Palette. Новый объект появляется в начале координат.
 4. Соберите пол и стены, изменяя Transform. Назначьте текстуры.
@@ -125,7 +119,7 @@ PostProcessingProfile=Default
 7. Сохраните карту как Content/Levels/MyLevel.map.
 8. В GameSettings.ini игрового проекта задайте `[Game] StartupLevel=MyLevel` и запустите игру.
 
-В примере стартовый уровень читает [ProjectDungeon.Core.Game](ProjectDungeon/Core/Game.cs), он же создаёт игрока и персонажа после загрузки. В собственной игре эти действия определяет ваш Game.
+Стартовый уровень читает [ProjectOxygenGL.Core.Game](ProjectOxygenGL/Core/Game.cs), он же создаёт игрока и персонажа после загрузки. В собственной игре эти действия определяет ваш Game.
 
 ### Пример связи уровня
 
@@ -134,7 +128,7 @@ PostProcessingProfile=Default
 3. Добавьте Output: Event=`OnTriggerEnter`, Target=`room_light`, Input=`SetActive`, Parameter=`true`.
 4. Сохраните карту и проверьте её в игре.
 
-Trigger и понятие игрока здесь принадлежат ProjectDungeon. В собственной игре условие активации определяется вашим кодом.
+Trigger и понятие игрока здесь принадлежат ProjectOxygenGL. В собственной игре условие активации определяется вашим кодом.
 
 ## Работа в редакторе
 
@@ -435,7 +429,7 @@ mesh.ShaderParameters.Set("uAmplitude", 0.15f);
 
 Здесь mesh — ваш MeshComponent, а Deform.vert/Lit.frag находятся в Shaders. Параметры поддерживают float/int/bool, Vector2/3/4, Color и Matrix4x4. Remove и Clear удаляют переопределения. Имена uniform должны соответствовать GLSL; матрицы, текстура, освещение и прочие служебные значения передаются рендерером.
 
-В ресурсах примера есть [Deform.vert](ProjectDungeon/Content/Shaders/Deform.vert) и [Pulse.frag](ProjectDungeon/Content/Shaders/Pulse.frag). Для Pulse можно использовать пару Unlit/Pulse и параметры uPulseColor, uPulseSpeed, uPulseStrength. Деформация изображения не изменяет физический коллайдер и границы объекта.
+В ресурсах примера есть [Deform.vert](StarterContent/Shaders/Deform.vert) и [Pulse.frag](StarterContent/Shaders/Pulse.frag). Для Pulse можно использовать пару Unlit/Pulse и параметры uPulseColor, uPulseSpeed, uPulseStrength. Деформация изображения не изменяет физический коллайдер и границы объекта.
 
 ### SimplePBR: упрощённое освещение поверхности
 
@@ -549,7 +543,7 @@ Windowed использует Width/Height. Borderless использует ра
 
 Icon — изображение для окна, путь относительно приложения. Иконка exe задаётся отдельно через ApplicationIcon в csproj и ICO-файл: изменение INI не пересобирает значок exe. В репозитории эти файлы уже настроены для игры и редактора.
 
-Game/Class и UICanvasClass читает движок. StartupLevel, PlayerClass и PlayerCharacterClass читает архитектура ProjectOxygenGL: собственная игра не обязана использовать эти ключи. Layers.ini задаёт именованные слои; пример находится в [ProjectDungeon/Layers.ini](ProjectDungeon/Layers.ini).
+Game/Class и UICanvasClass читает движок. StartupLevel, PlayerClass и PlayerCharacterClass читает архитектура ProjectOxygenGL: собственная игра не обязана использовать эти ключи. Layers.ini задаёт именованные слои; пример находится в [ProjectShockGLEditor/Layers.ini](ProjectShockGLEditor/Layers.ini).
 
 ## Проверки и ограничения
 

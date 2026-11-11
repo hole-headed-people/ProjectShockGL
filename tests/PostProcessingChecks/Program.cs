@@ -20,9 +20,9 @@ var fixture = Path.Combine(AppContext.BaseDirectory, "ProfileCheckContent");
 var profiles = Path.Combine(fixture, "PostProcessProfiles");
 Directory.CreateDirectory(profiles);
 Directory.CreateDirectory(Path.Combine(fixture, "Shaders"));
-foreach (var file in Directory.GetFiles(Path.Combine(root, "ProjectDungeon/Content/Shaders")))
+foreach (var file in Directory.GetFiles(Path.Combine(root, "StarterContent/Shaders")))
     File.Copy(file, Path.Combine(fixture, "Shaders", Path.GetFileName(file)), overwrite: true);
-File.Copy(Path.Combine(root, "ProjectDungeon/Content/PostProcessProfiles/Default.json"),
+File.Copy(Path.Combine(root, "StarterContent/PostProcessProfiles/Default.json"),
     Path.Combine(profiles, "Default.json"), overwrite: true);
 File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "GameSettings.ini"), "[Content]\nCustomPath=" + fixture + "\n");
 Settings.Initialize();

@@ -5,9 +5,9 @@ using ProjectShockGL.Core;
 using ProjectShockGL.Rendering;
 using ProjectShockGL.Tools;
 
-namespace ProjectDungeon.Game;
+namespace EditorChecks;
 
-public class ShockPlayerCharacter : Character
+public class PlayerCharacterFixture : Character
 {
     protected override bool IsSaveableByDefault => false;
 

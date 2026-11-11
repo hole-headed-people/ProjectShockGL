@@ -1,10 +1,9 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
+# 
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProjectShockGL", "ProjectShockGL\ProjectShockGL.csproj", "{935126B5-E783-4120-A237-F84CC3D14C74}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProjectShockGLEditor", "ProjectShockGLEditor\ProjectShockGLEditor.csproj", "{27C39736-C404-4BEB-A330-BFA530B04B03}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProjectDungeon", "ProjectDungeon\ProjectDungeon.csproj", "{8C3C3AEA-DCBE-48AE-AAD3-1E899CFC54BC}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProjectOxygenGL", "ProjectOxygenGL\ProjectOxygenGL.csproj", "{B6D20B68-43B3-4E44-B0C0-3F5F5A0D61E2}"
 EndProject
@@ -22,10 +21,6 @@ Global
 		{27C39736-C404-4BEB-A330-BFA530B04B03}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{27C39736-C404-4BEB-A330-BFA530B04B03}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{27C39736-C404-4BEB-A330-BFA530B04B03}.Release|Any CPU.Build.0 = Release|Any CPU
-		{8C3C3AEA-DCBE-48AE-AAD3-1E899CFC54BC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{8C3C3AEA-DCBE-48AE-AAD3-1E899CFC54BC}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{8C3C3AEA-DCBE-48AE-AAD3-1E899CFC54BC}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{8C3C3AEA-DCBE-48AE-AAD3-1E899CFC54BC}.Release|Any CPU.Build.0 = Release|Any CPU
 		{B6D20B68-43B3-4E44-B0C0-3F5F5A0D61E2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{B6D20B68-43B3-4E44-B0C0-3F5F5A0D61E2}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B6D20B68-43B3-4E44-B0C0-3F5F5A0D61E2}.Release|Any CPU.ActiveCfg = Release|Any CPU

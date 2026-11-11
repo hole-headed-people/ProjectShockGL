@@ -36,7 +36,7 @@ Run("Saveable defaults exclude geometry and players without excluding other char
 {
     Check(!new GameObject().Saveable && !new BrushBox().Saveable);
     Check(new ProjectOxygenGL.Core.Character().Saveable);
-    Check(!new ProjectOxygenGL.Core.Player().Saveable && !new ProjectDungeon.Game.ShockPlayerCharacter().Saveable);
+    Check(!new ProjectOxygenGL.Core.Player().Saveable && !new EditorChecks.PlayerCharacterFixture().Saveable);
 
     var entity = new Entity();
     Check(entity.Saveable);
@@ -1622,7 +1622,7 @@ Run("Player camera keeps spawn direction and character owns its flashlight", () 
         new object[] { new Silk.NET.Maths.Vector2D<int>(800, 600) }, null)!;
     ProjectShockGL.Rendering.Camera.ToggleTo(camera);
     var world = Game.Instance.World;
-    var character = world.Spawn<ProjectDungeon.Game.ShockPlayerCharacter>();
+    var character = world.Spawn<EditorChecks.PlayerCharacterFixture>();
     Check(character.GetComponent<CharacterController>() is { Height: 2f, Radius: 0.3f });
     Check(character.GetComponent<CameraComponent>()!.LocalPosition == Vector3.UnitY * 0.6f);
     Check(ProjectShockGL.Rendering.Camera.Active == camera);
