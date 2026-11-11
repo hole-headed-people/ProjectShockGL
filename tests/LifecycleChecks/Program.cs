@@ -387,6 +387,134 @@ Run("Reordering active and pending objects preserves order and defers lifecycle 
     world.Clear();
 });
 
+Run("Debug callbacks respect mode, selection, visibility and component lifetime without starting gameplay", () =>
+{
+    var editor = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+    var debug = typeof(Application).GetProperty(nameof(Application.IsDebug))!;
+    var wasEditor = Application.IsEditor;
+    var wasDebug = Application.IsDebug;
+    var world = new World();
+    var draw = new ProjectShockGL.Rendering.DebugDraw(null!);
+
+    try
+    {
+        editor.SetValue(null, false);
+        debug.SetValue(null, false);
+        var obj = world.Spawn<DebugProbe>();
+        var part = obj.AddComponent<DebugPart>();
+        world.Update(0, simulate: false);
+        world.DebugRender(draw);
+        Check(obj.Draws == 0 && part.Draws == 0);
+        debug.SetValue(null, true);
+        world.DebugRender(draw);
+        Check(obj.Draws == 1 && part.Draws == 1 && obj.Starts == 0);
+        world.DebugRenderSelected(draw, [obj]);
+        Check(obj.SelectedDraws == 0 && part.SelectedDraws == 0);
+        part.IsEnabled = false;
+        world.DebugRender(draw);
+        Check(obj.Draws == 2 && part.Draws == 1);
+        obj.SetActive(false);
+        world.DebugRender(draw);
+        Check(obj.Draws == 2);
+
+        editor.SetValue(null, true);
+        debug.SetValue(null, false);
+        world.DebugRender(draw);
+        Check(obj.Draws == 3 && part.Draws == 2 && obj.Starts == 0);
+        world.DebugRenderSelected(draw, [obj, obj]);
+        Check(obj.SelectedDraws == 1 && part.SelectedDraws == 1);
+        var other = world.Spawn<DebugProbe>();
+        world.Update(0, simulate: false);
+        world.DebugRenderSelected(draw, [obj, other]);
+        Check(obj.SelectedDraws == 2 && other.SelectedDraws == 1);
+        obj.EditorGroups.Add("debug-hidden-test");
+        World.HiddenEditorGroups.Add("debug-hidden-test");
+        world.DebugRender(draw);
+        world.DebugRenderSelected(draw, [obj]);
+        Check(obj.Draws == 3 && obj.SelectedDraws == 2 && part.Draws == 2);
+        World.HiddenEditorGroups.Remove("debug-hidden-test");
+        obj.RemoveComponent<DebugPart>();
+        world.DebugRender(draw);
+        Check(obj.Draws == 4 && part.Draws == 2);
+        obj.Destroy();
+        world.DebugRender(draw);
+        world.DebugRenderSelected(draw, [obj]);
+        Check(obj.Draws == 4 && obj.SelectedDraws == 2);
+    }
+    finally
+    {
+        world.Clear();
+        World.HiddenEditorGroups.Remove("debug-hidden-test");
+        editor.SetValue(null, wasEditor);
+        debug.SetValue(null, wasDebug);
+    }
+});
+
+Run("KillY destroys entities only in simulation and allows overriding Kill and rearming", () =>
+{
+    var world = new World { KillY = -10f };
+    try
+    {
+        var ordinary = world.Spawn<GameObject>();
+        ordinary.Transform.Position = new System.Numerics.Vector3(0, -11, 0);
+        var doomed = world.Spawn<Entity>();
+        doomed.Transform.Position = ordinary.Transform.Position;
+        doomed.IsStatic = true;
+        var disabled = world.Spawn<Entity>();
+        disabled.Transform.Position = ordinary.Transform.Position;
+        disabled.SetActive(false);
+        var boundary = world.Spawn<Entity>();
+        boundary.Transform.Position = new System.Numerics.Vector3(0, -10, 0);
+        world.Update(.1f, simulate: false);
+        Check(!doomed.IsDestroyed);
+        world.Update(0);
+        Check(!doomed.IsDestroyed);
+        world.Update(.1f);
+        Check(doomed.IsDestroyed && !ordinary.IsDestroyed && !disabled.IsDestroyed && !boundary.IsDestroyed);
+        disabled.SetActive(true);
+        world.Update(.1f);
+        Check(disabled.IsDestroyed);
+
+        var probe = world.Spawn<KillProbe>();
+        probe.Transform.Position = ordinary.Transform.Position;
+        world.Update(.1f);
+        world.Update(.1f);
+        Check(probe.Kills == 1 && !probe.IsDestroyed);
+        probe.Transform.Position = System.Numerics.Vector3.Zero;
+        world.Update(.1f);
+        probe.Transform.Position = ordinary.Transform.Position;
+        world.Update(.1f);
+        Check(probe.Kills == 2);
+        probe.Respawn = true;
+        probe.Transform.Position = System.Numerics.Vector3.Zero;
+        world.Update(.1f);
+        probe.Transform.Position = ordinary.Transform.Position;
+        world.Update(.1f);
+        Check(probe.Kills == 3 && probe.Transform.Position.Y == 0f);
+        probe.Transform.Position = ordinary.Transform.Position;
+        world.Update(.1f);
+        Check(probe.Kills == 4);
+
+        var editor = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+        var wasEditor = Application.IsEditor;
+        editor.SetValue(null, true);
+        try
+        {
+            probe.Transform.Position = ordinary.Transform.Position;
+            world.Update(.1f);
+            Check(probe.Kills == 4);
+        }
+        finally
+        {
+            editor.SetValue(null, wasEditor);
+        }
+    }
+    finally
+    {
+        world.Clear();
+    }
+});
+
 static void Run(string name, Action test)
 {
     test();
@@ -455,7 +583,7 @@ public sealed class FailingCollider : SphereCollider
 public sealed class OwnerDestroyingComponent : Component
 {
     public static OwnerDestroyingComponent Last = null!;
-    public override void Create() { Last = this; Parent.Destroy(); }
+    public override void Create() { Last = this; Owner.Destroy(); }
 }
 
 public sealed class FailingObject : GameObject
@@ -481,4 +609,39 @@ public sealed class CountingRenderComponent : RenderComponent
 {
     public int Renders;
     public override void Render(ProjectShockGL.Rendering.RenderQueue queue) => Renders++;
+}
+
+public sealed class DebugProbe : GameObject
+{
+    public int Draws;
+    public int SelectedDraws;
+    public int Starts;
+
+    public override void Start() => Starts++;
+    public override void DebugRender(ProjectShockGL.Rendering.DebugDraw draw) => Draws++;
+    public override void DebugRenderSelected(ProjectShockGL.Rendering.DebugDraw draw) => SelectedDraws++;
+}
+
+public sealed class DebugPart : Component
+{
+    public int Draws;
+    public int SelectedDraws;
+
+    public override void DebugRender(ProjectShockGL.Rendering.DebugDraw draw) => Draws++;
+    public override void DebugRenderSelected(ProjectShockGL.Rendering.DebugDraw draw) => SelectedDraws++;
+}
+
+public sealed class KillProbe : Entity
+{
+    public int Kills;
+    public bool Respawn;
+
+    public override void Kill()
+    {
+        Kills++;
+        if (Respawn)
+        {
+            Transform.Position = System.Numerics.Vector3.Zero;
+        }
+    }
 }

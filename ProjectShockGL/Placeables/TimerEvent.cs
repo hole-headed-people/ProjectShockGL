@@ -3,6 +3,8 @@ using Timer = ProjectShockGL.Core.Timer;
 
 namespace ProjectShockGL.Placeables;
 
+[OutputEvent("OnFinished")]
+[OutputEvent("OnValueChanged")]
 public class TimerEvent : Entity
 {
     [Editable] public bool UseUnscaledTime { get; set; }

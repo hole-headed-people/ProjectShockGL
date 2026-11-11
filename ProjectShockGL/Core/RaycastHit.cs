@@ -19,7 +19,7 @@ public struct RaycastHit
     }
 
     public RaycastHit(Collider collider, float distance, Vector3 point, Vector3 normal)
-        : this(collider.Parent, distance, point, normal)
+        : this(collider.Owner, distance, point, normal)
     {
         Collider = collider;
     }

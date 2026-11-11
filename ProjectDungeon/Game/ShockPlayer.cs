@@ -1,5 +1,5 @@
 ﻿using System.Numerics;
-using ProjectDungeon.Core;
+using ProjectOxygenGL.Core;
 using ProjectShockGL;
 using Silk.NET.Input;
 
@@ -49,6 +49,16 @@ public class ShockPlayer : Player
         if (Input.IsKeyDown(Key.F))
         {
             character.Interact();
+        }
+
+        if (Input.IsKeyDown(Key.Space))
+        {
+            character.Jump();
+        }
+
+        if (Input.IsKeyUp(Key.Space))
+        {
+            character.StopJumping();
         }
         
         character.Move(new Vector3(horizontalAxis, 0f, verticalAxis));

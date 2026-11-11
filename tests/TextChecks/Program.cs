@@ -103,7 +103,7 @@ void Render()
     using var window = Window.Create(options);
     window.Initialize();
     using var gl = window.CreateOpenGL();
-    File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "Settings.ini"),
+    File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "GameSettings.ini"),
         "[Content]\nCustomPath=" + Path.Combine(root, "ProjectDungeon/Content") + "\n");
     Settings.Initialize();
     Content.Initialize(gl);
@@ -588,3 +588,4 @@ static void Throws<T>(Action action) where T : Exception
     try { action(); } catch (T) { return; }
     throw new Exception("Expected " + typeof(T).Name);
 }
+

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
@@ -9,7 +9,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\ProjectDungeon\ProjectDungeon.csproj" />
+        <ProjectReference Include="..\ProjectOxygenGL\ProjectOxygenGL.csproj" />
         <ProjectReference Include="..\ProjectShockGL\ProjectShockGL.csproj" />
     </ItemGroup>
 
@@ -19,7 +19,8 @@
     </ItemGroup>
 
     <ItemGroup>
-      <None Update="Settings.ini">
+      <None Update="EditorSettings.ini">
+        <CopyToPublishDirectory>Always</CopyToPublishDirectory>
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </None>
       <None Update="Layers.ini">
@@ -32,3 +33,4 @@
     </ItemGroup>
 
 </Project>
+

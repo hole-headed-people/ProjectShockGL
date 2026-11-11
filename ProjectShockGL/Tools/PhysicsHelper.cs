@@ -145,7 +145,7 @@ public static class PhysicsHelper
 
     private static bool SphereBox(Vector3 center, float radius, BoxCollider box)
     {
-        var local = Vector3.Transform(center - box.GetWorldCenter(), Quaternion.Inverse(box.Parent.Transform.Rotation));
+        var local = Vector3.Transform(center - box.GetWorldCenter(), Quaternion.Inverse(box.Owner.Transform.Rotation));
         var closest = Vector3.Clamp(local, -box.WorldHalfExtents, box.WorldHalfExtents);
         
         return (new DVector(local) - new DVector(closest)).LengthSquared <= (double)radius * radius;
@@ -260,7 +260,7 @@ public static class PhysicsHelper
         distance = 0;
         normal = default;
         
-        var inverse = Quaternion.Inverse(box.Parent.Transform.Rotation);
+        var inverse = Quaternion.Inverse(box.Owner.Transform.Rotation);
         
         var localOrigin = new DVector(Vector3.Transform(origin - box.GetWorldCenter(), inverse));
         var localDirection = new DVector(Vector3.Transform(dir, inverse));
@@ -329,7 +329,7 @@ public static class PhysicsHelper
         }
         
         distance = (float)t;
-        normal = Vector3.Transform(entry >= 0 ? entryNormal : exitNormal, box.Parent.Transform.Rotation);
+        normal = Vector3.Transform(entry >= 0 ? entryNormal : exitNormal, box.Owner.Transform.Rotation);
         
         return true;
     }
@@ -448,7 +448,7 @@ public static class PhysicsHelper
     {
         var center = box.GetWorldCenter();
         
-        var inverse = Quaternion.Inverse(box.Parent.Transform.Rotation);
+        var inverse = Quaternion.Inverse(box.Owner.Transform.Rotation);
         
         var localA = Vector3.Transform(a - center, inverse);
         var localB = Vector3.Transform(b - center, inverse);
@@ -579,7 +579,7 @@ public static class PhysicsHelper
         switch (obstacle)
         {
             case BoxCollider box:
-                var rotation = box.Parent.Transform.Rotation;
+                var rotation = box.Owner.Transform.Rotation;
                 var inverse = Quaternion.Inverse(rotation);
                 var center = box.GetWorldCenter();
                 var localA = Vector3.Transform(a - center, inverse);
@@ -615,7 +615,7 @@ public static class PhysicsHelper
         normal = Vector3.Zero;
         
         var center = box.GetWorldCenter();
-        var rotation = box.Parent.Transform.Rotation;
+        var rotation = box.Owner.Transform.Rotation;
         var inverse = Quaternion.Inverse(rotation);
         var half = box.WorldHalfExtents;
         

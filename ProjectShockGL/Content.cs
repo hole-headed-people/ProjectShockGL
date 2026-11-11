@@ -23,6 +23,7 @@ public static class Content
     public static string Path { get; private set; } = null!;
 
     private static readonly Dictionary<string, Texture> Textures = new();
+    private static readonly Dictionary<string, TextureAtlas> TextureAtlases = new();
     private static readonly Dictionary<(string Name, int Size), Font> Fonts = new();
     private static readonly Dictionary<string, Shader> Shaders = new();
     private static readonly Dictionary<(string Vertex, string Fragment), ShaderProgram> Programs = new();
@@ -99,6 +100,33 @@ public static class Content
         return loadedTexture;
     }
     
+    public static TextureAtlas? LoadTextureAtlas(string name)
+    {
+        if (!_isInitialized)
+        {
+            throw new InvalidOperationException("Initialize Content before loading texture atlases.");
+        }
+
+        if (TextureAtlases.TryGetValue(name, out var cached) && cached.Texture.Handle != 0)
+        {
+            return cached;
+        }
+
+        var path = System.IO.Path.Combine(Path, "Atlases", name);
+        var descriptor = path + ".json";
+
+        if (!File.Exists(descriptor))
+        {
+            return null;
+        }
+
+        var atlas = TextureAtlas.Load(_gl, descriptor, path + ".png");
+        
+        TextureAtlases[name] = atlas;
+        
+        return atlas;
+    }
+
     public static Font? LoadFont(string name, int pixelHeight = 24)
     {
         if (!_isInitialized)
@@ -476,6 +504,7 @@ public static class Content
         PostProcessProfiles.Clear();
         
         var resources = Fonts.Values.Cast<IDisposable>()
+            .Concat(TextureAtlases.Values)
             .Concat(Programs.Values).Concat(Shaders.Values).Concat(Textures.Values).Concat(Meshes.Values).ToList();
         
         Programs.Clear();
@@ -486,6 +515,7 @@ public static class Content
         }
 
         Fonts.Clear();
+        TextureAtlases.Clear();
         Shaders.Clear();
         Textures.Clear();
         Meshes.Clear();

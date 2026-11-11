@@ -1,6 +1,6 @@
 ﻿using ProjectShockGL.Core;
 
-namespace ProjectDungeon.Core;
+namespace ProjectOxygenGL.Core;
 
 public abstract class Interactive : Entity
 {

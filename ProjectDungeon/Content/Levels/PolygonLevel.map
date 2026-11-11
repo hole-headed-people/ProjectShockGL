@@ -203,7 +203,7 @@
       "Brush": null,
       "Position": [
         0.0,
-        1.1352572,
+        1.1715662,
         -1.7444266
       ],
       "Rotation": {
@@ -414,7 +414,7 @@
       "Brush": null,
       "Position": [
         -5.9063053,
-        0.0,
+        0.4240046,
         0.0
       ],
       "Rotation": {
@@ -452,16 +452,16 @@
       "EditorGroups": [],
       "Brush": null,
       "Position": [
-        3.5202963,
+        3.5013623,
         0.5072673,
-        7.8494678
+        -2.240243
       ],
       "Rotation": {
         "X": 0.0,
-        "Y": 1.0,
+        "Y": 0.0,
         "Z": 0.0,
-        "W": 0.0,
-        "IsIdentity": false
+        "W": 1.0,
+        "IsIdentity": true
       },
       "Scale": [
         0.3534547,

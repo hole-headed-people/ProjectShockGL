@@ -11,7 +11,7 @@ public readonly record struct PhysicsQueryFilter
 
     internal bool Allows(Collider collider)
     {
-        return collider.Parent != IgnoreObject &&
+        return collider.Owner != IgnoreObject &&
                collider != IgnoreCollider && (!IgnoreTriggers || !collider.IsTrigger);
     }
 }

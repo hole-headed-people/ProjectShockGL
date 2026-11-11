@@ -5,6 +5,8 @@ using Object = ProjectShockGL.Core.Object;
 
 namespace ProjectShockGL.Placeables;
 
+[OutputEvent("OnReversed")]
+[OutputEvent("OnMoved")]
 public class LinearMovement : Entity
 {
     [Editable] public float Speed { get; set; }

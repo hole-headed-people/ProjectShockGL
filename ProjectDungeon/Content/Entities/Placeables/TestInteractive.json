@@ -1,5 +1,5 @@
 ﻿{
-  "Class": "ProjectDungeon.Placeables.TestInteractive, ProjectDungeon",
+  "Class": "ProjectOxygenGL.Placeables.TestInteractive, ProjectOxygenGL",
   "Parameters": {
     "DebugBillboard": "Editor/Entity"
   }

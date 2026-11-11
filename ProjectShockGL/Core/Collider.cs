@@ -51,11 +51,11 @@ public abstract class Collider : Component
     {
         if (trigger)
         {
-            Parent.OnTriggerEnter(other);
+            Owner.OnTriggerEnter(other);
         }
         else
         {
-            Parent.OnCollisionEnter(other);
+            Owner.OnCollisionEnter(other);
         }
     }
 
@@ -63,16 +63,16 @@ public abstract class Collider : Component
     {
         if (trigger)
         {
-            Parent.OnTriggerExit(other);
+            Owner.OnTriggerExit(other);
         }
         else
         {
-            Parent.OnCollisionExit(other);
+            Owner.OnCollisionExit(other);
         }
     }
 
     public Vector3 GetWorldCenter()
     {
-        return Parent.Transform.TransformPoint(Center);
+        return Owner.Transform.TransformPoint(Center);
     }
 }

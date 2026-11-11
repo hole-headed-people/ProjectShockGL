@@ -15,7 +15,7 @@ Run("Every query preserves defaults and consistently filters objects, colliders,
     var trigger = scene.Sphere(new Vector3(0, 0, 4));
     trigger.IsTrigger = true;
     var solid = scene.Sphere(new Vector3(0, 0, 6));
-    solid.Parent.Layer = 2;
+    solid.Owner.Layer = 2;
     var combinations = new (PhysicsQueryFilter Filter, Collider[] Expected)[]
     {
         (default, [first, second, trigger, solid]),
@@ -33,7 +33,7 @@ Run("Every query preserves defaults and consistently filters objects, colliders,
         var rayFound = Physics.Raycast(new Vector3(0, 0, -3), Vector3.UnitZ, 30, -1, out var ray, filter);
         Check(sphereFound == (expected.Length > 0) && capsuleFound == sphereFound && rayFound == sphereFound);
         Check(sphere == expected.FirstOrDefault() && capsule == expected.FirstOrDefault());
-        if (rayFound) Check(ray.Collider == expected[0] && ray.Object == expected[0].Parent);
+        if (rayFound) Check(ray.Collider == expected[0] && ray.Object == expected[0].Owner);
     }
     Check(Physics.OverlapSphereAll(Vector3.Zero, 20, 2).SequenceEqual(new[] { solid }));
     Check(!Physics.OverlapSphere(Vector3.Zero, 20, 0, out _));
@@ -49,9 +49,9 @@ Run("Inactive, disabled and destroyed colliders are excluded from every query", 
         Check(!Physics.OverlapCapsule(-Vector3.UnitY, Vector3.UnitY, 2, -1, out _));
         Check(!Physics.Raycast(new Vector3(-3, 0, 0), Vector3.UnitX, 10, -1, out _));
     }
-    sphere.Parent.SetActive(false);
+    sphere.Owner.SetActive(false);
     Missing();
-    sphere.Parent.SetActive(true);
+    sphere.Owner.SetActive(true);
     sphere.IsEnabled = false;
     Missing();
     sphere.IsEnabled = true;
@@ -180,7 +180,7 @@ Run("Raycasts starting inside boxes use the exit face normal", scene =>
     Check(Physics.Raycast(new Vector3(0.9f, 0, 0), new Vector3(1, 2, 0), 10, -1, out var hit));
     Near(hit.Normal, Vector3.UnitX);
     NearFloat(hit.Distance, 0.1f * MathF.Sqrt(5));
-    box.Parent.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI / 2);
+    box.Owner.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI / 2);
     Check(Physics.Raycast(new Vector3(0, 0.9f, 0), new Vector3(-2, 1, 0), 10, -1, out hit));
     Near(hit.Normal, Vector3.UnitY);
 });
@@ -221,7 +221,7 @@ Run("Capsule-box tests detect thin obstacles between samples and corner distance
     box.HalfExtents = new Vector3(0.05f, 0.02f, 0.05f);
     Check(Physics.OverlapCapsule(new Vector3(0, -10, 0), new Vector3(0, 10, 0), 0.01f, -1, out var hit) && hit == box);
     Check(Physics.OverlapCapsule(new Vector3(0, -10, 0), new Vector3(0, 10, 0), 0, -1, out _));
-    box.Parent.Transform.Position = Vector3.Zero;
+    box.Owner.Transform.Position = Vector3.Zero;
     box.HalfExtents = Vector3.One;
     Check(!Physics.OverlapCapsule(new Vector3(2, 2, -3), new Vector3(2, 2, 3), 1.4f, -1, out _));
     Check(Physics.OverlapCapsule(new Vector3(2, 2, -3), new Vector3(2, 2, 3), 1.42f, -1, out _));
@@ -233,19 +233,19 @@ Run("Direct capsule-box intersections and overlap queries use the same rotated g
 {
     var box = scene.Body(Vector3.Zero).AddComponent<BoxCollider>();
     box.HalfExtents = new Vector3(0.1f, 0.01f, 0.1f);
-    box.Parent.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, 0.3f);
+    box.Owner.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, 0.3f);
     var capsule = scene.Body(new Vector3(0, 0.37f, 0)).AddComponent<CapsuleCollider>();
     capsule.Height = 10;
     capsule.Radius = 0.02f;
     Check(capsule.Intersects(box) && box.Intersects(capsule));
     var (a, b) = capsule.GetWorldSegment();
     Check(Physics.OverlapCapsule(a, b, capsule.WorldRadius, -1, out var hit,
-        new PhysicsQueryFilter { IgnoreObject = capsule.Parent }) && hit == box);
+        new PhysicsQueryFilter { IgnoreObject = capsule.Owner }) && hit == box);
 });
 
 Run("Segment-box minimization agrees with dense independent samples", scene =>
 {
-    var random = new Random(17);
+    var random = new System.Random(17);
     for (var sample = 0; sample < 150; sample++)
     {
         Vector3 RandomPoint() => new((float)random.NextDouble() * 6 - 3,
@@ -267,8 +267,8 @@ Run("Collision enter/exit are delivered once and disabled objects stop colliding
 {
     var a = scene.Sphere(Vector3.Zero);
     var b = scene.Sphere(Vector3.Zero);
-    var ownerA = (EventBody)a.Parent;
-    var ownerB = (EventBody)b.Parent;
+    var ownerA = (EventBody)a.Owner;
+    var ownerB = (EventBody)b.Owner;
     Physics.Update();
     Physics.Update();
     Check(ownerA.Events.SequenceEqual(new[] { "enter" }) && ownerB.Events.SequenceEqual(new[] { "enter" }));
@@ -281,6 +281,28 @@ Run("Collision enter/exit are delivered once and disabled objects stop colliding
     Check(ownerA.Events.Count == 3);
 });
 
+Run("Trigger stay repeats only after enter and stops on exit", scene =>
+{
+    var a = scene.Sphere(Vector3.Zero);
+    var b = scene.Sphere(Vector3.Zero);
+    b.IsTrigger = true;
+    var ownerA = (EventBody)a.Owner;
+    var ownerB = (EventBody)b.Owner;
+
+    Physics.Update();
+    Check(ownerA.Events.SequenceEqual(new[] { "trigger-enter" }) && ownerB.Events.SequenceEqual(ownerA.Events));
+    Physics.Update();
+    Physics.Update();
+    Check(ownerA.Events.SequenceEqual(new[] { "trigger-enter", "trigger-stay", "trigger-stay" }) &&
+        ownerB.Events.SequenceEqual(ownerA.Events));
+
+    ownerB.Transform.Position = Vector3.UnitX * 10;
+    Physics.Update();
+    Physics.Update();
+    Check(ownerA.Events.SequenceEqual(new[] { "trigger-enter", "trigger-stay", "trigger-stay", "trigger-exit" }) &&
+        ownerB.Events.SequenceEqual(ownerA.Events));
+});
+
 Run("Changing trigger mode ends the old event type before starting the new type", scene =>
 {
     var a = scene.Sphere(Vector3.Zero);
@@ -290,15 +312,15 @@ Run("Changing trigger mode ends the old event type before starting the new type"
     Physics.Update();
     b.IsTrigger = false;
     Physics.Update();
-    Check(((EventBody)a.Parent).Events.SequenceEqual(new[] { "enter", "exit", "trigger-enter", "trigger-exit", "enter" }));
+    Check(((EventBody)a.Owner).Events.SequenceEqual(new[] { "enter", "exit", "trigger-enter", "trigger-exit", "enter" }));
 });
 
 Run("Destroying the other object inside enter skips dead callbacks and balances the survivor", scene =>
 {
     var a = scene.Sphere(Vector3.Zero);
     var b = scene.Sphere(Vector3.Zero);
-    var ownerA = (EventBody)a.Parent;
-    var ownerB = (EventBody)b.Parent;
+    var ownerA = (EventBody)a.Owner;
+    var ownerB = (EventBody)b.Owner;
     ownerA.Enter = other => scene.World.Destroy(other);
     Physics.Update();
     Physics.Update();
@@ -308,10 +330,10 @@ Run("Destroying the other object inside enter skips dead callbacks and balances 
 
 Run("New colliders created by callbacks participate on the next step", scene =>
 {
-    var a = (EventBody)scene.Sphere(Vector3.Zero).Parent;
-    var b = (EventBody)scene.Sphere(Vector3.Zero).Parent;
+    var a = (EventBody)scene.Sphere(Vector3.Zero).Owner;
+    var b = (EventBody)scene.Sphere(Vector3.Zero).Owner;
     EventBody? added = null;
-    a.Enter = _ => { if (added == null) added = (EventBody)scene.Sphere(Vector3.Zero).Parent; };
+    a.Enter = _ => { if (added == null) added = (EventBody)scene.Sphere(Vector3.Zero).Owner; };
     Physics.Update();
     Check(added != null && added.Events.Count == 0 && a.Events.Count == 1 && b.Events.Count == 1);
     Physics.Update();
@@ -322,37 +344,37 @@ Run("Unregistering in callbacks and recursive Update do not corrupt contact iter
 {
     var a = scene.Sphere(Vector3.Zero);
     var b = scene.Sphere(Vector3.Zero);
-    var ownerA = (EventBody)a.Parent;
+    var ownerA = (EventBody)a.Owner;
     ownerA.Enter = _ => { Physics.Update(); Physics.Unregister(a); };
     Physics.Update();
     Check(ownerA.Events.SequenceEqual(new[] { "enter", "exit" }));
-    Check(((EventBody)b.Parent).Events.Count == 0);
+    Check(((EventBody)b.Owner).Events.Count == 0);
     ownerA.Enter = null;
     Physics.Register(a);
     Physics.Update();
-    Check(ownerA.Events.Count == 3 && ((EventBody)b.Parent).Events.Count == 1);
+    Check(ownerA.Events.Count == 3 && ((EventBody)b.Owner).Events.Count == 1);
 });
 
 Run("Clearing the world from enter/exit handlers is safe", scene =>
 {
-    var a = (EventBody)scene.Sphere(Vector3.Zero).Parent;
+    var a = (EventBody)scene.Sphere(Vector3.Zero).Owner;
     scene.Sphere(Vector3.Zero);
     a.Enter = _ => scene.World.Clear();
     Physics.Update();
     Check(scene.World.GetAllObjects(true).Length == 0);
-    var c = (EventBody)scene.Sphere(Vector3.Zero).Parent;
+    var c = (EventBody)scene.Sphere(Vector3.Zero).Owner;
     var d = scene.Sphere(Vector3.Zero);
     Physics.Update();
     c.Exit = _ => scene.World.Clear();
-    d.Parent.Transform.Position = new Vector3(10);
+    d.Owner.Transform.Position = new Vector3(10);
     Physics.Update();
     Check(scene.World.GetAllObjects(true).Length == 0);
 });
 
 Run("Layer masks and static-static suppression are preserved for contact events", scene =>
 {
-    var a = (EventBody)scene.Sphere(Vector3.Zero).Parent;
-    var b = (EventBody)scene.Sphere(Vector3.Zero).Parent;
+    var a = (EventBody)scene.Sphere(Vector3.Zero).Owner;
+    var b = (EventBody)scene.Sphere(Vector3.Zero).Owner;
     a.CollidesWith = 0;
     Physics.Update();
     Check(a.Events.Count == 0 && b.Events.Count == 0);
@@ -417,7 +439,7 @@ Run("Controller respects masks, inactive obstacles, scaled offset capsules and d
     controller.Center = new Vector3(1, 0, 0);
     owner.Transform.Scale = new Vector3(2);
     var wall = scene.Body(new Vector3(5, 0, 0)).AddComponent<BoxCollider>();
-    wall.Parent.Layer = 2;
+    wall.Owner.Layer = 2;
     controller.CollisionMask = 1;
     controller.Move(Vector3.UnitX);
     NearFloat(owner.Transform.Position.X, 1);
@@ -425,7 +447,7 @@ Run("Controller respects masks, inactive obstacles, scaled offset capsules and d
     var flags = controller.Move(Vector3.UnitX * 3);
     Check((flags & CollisionFlags.Sides) != 0);
     NearFloat(owner.Transform.Position.X, 1.01f, 0.001f);
-    wall.Parent.SetActive(false);
+    wall.Owner.SetActive(false);
     controller.Move(Vector3.UnitX);
     NearFloat(owner.Transform.Position.X, 2.01f, 0.001f);
     controller.IsEnabled = false;
@@ -457,11 +479,11 @@ Run("Controller climbs small stairs but rejects tall stairs and stairs without h
     NearFloat(owner.Transform.Position.Y, 1.19f, 0.002f);
     owner.Transform.Position = new Vector3(0, 1, 0);
     stair.HalfExtents = new Vector3(1, 0.3f, 2);
-    stair.Parent.Transform.Position = new Vector3(2, 0.3f, 0);
+    stair.Owner.Transform.Position = new Vector3(2, 0.3f, 0);
     controller.Move(new Vector3(2, -0.01f, 0));
     Check(owner.Transform.Position.X < 1 && owner.Transform.Position.Y < 1.01f);
     stair.HalfExtents = new Vector3(1, 0.1f, 2);
-    stair.Parent.Transform.Position = new Vector3(2, 0.1f, 0);
+    stair.Owner.Transform.Position = new Vector3(2, 0.1f, 0);
     owner.Transform.Position = new Vector3(0, 1, 0);
     var ceiling = scene.Body(new Vector3(0, 2.1f, 0)).AddComponent<BoxCollider>();
     ceiling.HalfExtents = new Vector3(10, 0.05f, 10);
@@ -473,7 +495,7 @@ Run("Controller follows walkable slopes and rejects steep slopes regardless of s
 {
     var ramp = scene.Body(Vector3.Zero).AddComponent<BoxCollider>();
     ramp.HalfExtents = new Vector3(10, 0.5f, 4);
-    ramp.Parent.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI / 6);
+    ramp.Owner.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI / 6);
     var owner = scene.Body(new Vector3(-2, 5, 0));
     var controller = owner.AddComponent<CharacterController>();
     controller.StepOffset = 0;
@@ -500,7 +522,7 @@ Run("Player-sized capsule negotiates stairs up to StepOffset with small frame mo
     controller.Radius = 0.3f;
     foreach (var height in new[] { 0.1f, 0.2f, 0.29f, 0.3f })
     {
-        stair.Parent.Transform.Position = new Vector3(2, height / 2, 0);
+        stair.Owner.Transform.Position = new Vector3(2, height / 2, 0);
         stair.HalfExtents = new Vector3(1, height / 2, 2);
         owner.Transform.Position = new Vector3(0, 1, 0);
         for (var i = 0; i < 50; i++) controller.Move(new Vector3(0.04f, -0.003f, 0));
@@ -547,7 +569,7 @@ Run("Controller follows stairs down from support but does not snap across a larg
     Check(controller.IsGrounded);
     NearFloat(owner.Transform.Position.Y, 0.99f, 0.002f);
     stair.HalfExtents = new Vector3(1, 1, 2);
-    stair.Parent.Transform.Position = new Vector3(2, 1, 0);
+    stair.Owner.Transform.Position = new Vector3(2, 1, 0);
     owner.Transform.Position = new Vector3(2, 3, 0);
     controller.Move(new Vector3(0, -0.02f, 0));
     controller.Move(new Vector3(-2, 0, 0));
@@ -558,15 +580,30 @@ Run("GroundNormal describes the slope and descent keeps contact without applying
 {
     var ramp = scene.Body(Vector3.Zero).AddComponent<BoxCollider>();
     ramp.HalfExtents = new Vector3(5, 0.5f, 5);
-    ramp.Parent.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitX, MathF.PI / 6);
+    ramp.Owner.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitX, MathF.PI / 6);
     var owner = scene.Body(new Vector3(0, 5, 0));
     var controller = owner.AddComponent<CharacterController>();
     controller.Move(new Vector3(0, -10, 0));
-    Near(controller.GroundNormal, Vector3.Transform(Vector3.UnitY, ramp.Parent.Transform.Rotation));
+    Near(controller.GroundNormal, Vector3.Transform(Vector3.UnitY, ramp.Owner.Transform.Rotation));
     var before = owner.Transform.Position;
     for (var i = 0; i < 40; i++) controller.Move(new Vector3(0, 0, 0.05f));
     Check(controller.IsGrounded);
     NearFloat(owner.Transform.Position.Y - before.Y, -2 * MathF.Tan(MathF.PI / 6), 0.01f);
+});
+
+Run("Landing on a box edge provides support and allows climbing onto the top", scene =>
+{
+    var box = scene.Body(new Vector3(-1f, -.5f, 0f)).AddComponent<BoxCollider>();
+    box.HalfExtents = new Vector3(1f, .5f, 2f);
+    var body = scene.Body(new Vector3(.26f, 1.2f, 0f));
+    var controller = body.AddComponent<CharacterController>();
+    controller.Radius = .3f;
+    controller.Move(new Vector3(0f, -.5f, 0f));
+    Check(controller.IsGrounded);
+    for (var i = 0; i < 10; i++) controller.Move(new Vector3(-.04f, -.003f, 0f));
+    Check(controller.IsGrounded && body.Transform.Position.X < 0f && body.Transform.Position.Y > .98f);
+    for (var i = 0; i < 20; i++) controller.Move(new Vector3(.04f, -.003f, 0f));
+    Check(!controller.IsGrounded);
 });
 
 Run("Controller validates stair height and slope angles", scene =>
@@ -587,17 +624,79 @@ Run("Moving boxes push an idle controller and repeated updates remain stable", s
     var box = scene.Body(new Vector3(-3, 0, 0)).AddComponent<BoxCollider>();
     box.HalfExtents = new Vector3(0.5f, 2, 2);
     Physics.Update();
-    Near(controller.Parent.Transform.Position, Vector3.Zero);
+    Near(controller.Owner.Transform.Position, Vector3.Zero);
     for (var i = 0; i < 10; i++)
     {
-        box.Parent.Transform.Position = new Vector3(-0.8f + i * 0.1f, 0, 0);
+        box.Owner.Transform.Position = new Vector3(-0.8f + i * 0.1f, 0, 0);
         Physics.Update();
     }
-    Check(controller.Parent.Transform.Position.X > 1f);
-    NearFloat(controller.Parent.Transform.Position.Y, 0);
-    var position = controller.Parent.Transform.Position;
+    Check(controller.Owner.Transform.Position.X > 1f);
+    NearFloat(controller.Owner.Transform.Position.Y, 0);
+    var position = controller.Owner.Transform.Position;
     for (var i = 0; i < 20; i++) Physics.Update();
-    Near(controller.Parent.Transform.Position, position);
+    Near(controller.Owner.Transform.Position, position);
+});
+
+Run("Blocked movement bounds unrelated obstacles once per move", scene =>
+{
+    var far = scene.Body(new Vector3(100, 0, 100)).AddComponent<BoundsCountingBox>();
+    var floor = scene.Body(new Vector3(0, -1.5f, 0)).AddComponent<BoxCollider>();
+    floor.HalfExtents = new Vector3(10, .5f, 10);
+    var wall = scene.Body(new Vector3(1f, 0, 0)).AddComponent<BoxCollider>();
+    wall.HalfExtents = new Vector3(.5f, 2, 2);
+    var controller = scene.Body(Vector3.Zero).AddComponent<CharacterController>();
+
+    controller.Move(new Vector3(.03f, -.003f, .01f));
+    Check(far.BoundsQueries == 1);
+    Check(controller.IsGrounded && controller.Owner.Transform.Position.X < .011f);
+    far.Owner.Transform.Position = new Vector3(0, 0, 1.6f);
+    controller.Move(new Vector3(0, -.003f, 1f));
+    Check(controller.Owner.Transform.Position.Z < .62f);
+});
+
+Run("A controller wedged between opposing boxes escapes without oscillating", scene =>
+{
+    var controller = scene.Body(Vector3.Zero).AddComponent<CharacterController>();
+    var floor = scene.Body(new Vector3(0, -1.5f, 0)).AddComponent<BoxCollider>();
+    floor.HalfExtents = new Vector3(10, .5f, 10);
+    var left = scene.Body(new Vector3(-.9f, 0, 0)).AddComponent<BoxCollider>();
+    var right = scene.Body(new Vector3(.9f, 0, 0)).AddComponent<BoxCollider>();
+    left.HalfExtents = right.HalfExtents = new Vector3(.5f, 2, .8f);
+
+    Physics.Update();
+    var (a, b) = controller.GetWorldSegment();
+    var radius = controller.WorldRadius - .011f;
+    Check(!PhysicsHelper.CapsuleIntersectsCollider(a, b, radius, left));
+    Check(!PhysicsHelper.CapsuleIntersectsCollider(a, b, radius, right));
+    Check(!PhysicsHelper.CapsuleIntersectsCollider(a, b, radius, floor));
+    var position = controller.Owner.Transform.Position;
+    for (var i = 0; i < 30; i++) Physics.Update();
+    Near(controller.Owner.Transform.Position, position);
+});
+
+Run("A fully enclosed controller stays stable instead of tunneling through its enclosure", scene =>
+{
+    var controller = scene.Body(Vector3.Zero).AddComponent<CharacterController>();
+    var left = scene.Body(new Vector3(-.9f, 0, 0)).AddComponent<BoxCollider>();
+    var right = scene.Body(new Vector3(.9f, 0, 0)).AddComponent<BoxCollider>();
+    left.HalfExtents = right.HalfExtents = new Vector3(.5f, 2, .8f);
+    var front = scene.Body(new Vector3(0, 0, -1.4f)).AddComponent<BoxCollider>();
+    var back = scene.Body(new Vector3(0, 0, 1.4f)).AddComponent<BoxCollider>();
+    front.HalfExtents = back.HalfExtents = new Vector3(3, 4, .5f);
+    var floor = scene.Body(new Vector3(0, -1.5f, 0)).AddComponent<BoxCollider>();
+    floor.HalfExtents = new Vector3(10, .5f, 10);
+    var ceiling = scene.Body(new Vector3(0, 2.1f, 0)).AddComponent<BoxCollider>();
+    ceiling.HalfExtents = new Vector3(10, .1f, 10);
+    var outerLeft = scene.Body(new Vector3(-2.5f, 0, 0)).AddComponent<BoxCollider>();
+    var outerRight = scene.Body(new Vector3(2.5f, 0, 0)).AddComponent<BoxCollider>();
+    outerLeft.HalfExtents = outerRight.HalfExtents = new Vector3(.25f, 4, 3);
+
+    for (var i = 0; i < 30; i++)
+    {
+        controller.Move(new Vector3(0, -5f, 0));
+        Physics.Update();
+        Near(controller.Owner.Transform.Position, Vector3.Zero);
+    }
 });
 
 Run("Idle recovery supports rotated boxes, spheres, capsules and deep overlap", scene =>
@@ -605,43 +704,43 @@ Run("Idle recovery supports rotated boxes, spheres, capsules and deep overlap", 
     var controller = scene.Body(Vector3.Zero).AddComponent<CharacterController>();
     var box = scene.Body(Vector3.Zero).AddComponent<BoxCollider>();
     box.HalfExtents = new Vector3(1, 3, 2);
-    box.Parent.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, .7f);
+    box.Owner.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, .7f);
     Physics.Update();
     var (a, b) = controller.GetWorldSegment();
     Check(!PhysicsHelper.CapsuleIntersectsCollider(a, b, controller.WorldRadius - .011f, box));
-    box.Parent.SetActive(false);
-    controller.Parent.Transform.Position = Vector3.Zero;
+    box.Owner.SetActive(false);
+    controller.Owner.Transform.Position = Vector3.Zero;
     var sphere = scene.Sphere(new Vector3(.4f, 0, 0));
     Physics.Update();
-    Check(controller.Parent.Transform.Position.X < -.5f);
-    sphere.Parent.SetActive(false);
-    controller.Parent.Transform.Position = Vector3.Zero;
+    Check(controller.Owner.Transform.Position.X < -.5f);
+    sphere.Owner.SetActive(false);
+    controller.Owner.Transform.Position = Vector3.Zero;
     var capsule = scene.Body(new Vector3(.4f, 0, 0)).AddComponent<CapsuleCollider>();
     Physics.Update();
-    Check(controller.Parent.Transform.Position.X < -.5f);
+    Check(controller.Owner.Transform.Position.X < -.5f);
 });
 
 Run("Idle recovery respects filters, disabled owners and controller state", scene =>
 {
     var controller = scene.Body(Vector3.Zero).AddComponent<CharacterController>();
-    var own = controller.Parent.AddComponent<BoxCollider>();
+    var own = controller.Owner.AddComponent<BoxCollider>();
     var box = scene.Body(new Vector3(.4f, 0, 0)).AddComponent<BoxCollider>();
     box.IsTrigger = true;
-    Physics.Update(); Near(controller.Parent.Transform.Position, Vector3.Zero);
+    Physics.Update(); Near(controller.Owner.Transform.Position, Vector3.Zero);
     box.IsTrigger = false; box.IsEnabled = false;
-    Physics.Update(); Near(controller.Parent.Transform.Position, Vector3.Zero);
-    box.IsEnabled = true; box.Parent.SetActive(false);
-    Physics.Update(); Near(controller.Parent.Transform.Position, Vector3.Zero);
-    box.Parent.SetActive(true); box.Parent.Layer = 2; controller.CollisionMask = 1;
-    Physics.Update(); Near(controller.Parent.Transform.Position, Vector3.Zero);
-    controller.CollisionMask = -1; box.Parent.CollidesWith = 0;
-    Physics.Update(); Near(controller.Parent.Transform.Position, Vector3.Zero);
-    box.Parent.CollidesWith = -1; controller.IsEnabled = false;
-    Physics.Update(); Near(controller.Parent.Transform.Position, Vector3.Zero);
-    controller.IsEnabled = true; controller.Parent.SetActive(false);
-    Physics.Update(); Near(controller.Parent.Transform.Position, Vector3.Zero);
-    controller.Parent.SetActive(true); Physics.Update();
-    Check(controller.Parent.Transform.Position.X < 0);
+    Physics.Update(); Near(controller.Owner.Transform.Position, Vector3.Zero);
+    box.IsEnabled = true; box.Owner.SetActive(false);
+    Physics.Update(); Near(controller.Owner.Transform.Position, Vector3.Zero);
+    box.Owner.SetActive(true); box.Owner.Layer = 2; controller.CollisionMask = 1;
+    Physics.Update(); Near(controller.Owner.Transform.Position, Vector3.Zero);
+    controller.CollisionMask = -1; box.Owner.CollidesWith = 0;
+    Physics.Update(); Near(controller.Owner.Transform.Position, Vector3.Zero);
+    box.Owner.CollidesWith = -1; controller.IsEnabled = false;
+    Physics.Update(); Near(controller.Owner.Transform.Position, Vector3.Zero);
+    controller.IsEnabled = true; controller.Owner.SetActive(false);
+    Physics.Update(); Near(controller.Owner.Transform.Position, Vector3.Zero);
+    controller.Owner.SetActive(true); Physics.Update();
+    Check(controller.Owner.Transform.Position.X < 0);
 });
 
 Run("Idle recovery preserves floor support and does not run in editor", scene =>
@@ -653,19 +752,19 @@ Run("Idle recovery preserves floor support and does not run in editor", scene =>
     Check(controller.IsGrounded);
     var box = scene.Body(new Vector3(-.7f, 0, 0)).AddComponent<BoxCollider>();
     box.HalfExtents = new Vector3(.5f, 2, 2);
-    var before = controller.Parent.Transform.Position;
+    var before = controller.Owner.Transform.Position;
     var property = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
     var editor = Application.IsEditor;
     try
     {
         property.SetValue(null, true);
         Physics.Update();
-        Near(controller.Parent.Transform.Position, before);
+        Near(controller.Owner.Transform.Position, before);
     }
     finally { property.SetValue(null, editor); }
     Physics.Update();
-    Check(controller.Parent.Transform.Position.X > before.X && controller.IsGrounded);
-    NearFloat(controller.Parent.Transform.Position.Y, before.Y);
+    Check(controller.Owner.Transform.Position.X > before.X && controller.IsGrounded);
+    NearFloat(controller.Owner.Transform.Position.Y, before.Y);
 });
 
 Console.WriteLine("All physics checks passed.");
@@ -705,6 +804,17 @@ public sealed class Scene : IDisposable
     public void Dispose() { World.Clear(); Physics.Update(); }
 }
 
+public sealed class BoundsCountingBox : BoxCollider
+{
+    public int BoundsQueries { get; private set; }
+
+    public override (Vector3 min, Vector3 max) CalculateWorldBounds()
+    {
+        BoundsQueries++;
+        return base.CalculateWorldBounds();
+    }
+}
+
 public sealed class EventBody : Body
 {
     public List<string> Events { get; } = [];
@@ -712,6 +822,7 @@ public sealed class EventBody : Body
     public override void OnCollisionEnter(Body other) { Events.Add("enter"); Enter?.Invoke(other); }
     public override void OnCollisionExit(Body other) { Events.Add("exit"); Exit?.Invoke(other); }
     public override void OnTriggerEnter(Body other) { Events.Add("trigger-enter"); Enter?.Invoke(other); }
+    public override void OnTriggerStay(Body other) => Events.Add("trigger-stay");
     public override void OnTriggerExit(Body other) { Events.Add("trigger-exit"); Exit?.Invoke(other); }
 }
 

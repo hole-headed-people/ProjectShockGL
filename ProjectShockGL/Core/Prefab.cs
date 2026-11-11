@@ -22,10 +22,16 @@ public static class Prefab
     {
         return InstantiateAll(
             Content.LoadPrefabData(name) ?? throw new FileNotFoundException($"Prefab '{name}' not found."),
-            world ?? Game.Instance.World, position, rotation);
+            world ?? Game.Instance.World, position, rotation, name);
     }
 
     public static Object[] InstantiateAll(PrefabData template, World world, Vector3? position = null, Quaternion? rotation = null)
+    {
+        return InstantiateAll(template, world, position, rotation, null);
+    }
+
+    private static Object[] InstantiateAll(PrefabData template, World world, Vector3? position, Quaternion? rotation,
+        string? prefabName)
     {
         ArgumentNullException.ThrowIfNull(template);
         ArgumentNullException.ThrowIfNull(world);
@@ -49,9 +55,18 @@ public static class Prefab
         
         try
         {
-            return template.Placeables.Select(source => Instantiate(source, world,
-                origin + Vector3.Transform(source.Position, orientation),
-                Quaternion.Normalize(orientation * source.Rotation))).ToArray();
+            return template.Placeables.Select((source, index) =>
+            {
+                var instance = Instantiate(source, world, origin + Vector3.Transform(source.Position, orientation),
+                    Quaternion.Normalize(orientation * source.Rotation));
+
+                if (prefabName != null)
+                {
+                    instance.SpawnSource = new ObjectSpawnSource(prefabName, index);
+                }
+
+                return instance;
+            }).ToArray();
         }
         catch (Exception error)
         {
@@ -83,10 +98,30 @@ public static class Prefab
         
         var source = Content.LoadPrefab(name) ?? throw new FileNotFoundException($"Prefab '{name}' not found.");
         
-        return Instantiate(source, world, position, rotation);
+        var instance = Instantiate(source, world, position, rotation);
+        instance.SpawnSource = new ObjectSpawnSource(name, 0);
+        return instance;
     }
 
     public static Object Instantiate(Placeable template, World world, Vector3? position = null, Quaternion? rotation = null)
+    {
+        return Instantiate(template, world, position, rotation, null, null);
+    }
+
+    internal static Object RestoreMember(string name, int index, World world, Guid guid, SavedObjectState state)
+    {
+        var template = Content.LoadPrefabData(name) ?? throw new FileNotFoundException($"Prefab '{name}' not found.");
+
+        if (index < 0 || index >= template.Placeables.Length)
+        {
+            throw new InvalidDataException($"Prefab '{name}' has no member at index {index}.");
+        }
+
+        return Instantiate(template.Placeables[index], world, state.Position, state.Rotation, guid, state);
+    }
+
+    private static Object Instantiate(Placeable template, World world, Vector3? position, Quaternion? rotation,
+        Guid? guid, SavedObjectState? state)
     {
         ArgumentNullException.ThrowIfNull(template);
         ArgumentNullException.ThrowIfNull(world);
@@ -110,16 +145,20 @@ public static class Prefab
         
         var placement = new Placeable
         {
-            Name = $"{stem}_{suffix}", Type = copy.Type, Path = copy.Path,
-            Position = position ?? copy.Position, Rotation = rotation ?? copy.Rotation, Scale = copy.Scale,
-            IsActive = copy.IsActive, Brush = copy.Brush, Properties = copy.Properties, Outputs = copy.Outputs
+            Guid = guid, Name = state?.Name ?? $"{stem}_{suffix}", Type = copy.Type, Path = copy.Path,
+            Position = position ?? copy.Position, Rotation = rotation ?? copy.Rotation, Scale = state?.Scale ?? copy.Scale,
+            IsActive = state?.IsActive ?? copy.IsActive, SimulatePhysics = copy.SimulatePhysics,
+            RigidbodyMass = copy.RigidbodyMass,
+            Layer = copy.Layer,
+            CollidesWith = copy.CollidesWith,
+            Brush = copy.Brush, Properties = copy.Properties, Outputs = copy.Outputs
         };
         
         var existing = world.GetAllObjects(true).ToHashSet();
         
         try
         {
-            return LevelManager.CreateObject(world, placement);
+            return guid.HasValue ? LevelManager.RestoreObject(world, placement) : LevelManager.CreateObject(world, placement);
         }
         catch (Exception creationError)
         {

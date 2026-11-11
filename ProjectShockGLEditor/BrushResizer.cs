@@ -36,6 +36,7 @@ internal static class BrushResizer
     
     private static readonly Vector3[] Axes = [Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ];
     private static readonly uint[] Colors = [0xFF5555EF, 0xFF65CF65, 0xFFFFAA55];
+    
     public static bool IsDragging => _target != null;
 
     public static void Cancel()

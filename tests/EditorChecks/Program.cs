@@ -10,10 +10,12 @@ using Game = ProjectShockGL.Core.Game;
 using Environment = ProjectShockGL.Environment;
 
 var testRoot = Path.Combine(AppContext.BaseDirectory, "EditorCheckData");
+var saveDirectory = Path.Combine(testRoot, $"SaveCheck-{Guid.NewGuid():N}");
+var settingsPath = Path.Combine(AppContext.BaseDirectory, "GameSettings.ini");
+var gameSettings = $"[Game]\nName=EditorChecks\nClass=CheckGame, EditorChecks\nSaveDirectory={saveDirectory}\n[Content]\nCustomPath={testRoot}\n";
 Directory.CreateDirectory(Path.Combine(testRoot, "Entities"));
 Directory.CreateDirectory(Path.Combine(testRoot, "Geometry"));
-File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "Settings.ini"),
-    $"[Game]\nClass=CheckGame, EditorChecks\n[Content]\nCustomPath={testRoot}\n");
+File.WriteAllText(settingsPath, gameSettings);
 File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "Layers.ini"), "[Layers]\n0=Default\n");
 File.WriteAllText(Path.Combine(testRoot, "Entities", "Check.json"),
     "{\"Class\":\"CheckEntity, EditorChecks\",\"Parameters\":{}}");
@@ -29,6 +31,429 @@ Settings.Initialize();
 Content.Initialize(null!); // Fixture assets deliberately contain no GPU resources.
 Game.Initialize();
 ((CheckGame)Game.Instance).LoadForTest();
+
+Run("Saveable defaults exclude geometry and players without excluding other characters", () =>
+{
+    Check(!new GameObject().Saveable && !new BrushBox().Saveable);
+    Check(new ProjectOxygenGL.Core.Character().Saveable);
+    Check(!new ProjectOxygenGL.Core.Player().Saveable && !new ProjectDungeon.Game.ShockPlayerCharacter().Saveable);
+
+    var entity = new Entity();
+    Check(entity.Saveable);
+    entity.Saveable = false;
+    Check(!entity.Saveable);
+
+    GameObject geometry = new Geometry();
+    geometry.Saveable = false;
+    Check(!geometry.Saveable);
+    try
+    {
+        geometry.Saveable = true;
+    }
+    catch (InvalidOperationException)
+    {
+        Check(!geometry.Saveable);
+        return;
+    }
+
+    throw new Exception("Geometry accepted Saveable = true.");
+});
+
+Run("Relative save directories resolve inside the game's LocalAppData folder", () =>
+{
+    var getPath = typeof(SaveManager).GetMethod("GetDefaultPath",
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+    var localAppData = System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData);
+
+    try
+    {
+        File.WriteAllText(settingsPath, gameSettings.Replace($"SaveDirectory={saveDirectory}", "SaveDirectory=Progress/Saves"));
+        Settings.Initialize();
+        Check((string)getPath.Invoke(null, null)! == Path.Combine(localAppData, "EditorChecks", "Progress", "Saves", "Game.save"));
+
+        File.WriteAllText(settingsPath, gameSettings.Replace($"SaveDirectory={saveDirectory}", "SaveDirectory=../OtherGame"));
+        Settings.Initialize();
+        Throws(() => getPath.Invoke(null, null));
+    }
+    finally
+    {
+        File.WriteAllText(settingsPath, gameSettings);
+        Settings.Initialize();
+    }
+});
+
+Run("SaveManager keeps slot snapshots separate and reports results without changing levels", () =>
+{
+    var directory = saveDirectory;
+    var save = Path.Combine(directory, "Game.save");
+    string? newSave = null;
+    var activeLevel = new Level();
+    LevelManager.Load(activeLevel);
+    var world = Game.Instance.World;
+    var existing = world.Spawn<GameObject>();
+    var door = Guid.NewGuid();
+    var removed = Guid.NewGuid();
+    var events = new List<string>();
+    var initial = SaveManager.GetData();
+    var doorState = new SavedObjectState
+    {
+        Position = new Vector3(1, 2, 3),
+        Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, 1),
+        Scale = new Vector3(2, 3, 4),
+        IsActive = false
+    };
+    doorState.Set("Progress", 42);
+    initial.Levels["A"] = new() { [door] = doorState };
+
+    void Saving()
+    {
+        events.Add("Saving");
+        SaveManager.GetData().Levels["B"] = new() { [removed] = new() { IsDestroyed = true } };
+    }
+    void Saved(SaveResult result) => events.Add($"Saved {result}");
+    void Loaded(LoadResult result) => events.Add($"Loaded {result}");
+
+    SaveManager.Saving += Saving;
+    SaveManager.Saved += Saved;
+    SaveManager.Loaded += Loaded;
+
+    try
+    {
+        Check(SaveManager.GetSlots().Count == 0 && !Directory.Exists(directory));
+        SaveManager.Save();
+        Check(File.Exists(save) && events.SequenceEqual(new[] { "Saving", "Saved Success" }));
+        Check(SaveManager.GetSlots().Single().Id == "Game");
+
+        initial.Levels.Clear();
+        SaveManager.Load();
+        var loaded = SaveManager.GetData();
+        var state = loaded.Levels["A"][door];
+        Check(!ReferenceEquals(initial, loaded) && loaded.Levels.Count == 2);
+        Check(state.Position == doorState.Position && state.Rotation == doorState.Rotation && state.Scale == doorState.Scale);
+        Check(!state.IsActive && state.Get("Progress", -1) == 42 && state.Get("Missing", 17) == 17);
+        Check(loaded.Levels["B"][removed].IsDestroyed && events[^1] == "Loaded Success");
+
+        File.WriteAllText(save, "{\"Levels\":null}");
+        SaveManager.Load();
+        Check(ReferenceEquals(SaveManager.GetData(), loaded) && events[^1] == "Loaded Failed");
+
+        File.WriteAllText(save, JsonConvert.SerializeObject(new { Level = "A", Objects = loaded.Levels["A"] },
+            JsonHelper.GetSettings()));
+        SaveManager.Load();
+        Check(SaveManager.GetData().Levels["A"][door].Get("Progress", -1) == 42 && events[^1] == "Loaded Success");
+
+        var newId = SaveManager.CreateSlot();
+        newSave = Path.Combine(directory, newId + ".save");
+        Check(!File.Exists(newSave) && SaveManager.GetSlots().Count == 1);
+
+        SaveManager.GetData().Levels["A"][door].Set("Progress", 60);
+        SaveManager.Save();
+        var slots = SaveManager.GetSlots();
+        Check(slots.Count == 2 && slots.Any(slot => slot.Id == newId &&
+            slot.LastWriteTimeUtc == File.GetLastWriteTimeUtc(newSave)));
+
+        SaveManager.SelectSlot("Game");
+        Check(SaveManager.GetData().Levels["A"][door].Get<int>("Progress") == 60);
+        Throws(() => SaveManager.SelectSlot("../Game"));
+        SaveManager.Load();
+        Check(SaveManager.GetData().Levels["A"][door].Get<int>("Progress") == 42);
+
+        SaveManager.SelectSlot(newId);
+        SaveManager.Load();
+        Check(SaveManager.GetData().Levels["A"][door].Get<int>("Progress") == 60);
+        SaveManager.GetData().Levels["A"][door].Set("Progress", 75);
+        SaveManager.Save();
+        Check(SaveManager.GetSlots().Count == 2);
+        SaveManager.Load();
+        Check(SaveManager.GetData().Levels["A"][door].Get<int>("Progress") == 75);
+        Check(ReferenceEquals(LevelManager.ActiveLevel, activeLevel) && world.GetAllObjects(true).Contains(existing));
+    }
+    finally
+    {
+        SaveManager.Saving -= Saving;
+        SaveManager.Saved -= Saved;
+        SaveManager.Loaded -= Loaded;
+        SaveManager.GetData().Levels.Clear();
+        LevelManager.Unload();
+        File.Delete(save);
+        if (newSave != null)
+        {
+            File.Delete(newSave);
+        }
+        if (Directory.Exists(directory))
+        {
+            Directory.Delete(directory);
+        }
+    }
+});
+
+Run("SaveHelper restores the active map by GUID before Start and keeps other maps separate", () =>
+{
+    var name = $"SaveHelper-{Guid.NewGuid():N}";
+    var levelA = name + "-A";
+    var levelB = name + "-B";
+    var menuLevel = name + "-Menu";
+    var levelsDirectory = Path.Combine(testRoot, "Levels");
+    Directory.CreateDirectory(levelsDirectory);
+    var mapA = Path.Combine(levelsDirectory, levelA + ".map");
+    var mapB = Path.Combine(levelsDirectory, levelB + ".map");
+    var menuMap = Path.Combine(levelsDirectory, menuLevel + ".map");
+    var definition = Path.Combine(testRoot, "Entities", name + ".json");
+    var door = Guid.NewGuid();
+    var inactive = Guid.NewGuid();
+    var removed = Guid.NewGuid();
+    var ignored = Guid.NewGuid();
+    var world = Game.Instance.World;
+    var levels = SaveManager.GetData().Levels;
+
+    Placeable Placement(Guid id, string objectName) => new()
+    {
+        Guid = id, Type = PlaceableType.Entity, Path = name, Name = objectName
+    };
+
+    try
+    {
+        File.WriteAllText(definition, "{\"Class\":\"SaveCheckEntity, EditorChecks\",\"Parameters\":{}}");
+        EditorLevelManager.SaveLevel(new Level { Placeables = [
+            Placement(door, "door"), Placement(inactive, "inactive"), Placement(removed, "removed"),
+            Placement(ignored, "ignored")
+        ] }, mapA);
+        EditorLevelManager.SaveLevel(new Level { Placeables = [Placement(door, "door")] }, mapB);
+        EditorLevelManager.SaveLevel(new Level { SaveLevelState = false, Placeables = [Placement(door, "door")] }, menuMap);
+
+        LevelManager.Load(levelA);
+        world.Update(0);
+        var source = (SaveCheckEntity)world.Find("door")!;
+        source.Progress = 42;
+        source.Transform.Position = new Vector3(1, 2, 3);
+        source.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, 1);
+        source.Transform.Scale = new Vector3(2, 3, 4);
+        world.Find("inactive")!.SetActive(false);
+        world.Find("removed")!.Destroy();
+        world.Find("ignored")!.Saveable = false;
+        world.Update(0);
+        SaveHelper.CaptureLevel();
+        Check(levels[levelA].Count == 3 && levels[levelA][removed].IsDestroyed && !levels[levelA].ContainsKey(ignored));
+
+        LevelManager.Load(levelB);
+        SaveHelper.RestoreLevel();
+        var otherDoor = (SaveCheckEntity)world.Find("door")!;
+        Check(otherDoor.Progress == 0);
+        otherDoor.Progress = 7;
+        SaveHelper.CaptureLevel();
+
+        LevelManager.Load(levelA);
+        SaveHelper.RestoreLevel();
+        var restored = (SaveCheckEntity)world.Find("door")!;
+        var restoredInactive = (SaveCheckEntity)world.Find("inactive")!;
+        Check(restored.Guid == door && restored.Progress == 42 && restored.ProgressAtStart == null);
+        Check(restored.Transform.Position == source.Transform.Position &&
+            restored.Transform.Rotation == source.Transform.Rotation && restored.Transform.Scale == source.Transform.Scale);
+        Check(!restoredInactive.IsActive && world.Find("removed") == null && world.Find("ignored") != null);
+        world.Update(0);
+        Check(restored.ProgressAtStart == 42 && restoredInactive.ProgressAtStart == null);
+        SaveHelper.CaptureLevel();
+        Check(levels[levelA][removed].IsDestroyed);
+
+        LevelManager.Load(levelB);
+        SaveHelper.RestoreLevel();
+        Check(((SaveCheckEntity)world.Find("door")!).Progress == 7);
+
+        var oxygenGame = new SessionCheckGame();
+        typeof(Game).GetProperty(nameof(Game.World))!.SetValue(oxygenGame, world);
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var oxygenType = typeof(ProjectOxygenGL.Core.Game);
+        var onUnloading = oxygenType.GetMethod("OnLevelUnloading", flags)!.CreateDelegate<Action<Level>>(oxygenGame);
+        var onLoaded = oxygenType.GetMethod("OnLevelLoaded", flags)!.CreateDelegate<Action<Level>>(oxygenGame);
+        var onSaving = oxygenType.GetMethod("OnSaving", flags)!.CreateDelegate<Action>(oxygenGame);
+        var onSaveLoaded = oxygenType.GetMethod("OnSaveLoaded", flags)!.CreateDelegate<Action<LoadResult>>(oxygenGame);
+        int? progressAtBeginPlay = null;
+        Vector3? playerPositionAtBeginPlay = null;
+        Quaternion? playerRotationAtBeginPlay = null;
+        oxygenGame.BeginPlay += () =>
+        {
+            progressAtBeginPlay = ((SaveCheckEntity)world.Find("door")!).Progress;
+            playerPositionAtBeginPlay = oxygenGame.GetPlayerCharacter()?.Transform.Position;
+            playerRotationAtBeginPlay = oxygenGame.GetPlayerCharacter()?.Transform.Rotation;
+        };
+        var slot = SaveManager.CreateSlot();
+        var save = Path.Combine(saveDirectory, slot + ".save");
+
+        LevelManager.Unloading += onUnloading;
+        LevelManager.Loaded += onLoaded;
+        SaveManager.Saving += onSaving;
+        SaveManager.Loaded += onSaveLoaded;
+        try
+        {
+            File.WriteAllText(settingsPath, gameSettings.Replace("[Game]\n",
+                "[Game]\nGameStateClass=SessionCheckState, EditorChecks\n" +
+                "PlayerCharacterClass=SessionCheckCharacter, EditorChecks\n"));
+            Settings.Initialize();
+            ((SaveCheckEntity)world.Find("door")!).Progress = 11;
+            LevelManager.Load(levelA);
+            Check(levels[levelB][door].Get<int>("Progress") == 11 && progressAtBeginPlay == 42);
+            Check(!File.Exists(save));
+
+            ((SaveCheckEntity)world.Find("door")!).Progress = 55;
+            var character = oxygenGame.GetPlayerCharacter()!;
+            var position = new Vector3(8, 4, 2);
+            var rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, 1);
+            character.Transform.Position = position;
+            character.Transform.Rotation = rotation;
+            oxygenGame.Score = 73;
+            SaveManager.Save();
+            Check(File.Exists(save) && levels[levelA][door].Get<int>("Progress") == 55);
+            Check(SaveManager.GetData().GetGameState(typeof(SessionCheckState)) is SessionCheckState { Score: 73 } saved &&
+                saved.Level == levelA && saved.PlayerPosition == position && saved.PlayerRotation == rotation);
+
+            ((SaveCheckEntity)world.Find("door")!).Progress = 99;
+            character.Transform.Position = Vector3.Zero;
+            oxygenGame.Score = 0;
+            SaveManager.Load();
+            Check(LevelManager.ActiveLevelName == levelA && progressAtBeginPlay == 55 && oxygenGame.Score == 73);
+            Check(playerPositionAtBeginPlay == position && playerRotationAtBeginPlay == rotation);
+            var restoredCharacter = (SessionCheckCharacter)oxygenGame.GetPlayerCharacter()!;
+            Check(restoredCharacter.PositionAtStart == null);
+            world.Update(0);
+            Check(restoredCharacter.PositionAtStart == position && restoredCharacter.RotationAtStart == rotation);
+
+            var loadedLevels = SaveManager.GetData().Levels;
+            loadedLevels[menuLevel] = new() { [door] = new SavedObjectState { IsDestroyed = true } };
+            LevelManager.Load(menuLevel);
+            Check(!world.SaveLevelState && world.Find("door") != null && progressAtBeginPlay == 0);
+            loadedLevels.Remove(menuLevel);
+            ((SaveCheckEntity)world.Find("door")!).Progress = 99;
+            SaveManager.Save();
+            Check(!loadedLevels.ContainsKey(menuLevel) && loadedLevels[levelA][door].Get<int>("Progress") == 55);
+            LevelManager.Load(levelA);
+            Check(world.SaveLevelState && !loadedLevels.ContainsKey(menuLevel) && progressAtBeginPlay == 55);
+        }
+        finally
+        {
+            SaveManager.Loaded -= onSaveLoaded;
+            LevelManager.Unloading -= onUnloading;
+            LevelManager.Loaded -= onLoaded;
+            SaveManager.Saving -= onSaving;
+            SaveManager.GetData().Levels.Remove(levelA);
+            SaveManager.GetData().Levels.Remove(levelB);
+            SaveManager.GetData().SetGameState(null);
+            File.WriteAllText(settingsPath, gameSettings);
+            Settings.Initialize();
+            File.Delete(save);
+            if (Directory.Exists(saveDirectory))
+            {
+                Directory.Delete(saveDirectory);
+            }
+        }
+    }
+    finally
+    {
+        LevelManager.Unload();
+        levels.Remove(levelA);
+        levels.Remove(levelB);
+        File.Delete(mapA);
+        File.Delete(mapB);
+        File.Delete(menuMap);
+        File.Delete(definition);
+    }
+});
+
+Run("SaveHelper recreates prefab members, entity assets and spawned classes with their original GUIDs", () =>
+{
+    var name = $"DynamicSave-{Guid.NewGuid():N}";
+    var levelsDirectory = Path.Combine(testRoot, "Levels");
+    var map = Path.Combine(levelsDirectory, name + ".map");
+    var asset = Path.Combine(testRoot, "Entities", name + ".json");
+    var prefab = Content.PrefabPath(name);
+    var singlePrefab = Content.PrefabPath(name + "-Single");
+    var slot = SaveManager.CreateSlot();
+    var save = Path.Combine(saveDirectory, slot + ".save");
+    var world = Game.Instance.World;
+
+    Directory.CreateDirectory(levelsDirectory);
+    Directory.CreateDirectory(Path.GetDirectoryName(prefab)!);
+
+    try
+    {
+        EditorLevelManager.SaveLevel(new Level(), map);
+        File.WriteAllText(asset, "{\"Class\":\"SaveCheckEntity, EditorChecks\",\"Parameters\":{}}");
+        var member = new Placeable
+        {
+            Type = PlaceableType.Entity, Path = name, Name = "prefab-door",
+            Properties = new() { [nameof(SaveCheckEntity.TemplateValue)] = 13 }
+        };
+        File.WriteAllText(prefab, JsonConvert.SerializeObject(new PrefabData { Placeables = [
+            new Placeable { Type = PlaceableType.BrushBox, Name = "brush" }, member
+        ] }, JsonHelper.GetSettings()));
+        File.WriteAllText(singlePrefab, JsonConvert.SerializeObject(member, JsonHelper.GetSettings()));
+
+        LevelManager.Load(name);
+        var members = Prefab.InstantiateAll(name, world);
+        var brush = (BrushBox)members[0];
+        brush.Saveable = true;
+        var door = (SaveCheckEntity)members[1];
+        door.Progress = 42;
+        door.Name = "runtime-door";
+        door.Transform.Position = new Vector3(3, 2, 1);
+        var single = (SaveCheckEntity)Prefab.Instantiate(name + "-Single", world);
+        single.SetActive(false);
+        var deleted = Prefab.Instantiate(name + "-Single", world);
+        deleted.Destroy();
+        var entity = (SaveCheckEntity)Entity.Create(name, world)!;
+        entity.Progress = 7;
+        var raw = world.Spawn<SaveCheckEntity>(Vector3.One, Quaternion.Identity);
+        raw.Name = "spawned-in-code";
+        raw.Progress = 11;
+        var typed = (SaveCheckEntity)world.Spawn<GameObject>(typeof(SaveCheckEntity))!;
+        typed.Progress = 15;
+        typed.SetActive(false);
+        var transient = world.Spawn<SaveCheckEntity>();
+        transient.Saveable = false;
+        SaveHelper.CaptureLevel();
+        SaveManager.Save();
+        Check(File.Exists(save));
+
+        LevelManager.Load(name);
+        SaveManager.Load();
+        SaveHelper.RestoreLevel();
+        SaveHelper.RestoreLevel();
+
+        var objects = world.GetAllObjects(true).ToDictionary(obj => obj.Guid);
+        var restoredDoor = (SaveCheckEntity)objects[door.Guid];
+        Check(objects.Count == 6 && !objects.ContainsKey(deleted.Guid) && !objects.ContainsKey(transient.Guid));
+        Check(restoredDoor.Name == door.Name && restoredDoor.TemplateValue == 13 &&
+            restoredDoor.Progress == 42 && restoredDoor.Transform.Position == door.Transform.Position);
+        Check(objects[brush.Guid] is BrushBox { Saveable: true } && !objects[single.Guid].IsActive);
+        Check(((SaveCheckEntity)objects[entity.Guid]).Progress == 7 && restoredDoor.ProgressAtStart == null);
+        var restoredRaw = (SaveCheckEntity)objects[raw.Guid];
+        var restoredTyped = (SaveCheckEntity)objects[typed.Guid];
+        Check(restoredRaw.GuidAtCreate == raw.Guid && restoredRaw.Name == raw.Name &&
+            restoredRaw.Transform.Position == Vector3.One && restoredRaw.Progress == 11 && restoredRaw.ProgressAtStart == null);
+        Check(restoredTyped.GuidAtCreate == typed.Guid && restoredTyped.Progress == 15 && !restoredTyped.IsActive);
+        world.Update(0);
+        Check(restoredDoor.ProgressAtStart == 42);
+        Check(restoredRaw.ProgressAtStart == 11 && restoredTyped.ProgressAtStart == null);
+
+        SaveHelper.CaptureLevel();
+        Check(SaveManager.GetData().Levels[name][door.Guid].SpawnSource?.PrefabMemberIndex == 1);
+        Check(SaveManager.GetData().Levels[name][raw.Guid].SpawnSource?.ClassName == typeof(SaveCheckEntity).AssemblyQualifiedName);
+        Check(SaveManager.GetData().Levels[name][deleted.Guid].IsDestroyed);
+    }
+    finally
+    {
+        LevelManager.Unload();
+        SaveManager.GetData().Levels.Remove(name);
+        File.Delete(map);
+        File.Delete(asset);
+        File.Delete(prefab);
+        File.Delete(singlePrefab);
+        File.Delete(save);
+        if (Directory.Exists(saveDirectory))
+        {
+            Directory.Delete(saveDirectory);
+        }
+    }
+});
 
 Run("Projection and ray agree for a perspective camera", () =>
 {
@@ -309,6 +734,68 @@ Run("Environment changes mark the map dirty; reverting or saving clears it", () 
     Check(saved.Environment!.FogNear == Environment.FogNear);
 });
 
+Run("KillY roundtrips per level, participates in history and rejects invalid values", () =>
+{
+    var world = Game.Instance.World;
+    EditorLevelManager.NewLevel();
+    Check(world.KillY == -1000f);
+    var capture = typeof(EnvironmentWindow).GetMethod("Capture", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+    var apply = typeof(EnvironmentWindow).GetMethod("Apply", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+    var before = (string)capture.Invoke(null, null)!;
+    world.KillY = -45f;
+    var after = (string)capture.Invoke(null, null)!;
+    UndoRedo.RecordEdit(world, "KillY", before, after, state => apply.Invoke(null, [state]), false);
+    UndoRedo.Undo();
+    Check(world.KillY == -1000f);
+    UndoRedo.Redo();
+    Check(world.KillY == -45f);
+    EditorLevelManager.RefreshDirty();
+    Check(EditorLevelManager.IsDirty);
+    var path = Path.Combine(testRoot, "kill-y.map");
+    EditorLevelManager.SaveCurrentLevel(path);
+    Check(EditorLevelManager.ReadLevel(path).KillY == -45f && !EditorLevelManager.IsDirty);
+    world.KillY = -5f;
+    EditorLevelManager.OpenLevel(path);
+    Check(world.KillY == -45f);
+    var keeper = world.Spawn<GameObject>();
+    Throws(() => LevelManager.Load(new Level { KillY = float.NaN }));
+    Check(world.KillY == -45f && !keeper.IsDestroyed);
+    Throws(() => EditorLevelManager.SaveLevel(new Level { KillY = float.PositiveInfinity }, path));
+    Check(EditorLevelManager.ReadLevel(path).KillY == -45f);
+    LevelManager.Load(JsonConvert.DeserializeObject<Level>("{\"Placeables\":[]}")!);
+    Check(world.KillY == -1000f);
+    world.KillY = -20f;
+    EditorLevelManager.NewLevel();
+    Check(world.KillY == -1000f && !EditorLevelManager.IsDirty);
+});
+
+Run("Save Level State is enabled by default and roundtrips through editor history and maps", () =>
+{
+    var world = Game.Instance.World;
+    EditorLevelManager.NewLevel();
+    Check(world.SaveLevelState);
+    var flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+    var capture = typeof(EnvironmentWindow).GetMethod("Capture", flags)!;
+    var apply = typeof(EnvironmentWindow).GetMethod("Apply", flags)!;
+    var before = (string)capture.Invoke(null, null)!;
+    world.SaveLevelState = false;
+    var after = (string)capture.Invoke(null, null)!;
+    UndoRedo.RecordEdit(world, "SaveLevelState", before, after, state => apply.Invoke(null, [state]), false);
+    UndoRedo.Undo();
+    Check(world.SaveLevelState);
+    UndoRedo.Redo();
+    Check(!world.SaveLevelState);
+    var path = Path.Combine(testRoot, "save-level-state.map");
+    EditorLevelManager.SaveCurrentLevel(path);
+    Check(!EditorLevelManager.ReadLevel(path).SaveLevelState);
+    EditorLevelManager.NewLevel();
+    Check(world.SaveLevelState);
+    EditorLevelManager.OpenLevel(path);
+    Check(!world.SaveLevelState);
+    LevelManager.Load(JsonConvert.DeserializeObject<Level>("{\"Placeables\":[]}")!);
+    Check(world.SaveLevelState);
+});
+
 Run("Legacy maps and null environment use defaults instead of previous map values", () =>
 {
     var legacy = JsonConvert.DeserializeObject<Level>("{\"Placeables\":[]}", JsonHelper.GetSettings())!;
@@ -413,7 +900,7 @@ Run("Unnamed geometry duplicates with a unique asset-based name and its own coll
     var copy = (Geometry)EditorLevelManager.DuplicateObject(source);
     Check(copy.Name == "Box_2" && copy.Path == source.Path);
     Check(copy.Transform.Position == source.Transform.Position && copy.Transform.Scale == source.Transform.Scale);
-    Check(copy.Collider != null && copy.Collider != source.Collider && copy.Collider.Parent == copy);
+    Check(copy.Collider != null && copy.Collider != source.Collider && copy.Collider.Owner == copy);
 });
 
 Run("Failed duplication removes partial objects and unregisters their colliders", () =>
@@ -687,6 +1174,8 @@ Run("BrushBox roundtrip and duplication preserve independent size, material, tra
     EditorLevelManager.NewLevel();
     var brush = Game.Instance.World.Spawn<BrushBox>();
     brush.Name = "wall_1";
+    brush.SimulatePhysics = true;
+    brush.GetComponent<Rigidbody>()!.Mass = 6f;
     brush.Size = new Vector3(4, 3, 0.25f);
     brush.TextureScale = 2.5f;
     brush.Color = Color.Cyan;
@@ -699,16 +1188,323 @@ Run("BrushBox roundtrip and duplication preserve independent size, material, tra
     EditorLevelManager.OpenLevel(path);
     var loaded = Game.Instance.World.Find<BrushBox>()!;
     Check(loaded.Name == "wall_1" && loaded.Size == brush.Size && !loaded.IsActive);
+    Check(loaded.Movable && loaded.SimulatePhysics && loaded.GetComponent<Rigidbody>() is { IsEnabled: true, Mass: 6f });
     Check(loaded.TextureScale == 2.5f && loaded.Color.Equals(Color.Cyan) && !loaded.Lit);
     Check(loaded.Transform.Position == brush.Transform.Position && loaded.Transform.Scale == brush.Transform.Scale);
     Selection.Object = loaded;
     Check(Editor.CanDuplicateSelection);
     var copy = (BrushBox)EditorLevelManager.DuplicateObject(loaded);
     Check(copy.Name == "wall_2" && copy.Size == loaded.Size && copy.Collider != loaded.Collider && !copy.IsActive);
+    Check(copy.Movable && copy.SimulatePhysics && copy.GetComponent<Rigidbody>() is { IsEnabled: true, Mass: 6f });
     copy.Size = Vector3.One;
     Check(loaded.Size == new Vector3(4, 3, 0.25f));
     EditorLevelManager.RefreshDirty();
     Check(EditorLevelManager.IsDirty);
+});
+
+Run("Dynamic BrushBoxes fall and stack on a solid floor; destroying it removes its support", () =>
+{
+    EditorLevelManager.NewLevel();
+    var world = Game.Instance.World;
+    try
+    {
+        var floor = world.Spawn<BrushBox>();
+        floor.Size = new Vector3(10f, 1f, 10f);
+        floor.Transform.Position = new Vector3(0f, -0.5f, 0f);
+
+        var trigger = world.Spawn<BrushBox>();
+        trigger.Size = floor.Size;
+        trigger.Transform.Position = new Vector3(0f, 2f, 0f);
+        trigger.Collider!.IsTrigger = true;
+
+        var lower = world.Spawn<BrushBox>();
+        lower.SimulatePhysics = true;
+        lower.Transform.Position = new Vector3(0f, 4f, 0f);
+        var upper = world.Spawn<BrushBox>();
+        upper.SimulatePhysics = true;
+        upper.Transform.Position = new Vector3(0f, 6f, 0f);
+
+        Physics.Update(0f);
+        Check(lower.Transform.Position.Y == 4f);
+        for (var i = 0; i < 360; i++)
+        {
+            Physics.Update(1f / 120f);
+        }
+
+        Check(MathF.Abs(lower.Transform.Position.Y - 0.5f) < 0.04f);
+        Check(MathF.Abs(upper.Transform.Position.Y - 1.5f) < 0.04f);
+        Check(Physics.Raycast(new Vector3(0f, 4f, 0f), -Vector3.UnitY, 10f, Layers.Everything,
+            out var hit, new PhysicsQueryFilter { IgnoreTriggers = true }) && hit.Object == upper);
+
+        var body = upper.GetComponent<Rigidbody>()!;
+        upper.SimulatePhysics = false;
+        Check(body.IsDestroyed && upper.GetComponent<Rigidbody>() == null && upper.Movable);
+        var suspended = upper.Transform.Position;
+        floor.Destroy();
+        for (var i = 0; i < 60; i++)
+        {
+            Physics.Update(1f / 60f);
+        }
+
+        Check(lower.Transform.Position.Y < -1f && upper.Transform.Position == suspended);
+        upper.SimulatePhysics = true;
+        for (var i = 0; i < 60; i++)
+        {
+            Physics.Update(1f / 60f);
+        }
+
+        Check(upper.Transform.Position.Y < 0f);
+    }
+    finally
+    {
+        world.Clear();
+    }
+});
+
+Run("Mass controls impulse response and collisions, and linear velocity is synchronized", () =>
+{
+    EditorLevelManager.NewLevel();
+    var world = Game.Instance.World;
+    try
+    {
+        Rigidbody CreateBox(float x, float mass)
+        {
+            var brush = world.Spawn<BrushBox>();
+            brush.SimulatePhysics = true;
+            brush.Transform.Position = new Vector3(x, 20f, 0f);
+            var body = brush.GetComponent<Rigidbody>()!;
+            body.Mass = mass;
+            body.AddImpulse(new Vector3(8f, 0f, 0f));
+            return body;
+        }
+
+        var light = CreateBox(0f, 2f);
+        var heavy = CreateBox(3f, 8f);
+        for (var i = 0; i < 10; i++)
+        {
+            Physics.Update(1f / 60f);
+        }
+
+        Check(MathF.Abs(light.LinearVelocity.X - 4f) < 0.001f && MathF.Abs(heavy.LinearVelocity.X - 1f) < 0.001f);
+        Check(light.LinearVelocity.Y < 0f && light.LinearVelocity.Y == heavy.LinearVelocity.Y);
+        Check(light.Owner.Transform.Rotation == Quaternion.Identity);
+
+        light.LinearVelocity += Vector3.UnitZ * 0.5f;
+        heavy.LinearVelocity += Vector3.UnitZ * 0.5f;
+        Physics.Update(1f / 60f);
+        Check(light.Owner.Transform.Position.Z > 0f && heavy.Owner.Transform.Position.Z > 0f);
+
+        for (var i = 0; i < 70; i++)
+        {
+            Physics.Update(1f / 60f);
+        }
+
+        Check(light.LinearVelocity.X < 3f && heavy.LinearVelocity.X > 1.1f);
+        Check(MathF.Abs(2f * light.LinearVelocity.X + 8f * heavy.LinearVelocity.X - 16f) < 0.1f);
+
+        heavy.Owner.Transform.Position += new Vector3(0f, 0f, 3f);
+        heavy.Mass = 4f;
+        heavy.LinearVelocity = new Vector3(0f, 0f, 3f);
+        heavy.AddImpulse(new Vector3(0f, 0f, 4f));
+        Physics.Update(1f / 60f);
+        Check(MathF.Abs(heavy.LinearVelocity.Z - 4f) < 0.001f);
+        Check(heavy.Owner.Transform.Position.Z > 3f);
+    }
+    finally
+    {
+        world.Clear();
+    }
+});
+
+Run("Angular velocity starts and changes spin and can be cleared on teleport", () =>
+{
+    EditorLevelManager.NewLevel();
+    var world = Game.Instance.World;
+    try
+    {
+        const float step = 1f / 60f;
+        var brush = world.Spawn<BrushBox>();
+        brush.SimulatePhysics = true;
+        var body = brush.GetComponent<Rigidbody>()!;
+        body.AngularVelocity = Vector3.UnitY * 3f;
+        Physics.Update(step);
+        Check(MathF.Abs(brush.Transform.Rotation.Y) > 0.01f);
+        Check(Vector3.Distance(body.AngularVelocity, Vector3.UnitY * 3f) < 0.001f);
+
+        body.AngularVelocity = -Vector3.UnitX * 2f;
+        Physics.Update(step);
+        Check(MathF.Abs(brush.Transform.Rotation.X) > 0.01f);
+        Check(Vector3.Distance(body.AngularVelocity, -Vector3.UnitX * 2f) < 0.001f);
+
+        var destination = new Vector3(10f, 5f, 2f);
+        brush.Transform.Position = destination;
+        brush.Transform.Rotation = Quaternion.Identity;
+        body.LinearVelocity = Vector3.Zero;
+        body.AngularVelocity = Vector3.Zero;
+        Physics.Update(step);
+
+        Check(body.AngularVelocity == Vector3.Zero && brush.Transform.Rotation == Quaternion.Identity);
+        Check(brush.Transform.Position.X == destination.X && brush.Transform.Position.Z == destination.Z);
+        Check(MathF.Abs(body.LinearVelocity.Y + 9.81f * step) < 0.001f);
+    }
+    finally
+    {
+        world.Clear();
+    }
+});
+
+Run("Point impulses spin a rotated box using its scaled inertia and offset center", () =>
+{
+    EditorLevelManager.NewLevel();
+    var world = Game.Instance.World;
+    try
+    {
+        var obj = world.Spawn<GameObject>();
+        obj.Transform.Position = new Vector3(4f, 10f, -3f);
+        obj.Transform.Scale = new Vector3(2f, 1f, 1f);
+        var rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI / 2f);
+        obj.Transform.Rotation = rotation;
+        var collider = obj.AddComponent<BoxCollider>();
+        collider.HalfExtents = new Vector3(1f, 0.5f, 0.25f);
+        collider.Center = new Vector3(0.25f, 0f, 0f);
+        var body = obj.AddComponent<Rigidbody>();
+        body.Mass = 2f;
+
+        var center = collider.GetWorldCenter();
+        var impulse = Vector3.UnitX * 4f;
+        body.AddImpulse(impulse, center);
+        Check(body.LinearVelocity == Vector3.UnitX * 2f && body.AngularVelocity == Vector3.Zero);
+
+        body.AddImpulse(impulse, center + new Vector3(0.25f, 0.5f, 0f));
+        Check(body.LinearVelocity == Vector3.UnitX * 4f);
+        Check(Vector3.Distance(body.AngularVelocity, -Vector3.UnitZ * 9.6f) < 0.001f);
+
+        Physics.Update(1f / 60f);
+        Check(obj.Transform.Position.X > 4f && MathF.Abs(Quaternion.Dot(obj.Transform.Rotation, rotation)) < 0.999f);
+    }
+    finally
+    {
+        world.Clear();
+    }
+});
+
+Run("Sphere and capsule rigidbodies share a simulation with dynamic boxes", () =>
+{
+    EditorLevelManager.NewLevel();
+    var world = Game.Instance.World;
+    try
+    {
+        var floor = world.Spawn<BrushBox>();
+        floor.Size = new Vector3(20f, 1f, 12f);
+        floor.Transform.Position = new Vector3(0f, -0.5f, 0f);
+
+        foreach (var x in new[] { -4f, 4f })
+        {
+            var box = world.Spawn<BrushBox>();
+            box.SimulatePhysics = true;
+            box.Size = new Vector3(3f, 1f, 3f);
+            box.Transform.Position = new Vector3(x, 0.5f, 0f);
+        }
+
+        var sphereOwner = world.Spawn<GameObject>();
+        sphereOwner.Transform.Position = new Vector3(-4f, 5f, 0f);
+        sphereOwner.Transform.Scale = new Vector3(1f, 2f, 1f);
+        var sphere = sphereOwner.AddComponent<SphereCollider>();
+        sphere.Radius = 0.3f;
+        sphere.Center = new Vector3(0f, 0.2f, 0f);
+        sphereOwner.AddComponent<Rigidbody>();
+
+        var capsuleOwner = world.Spawn<GameObject>();
+        capsuleOwner.Transform.Position = new Vector3(4f, 5f, 0f);
+        capsuleOwner.Transform.Scale = new Vector3(2f, 1f, 0.75f);
+        var rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, 0.5f);
+        capsuleOwner.Transform.Rotation = rotation;
+        var capsule = capsuleOwner.AddComponent<CapsuleCollider>();
+        capsule.LocalAxis = -Vector3.UnitX;
+        capsule.Radius = 0.3f;
+        capsule.Center = new Vector3(0f, 0.2f, 0f);
+        capsuleOwner.AddComponent<Rigidbody>();
+
+        Physics.Update(1f / 60f);
+        Check(MathF.Abs(Quaternion.Dot(capsuleOwner.Transform.Rotation, rotation)) > 0.9999f);
+        Check(sphereOwner.Transform.Position.Y < 5f && capsuleOwner.Transform.Position.Y < 5f);
+
+        for (var i = 0; i < 180; i++)
+        {
+            Physics.Update(1f / 60f);
+        }
+
+        Check(MathF.Abs(sphere.GetWorldBounds().min.Y - 1f) < 0.04f);
+        Check(MathF.Abs(capsule.GetWorldBounds().min.Y - 1f) < 0.04f);
+        var (a, b) = capsule.GetWorldSegment();
+        Check(MathF.Abs(b.Y - a.Y) < 0.04f);
+    }
+    finally
+    {
+        world.Clear();
+    }
+});
+
+Run("An entity with simulation disabled supports a box until an Output enables its Rigidbody", () =>
+{
+    EditorLevelManager.NewLevel();
+    File.WriteAllText(Path.Combine(testRoot, "Entities", "PhysicsPlatform.json"),
+        "{\"Class\":\"PhysicsPlatform, EditorChecks\",\"Parameters\":{}}");
+    var world = Game.Instance.World;
+    try
+    {
+        var platform = (Entity)LevelManager.CreateObject(world, new Placeable
+        {
+            Type = PlaceableType.Entity, Path = "PhysicsPlatform", Name = "platform",
+            SimulatePhysics = false, Position = new Vector3(0f, 3f, 0f)
+        });
+        var body = platform.Rigidbody!;
+        Check(!body.IsEnabled);
+        RecordInspector(platform, "Simulate physics", () => platform.SetSimulatePhysics(true));
+        UndoRedo.Undo();
+        Check(!body.IsEnabled);
+        UndoRedo.Redo();
+        Check(body.IsEnabled);
+        UndoRedo.Undo();
+
+        var path = Path.Combine(testRoot, "physics-platform.map");
+        EditorLevelManager.SaveCurrentLevel(path);
+        Check(EditorLevelManager.ReadLevel(path).Placeables.Single().SimulatePhysics == false);
+        EditorLevelManager.OpenLevel(path);
+        platform = (Entity)world.Find("platform")!;
+        Check(platform.Rigidbody is { IsEnabled: false });
+
+        var floor = world.Spawn<BrushBox>();
+        floor.Size = new Vector3(10f, 1f, 10f);
+        floor.Transform.Position = new Vector3(0f, -0.5f, 0f);
+        var box = world.Spawn<BrushBox>();
+        box.SimulatePhysics = true;
+        box.Transform.Position = new Vector3(0f, 5f, 0f);
+        for (var i = 0; i < 120; i++)
+        {
+            Physics.Update(1f / 60f);
+        }
+
+        Check(platform.Transform.Position.Y == 3f && MathF.Abs(box.Transform.Position.Y - 4f) < 0.04f);
+        var source = world.Spawn<Entity>();
+        source.Outputs.Add(new OutputData
+        {
+            Event = "Release", TargetName = platform.Name, Input = "SetSimulatePhysics", Parameter = "true"
+        });
+        source.InvokeEvent("Release");
+        Check(platform.Rigidbody is { IsEnabled: true });
+        for (var i = 0; i < 180; i++)
+        {
+            Physics.Update(1f / 60f);
+        }
+
+        Check(MathF.Abs(platform.Transform.Position.Y - 0.5f) < 0.04f);
+        Check(MathF.Abs(box.Transform.Position.Y - 1.5f) < 0.04f);
+    }
+    finally
+    {
+        world.Clear();
+    }
 });
 
 Run("Invalid BrushBox descriptions reject loading without replacing the current world", () =>
@@ -778,7 +1574,7 @@ Run("Spotlight gizmo matches the rotated outer cone and radial cutoff", () =>
     var light = new Light { Radius = 7, OuterAngle = 60 };
     light.Transform.Position = new Vector3(2, 3, 4);
     light.Transform.Rotation = Quaternion.CreateFromYawPitchRoll(0.9f, 0.4f, 0);
-    var lines = LightGizmo.ConeLines(light, light.OuterAngle).ToArray();
+    var lines = Utils.GetConeLines(light.Transform, light.Radius, light.OuterAngle).ToArray();
     Check(lines.Length == 52);
     foreach (var line in lines)
     {
@@ -787,7 +1583,7 @@ Run("Spotlight gizmo matches the rotated outer cone and radial cutoff", () =>
         Check(MathF.Abs(Vector3.Dot(Vector3.Normalize(toRim), light.Transform.Forward) - MathF.Cos(MathF.PI / 6)) < 0.0001f);
     }
     light.Radius = 0;
-    Check(!LightGizmo.ConeLines(light, 60).Any());
+    Check(!Utils.GetConeLines(light.Transform, light.Radius, light.OuterAngle).Any());
 });
 
 Run("Corrupt BrushBox texture preserves the current world", () =>
@@ -827,9 +1623,14 @@ Run("Player camera keeps spawn direction and character owns its flashlight", () 
     ProjectShockGL.Rendering.Camera.ToggleTo(camera);
     var world = Game.Instance.World;
     var character = world.Spawn<ProjectDungeon.Game.ShockPlayerCharacter>();
+    Check(character.GetComponent<CharacterController>() is { Height: 2f, Radius: 0.3f });
+    Check(character.GetComponent<CameraComponent>()!.LocalPosition == Vector3.UnitY * 0.6f);
+    Check(ProjectShockGL.Rendering.Camera.Active == camera);
     character.Transform.Rotation = Quaternion.CreateFromYawPitchRoll(1.2f, 0.2f, 0);
     var expected = character.Transform.Forward;
     world.Update(0);
+    camera = character.GetComponent<CameraComponent>()!.Camera;
+    Check(ProjectShockGL.Rendering.Camera.Active == camera);
     Check(Vector3.Distance(camera.Transform.Forward, expected) < 0.0001f);
     character.Turn(1);
     world.Update(0);
@@ -837,7 +1638,7 @@ Run("Player camera keeps spawn direction and character owns its flashlight", () 
         Quaternion.CreateFromYawPitchRoll(1.2f + MathF.PI / 180f, 0.2f, 0));
     Check(Vector3.Distance(camera.Transform.Forward, turnedForward) < 0.0001f);
     var light = world.Find<Light>()!;
-    Check(light.IsActive);
+    Check(light.IsActive && !light.Saveable);
     character.SetActive(false);
     Check(!light.IsActive);
     character.SetActive(true);
@@ -908,6 +1709,8 @@ Run("Inspector snapshots restore all BrushBox data, paired texture fields and co
         brush.Name = "wall"; brush.Size = new Vector3(4,5,6); brush.TextureScale = 3;
         brush.TextureName = "paint"; brush.TextureFormat = TextureFormat.Png;
         brush.Color = Color.Red; brush.Lit = false; brush.SetActive(false);
+        brush.SimulatePhysics = true;
+        brush.GetComponent<Rigidbody>()!.Mass = 3.5f;
     });
     var after = InspectorState.Capture(brush);
     UndoRedo.Undo();
@@ -933,6 +1736,41 @@ Run("Spotlight undo restores linked inner and outer angles and light registratio
     Check(Light.Main == light && !Light.All.Contains(light));
     UndoRedo.Undo();
     Check(light.Type == LightType.Spot && Light.Main != light && Light.All.Contains(light));
+});
+
+Run("Inspector discovers inherited OutputEvent names without duplicates", () =>
+{
+    var getNames = typeof(Inspector).GetMethod("GetOutputEventNames",
+        System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+    var timerNames = (string[])getNames.Invoke(null, [typeof(OutputCheckTimer)])!;
+    Check(timerNames.SequenceEqual(new[] { "OnFinished", "OnReset", "OnValueChanged" }));
+    var plainNames = (string[])getNames.Invoke(null, [typeof(CheckEntity)])!;
+    Check(plainNames.Length == 0);
+});
+
+Run("Inspector lists named output targets, including pending objects, without duplicate names", () =>
+{
+    var world = new World();
+    try
+    {
+        world.Spawn<GameObject>().Name = "panel";
+        world.Update(0, simulate: false);
+        world.Spawn<GameObject>().Name = "door";
+        world.Spawn<GameObject>().Name = "panel";
+        world.Spawn<GameObject>();
+        var removed = world.Spawn<GameObject>();
+        removed.Name = "removed";
+        removed.Destroy();
+
+        var getNames = typeof(Inspector).GetMethod("GetOutputTargetNames",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+        var names = (string[])getNames.Invoke(null, [world])!;
+        Check(names.SequenceEqual(new[] { "door", "panel" }));
+    }
+    finally
+    {
+        world.Clear();
+    }
 });
 
 Run("Outputs and mutable Editable values are deep snapshots across repeated undo and redo", () =>
@@ -1097,6 +1935,38 @@ RunScene("Older Inspector and gizmo actions follow the restored instance through
     }
 });
 
+RunScene("Map GUIDs survive reopening, and legacy maps get distinct IDs", () =>
+{
+    var path = Path.Combine(testRoot, $"ObjectIds-{Guid.NewGuid():N}.map");
+    try
+    {
+        File.WriteAllText(path, """
+            {"Placeables":[{"Type":1,"Path":"Check","Name":"entity"},
+                           {"Type":0,"Path":"Box","Name":"geometry"},
+                           {"Type":2,"Name":"brush"}]}
+            """);
+        EditorLevelManager.OpenLevel(path);
+
+        var world = Game.Instance.World;
+        var ids = world.GetAllObjects(true).Select(obj => obj.Guid).ToArray();
+        Check(ids.Length == 3 && ids.Distinct().Count() == 3 && !ids.Contains(Guid.Empty));
+
+        EditorLevelManager.SaveCurrentLevel(path);
+        Check(EditorLevelManager.ReadLevel(path).Placeables.Select(placement => placement.Guid!.Value).SequenceEqual(ids));
+        EditorLevelManager.OpenLevel(path);
+        Check(world.GetAllObjects(true).Select(obj => obj.Guid).SequenceEqual(ids));
+        Check(world.Find<CheckEntity>()!.GuidSeenInCreate == ids[0]);
+
+        var previous = LevelManager.ActiveLevel;
+        Throws(() => LevelManager.Load(new Level { Placeables = [
+            new Placeable { Type = PlaceableType.BrushBox, Guid = ids[0] },
+            new Placeable { Type = PlaceableType.BrushBox, Guid = ids[0] }
+        ] }));
+        Check(LevelManager.ActiveLevel == previous && world.GetAllObjects(true).Select(obj => obj.Guid).SequenceEqual(ids));
+    }
+    finally { File.Delete(path); }
+});
+
 RunScene("Duplication redo restores the same independent data, name and self-targeted outputs", () =>
 {
     var source = (CheckEntity)SceneObjects.Create(PlaceableType.Entity,"Check");
@@ -1106,17 +1976,20 @@ RunScene("Duplication redo restores the same independent data, name and self-tar
     });
     var clone = (CheckEntity)SceneObjects.Duplicate(source);
     var reference = EditorObjectReference.Get(clone);
+    Check(clone.Guid != Guid.Empty && clone.Guid != source.Guid && clone.Guid == clone.GuidSeenInCreate);
     Check(clone.Name=="logic_2" && clone.Outputs[0].TargetName==clone.Name);
     var state = InspectorState.Capture(clone);
     UndoRedo.Undo();
     Check(clone.IsDestroyed && Selection.Object==source && !source.IsDestroyed);
     UndoRedo.Redo();
     var restored = (CheckEntity)reference.Current;
+    Check(restored.Guid == clone.Guid);
     Check(InspectorState.Capture(restored)==state && !restored.IsActive);
     Check(!ReferenceEquals(source.Values,restored.Values) && !ReferenceEquals(source.Outputs[0],restored.Outputs[0]));
     RecordInspector(restored,"Number",()=>restored.Number=20);
     SceneObjects.Delete(restored);
     UndoRedo.Undo();
+    Check(reference.Current.Guid == clone.Guid);
     UndoRedo.Undo();
     Check(((CheckEntity)reference.Current).Number==7 && source.Number==7);
 });
@@ -1273,6 +2146,7 @@ RunScene("Brush Movable survives Inspector undo, duplication and level data", ()
     Check(placement.Brush!.Movable);
     var restored = (BrushBox)EditorLevelManager.CreatePlacement(placement);
     Check(restored.Movable && !restored.IsStatic);
+    Check(restored.Guid != brush.Guid && restored.Guid != duplicate.Guid);
 });
 
 RunScene("Palette creation uses short unique names while retaining nested asset paths", () =>
@@ -1304,9 +2178,11 @@ RunScene("Single-object prefabs save independent values and Outputs, and support
         PrefabTools.Save(source, name);
         Check(Content.GetAllPrefabNames().Contains(name));
         var template = Content.LoadPrefab(name)!;
+        Check(template.Guid == null);
         Check(template.EditorGroups.Length == 0 && template.Outputs.Single().TargetName == "gate");
         var a = (CheckEntity)SceneObjects.CreatePrefab(name);
         var b = (CheckEntity)SceneObjects.CreatePrefab(name);
+        Check(a.Guid != b.Guid && a.Guid != source.Guid && b.Guid != source.Guid);
         Check(a.Number == 17 && b.Number == 17 && !a.IsActive && a.Transform.Position == source.Transform.Position);
         Check(a.Name != b.Name && a.EditorGroups.Count == 0 && a.Path == source.Path);
         a.Outputs[0].Parameter = "false"; a.Number = 99;
@@ -1316,6 +2192,7 @@ RunScene("Single-object prefabs save independent values and Outputs, and support
         var reference = EditorObjectReference.Get(b);
         UndoRedo.Undo(); Check(b.IsDestroyed);
         UndoRedo.Redo(); Check(((CheckEntity)reference.Current).Number == 17);
+        Check(reference.Current.Guid == b.Guid);
         var editorProperty = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
         try
         {
@@ -1341,11 +2218,13 @@ RunScene("Brush prefab retains procedural settings and failed prefab spawn clean
     var template = EditorLevelManager.CaptureLevel([brush]).Placeables.Single();
     var copy = (BrushBox)Prefab.Instantiate(template, Game.Instance.World);
     Check(copy.Size == brush.Size && copy.Movable && copy.TextureScale == 2);
+    Check(copy.Guid != brush.Guid);
     var first = (CheckEntity)SceneObjects.Create(PlaceableType.Entity, "Check");
     first.Values = [5];
     var shared = EditorLevelManager.CaptureLevel([first]).Placeables.Single();
     var left = (CheckEntity)Prefab.Instantiate(shared, Game.Instance.World);
     var right = (CheckEntity)Prefab.Instantiate(shared, Game.Instance.World);
+    Check(left.Guid != right.Guid && left.Guid != first.Guid && right.Guid != first.Guid);
     left.Values.Add(6);
     Check(right.Values.Count == 1 && first.Values.Count == 1);
     var world = Game.Instance.World;
@@ -1788,6 +2667,36 @@ if (args.Contains("--imgui"))
             UndoRedo.Redo();
             Check(Environment.IsFogEnabled != fog);
         });
+        Run("Real ImGui editor errors have a wide, bounded message area", () =>
+        {
+            var drawPopups = typeof(Editor).GetMethod("DrawPopups",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+            var message = string.Join("\n", Enumerable.Repeat("Cannot create entity from asset Entities/Placeables/Missing.json.", 40));
+            Editor.Execute(() => throw new InvalidOperationException(message));
+
+            void DrawError()
+            {
+                ImGuiNET.ImGui.Begin("Error test host");
+                drawPopups.Invoke(null, null);
+                ImGuiNET.ImGui.End();
+            }
+
+            Frame(DrawError);
+            Frame(DrawError);
+            var drawData = ImGuiNET.ImGui.GetDrawData();
+            var hasMessageArea = false;
+            for (var i = 0; i < drawData.CmdListsCount; i++)
+            {
+                var commands = drawData.CmdLists[i].CmdBuffer;
+                for (var j = 0; j < commands.Size; j++)
+                {
+                    var clip = commands[j].ClipRect;
+                    hasMessageArea |= clip.Z - clip.X is > 450 and < 560 && clip.W - clip.Y is > 150 and < 260;
+                }
+            }
+
+            Check(hasMessageArea);
+        });
     }
     finally { ImGuiNET.ImGui.DestroyContext(context); }
 }
@@ -1840,14 +2749,100 @@ public sealed class CheckGame : Game
     }
     public void UpdateForTest() => Update(0);
 }
+public sealed class SessionCheckState : ProjectOxygenGL.Core.GameState
+{
+    public int Score { get; set; }
+}
+
+public sealed class SessionCheckGame : ProjectOxygenGL.Core.Game
+{
+    public int Score { get; set; }
+
+    protected override void OnCaptureState(ProjectOxygenGL.Core.GameState state)
+    {
+        ((SessionCheckState)state).Score = Score;
+    }
+
+    protected override void OnRestoreState(ProjectOxygenGL.Core.GameState state)
+    {
+        Score = ((SessionCheckState)state).Score;
+    }
+}
+
+public sealed class SessionCheckCharacter : ProjectOxygenGL.Core.Character
+{
+    protected override bool IsSaveableByDefault => false;
+    public Vector3? PositionAtStart { get; private set; }
+    public Quaternion? RotationAtStart { get; private set; }
+
+    public override void Start()
+    {
+        base.Start();
+        PositionAtStart = Transform.Position;
+        RotationAtStart = Transform.Rotation;
+    }
+}
+
+public sealed class SaveCheckEntity : Entity
+{
+    [Editable] public int TemplateValue { get; set; }
+    public int Progress { get; set; }
+    public int? ProgressAtStart { get; private set; }
+    public Guid GuidAtCreate { get; private set; }
+
+    public override void Create()
+    {
+        GuidAtCreate = Guid;
+        base.Create();
+    }
+
+    public override void Start()
+    {
+        base.Start();
+        ProgressAtStart = Progress;
+    }
+
+    public override void OnCaptureState(IObjectStateWriter state)
+    {
+        state.Set("Progress", Progress);
+    }
+
+    public override void OnRestoreState(IObjectStateReader state)
+    {
+        Progress = state.Get<int>("Progress");
+    }
+}
+
+[OutputEvent("OnFinished")]
+[OutputEvent("OnReset")]
+public sealed class OutputCheckTimer : ProjectShockGL.Placeables.TimerEvent
+{
+}
+
 public class CheckEntity : Entity
 {
     public int Starts;
+    public Guid GuidSeenInCreate { get; private set; }
     public override void Start() { base.Start(); Starts++; }
     [Editable] public int Number { get; set; }
     [Editable] public List<int> Values { get; set; } = [];
-    public override void Create() { base.Create(); AddComponent<SphereCollider>(); }
+    public override void Create()
+    {
+        GuidSeenInCreate = Guid;
+        base.Create();
+        AddComponent<SphereCollider>();
+    }
 }
+public sealed class PhysicsPlatform : Entity
+{
+    public override void Create()
+    {
+        base.Create();
+        AddComponent<BoxCollider>().HalfExtents = new Vector3(1f, 0.5f, 1f);
+        AddComponent<Rigidbody>();
+    }
+}
+
 public sealed class BrokenEntity : CheckEntity
 {
     public override void Create() { base.Create(); throw new InvalidOperationException("Expected creation failure"); }
@@ -1883,5 +2878,8 @@ public sealed class ThrowingDeleteEntity : CheckEntity
     public static bool RejectDestroy = true;
     public override void Destroy() { if (RejectDestroy) throw new InvalidOperationException("Destroy before base.Destroy"); base.Destroy(); }
 }
+
+
+
 
 

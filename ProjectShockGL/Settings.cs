@@ -11,10 +11,10 @@ public static class Settings
 
     private static string _path = null!;
     
-    public static void Initialize()
+    public static void Initialize(bool isEditor = false)
     {
         _parser = new FileIniDataParser();
-        _path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Settings.ini");
+        _path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, (isEditor ? "EditorSettings" : "GameSettings") + ".ini");
 
         _data = File.Exists(_path) ? _parser.ReadFile(_path) : new IniData();
         _data.Configuration.AllowCreateSectionsOnFly = true;

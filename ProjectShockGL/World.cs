@@ -8,12 +8,31 @@ public class World
 {
     private readonly List<Object> _objects;
     private readonly Queue<Object> _spawnedObjects;
+    internal HashSet<Guid> RemovedSaveableObjects { get; } = [];
     
     private Object[]? _cachedObjectsArray;
     
     private int _cachedObjectsVersion = -1;
     private int _objectsVersion;
     private int _clearVersion;
+    
+    private float _killY = -1000f;
+
+    public bool SaveLevelState { get; set; } = true;
+
+    public float KillY
+    {
+        get => _killY;
+        set
+        {
+            if (!float.IsFinite(value))
+            {
+                throw new ArgumentOutOfRangeException(nameof(value));
+            }
+
+            _killY = value;
+        }
+    }
     
     public static HashSet<string> HiddenEditorGroups { get; } = new(StringComparer.Ordinal);
 
@@ -85,6 +104,19 @@ public class World
             routine.Tick(deltaSeconds, unscaledDeltaSeconds ?? deltaSeconds);
         }
 
+        if (simulate && !Application.IsEditor && deltaSeconds > 0f && _clearVersion == clearVersion)
+        {
+            foreach (var entity in objectsToUpdate.OfType<Core.Entity>())
+            {
+                if (_clearVersion != clearVersion)
+                {
+                    break;
+                }
+
+                entity.CheckKillY(KillY);
+            }
+        }
+
         if (_objects.RemoveAll(obj => obj.IsDestroyed) > 0)
         {
             _objectsVersion++;
@@ -102,9 +134,45 @@ public class World
         }
     }
 
+    public void DebugRender(DebugDraw draw)
+    {
+        if (!Application.IsEditor && !Application.IsDebug)
+        {
+            return;
+        }
+
+        foreach (var obj in GetAllObjects())
+        {
+            obj.DrawDebug(draw, false);
+        }
+    }
+
+    public void DebugRenderSelected(DebugDraw draw, IEnumerable<Object> selected)
+    {
+        if (!Application.IsEditor)
+        {
+            return;
+        }
+
+        var objects = GetAllObjects().ToHashSet();
+
+        foreach (var obj in selected.Distinct().ToArray())
+        {
+            if (objects.Contains(obj))
+            {
+                obj.DrawDebug(draw, true);
+            }
+        }
+    }
+
     public T? Spawn<T>(Type? type) where T : Object
     {
-        if (type == null)
+        return Spawn<T>(type, null, type == null ? null : new ObjectSpawnSource(ClassName: type.AssemblyQualifiedName));
+    }
+
+    internal T? Spawn<T>(Type? type, Guid? guid, ObjectSpawnSource? source = null) where T : Object
+    {
+        if (type == null || !typeof(T).IsAssignableFrom(type))
         {
             return null;
         }
@@ -114,21 +182,46 @@ public class World
             return null;
         }
         
-        _spawnedObjects.Enqueue(obj);
-        
-        CreateObject(obj);
-        
-        return obj;
+        return SpawnObject(obj, guid, source);
     }
     
     public T Spawn<T>() where T : Object, new()
     {
-        var obj = new T();
+        return SpawnObject(new T(), null, new ObjectSpawnSource(ClassName: typeof(T).AssemblyQualifiedName));
+    }
+
+    internal T Spawn<T>(Guid? guid) where T : Object, new()
+    {
+        return SpawnObject(new T(), guid);
+    }
+
+    private T SpawnObject<T>(T obj, Guid? guid, ObjectSpawnSource? source = null) where T : Object
+    {
+        obj.Guid = guid is { } id && id != Guid.Empty ? id : Guid.NewGuid();
+        obj.SpawnSource = source;
         _spawnedObjects.Enqueue(obj);
         
         CreateObject(obj);
+
+        if (obj.IsDestroyed)
+        {
+            RecordRemoval(obj);
+        }
+        else
+        {
+            RemovedSaveableObjects.Remove(obj.Guid);
+            obj.OwningWorld = this;
+        }
         
         return obj;
+    }
+
+    internal void RecordRemoval(Object obj)
+    {
+        if (obj.Saveable && !Application.IsEditor)
+        {
+            RemovedSaveableObjects.Add(obj.Guid);
+        }
     }
 
     public T Spawn<T>(Vector3 position, Quaternion rotation) where T : Object, new()
@@ -218,6 +311,7 @@ public class World
         
         _objects.Clear();
         _spawnedObjects.Clear();
+        RemovedSaveableObjects.Clear();
         
         _objectsVersion++;
         _clearVersion++;
@@ -225,6 +319,11 @@ public class World
         _cachedObjectsArray = null;
 
         List<Exception> errors = [];
+
+        foreach (var obj in objects)
+        {
+            obj.OwningWorld = null;
+        }
         
         foreach (var obj in objects)
         {
@@ -335,8 +434,12 @@ public class World
         replacement._spawnedObjects.Clear();
         replacement._objectsVersion++;
 
+        RemovedSaveableObjects.UnionWith(replacement.RemovedSaveableObjects);
+        replacement.RemovedSaveableObjects.Clear();
+
         foreach (var obj in objects)
         {
+            obj.OwningWorld = this;
             _spawnedObjects.Enqueue(obj);
         }
     }

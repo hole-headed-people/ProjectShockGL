@@ -1,6 +1,6 @@
-﻿using ProjectShockGL;
+using ProjectShockGL;
 using ProjectShockGL.Core;
 
-Settings.Initialize();
+Settings.Initialize(isEditor: false);
 Game.Initialize();
 Application.Run();

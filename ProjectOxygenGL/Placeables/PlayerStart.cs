@@ -3,7 +3,7 @@ using ProjectShockGL;
 using ProjectShockGL.Core;
 using ProjectShockGL.Rendering;
 
-namespace ProjectDungeon.Placeables;
+namespace ProjectOxygenGL.Placeables;
 
 public sealed class PlayerStart : Entity
 {
@@ -19,6 +19,8 @@ public sealed class PlayerStart : Entity
             arrowComponent.Texture = Content.GetWhitePixel();
             arrowComponent.Color = Color.Blue;
             arrowComponent.Scale = 0.2f;
+            arrowComponent.UseParentScale = false;
+            arrowComponent.LocalRotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI);
         }
     }
 

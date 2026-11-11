@@ -159,16 +159,13 @@ public static class Editor
     private static void OnRender(Graphics graphics)
     {
         SceneGrid.Render(graphics);
+        ProjectShockGL.Core.Game.Instance.World.DebugRenderSelected(new DebugDraw(graphics), Selection.Objects);
         
         foreach (var selected in Selection.Objects.Where(o => o.IsEditorVisible))
         {
             var bounds = selected.GetLocalBounds();
             graphics.DrawBoxWireframe(bounds.min, bounds.max, selected.Transform.GetModelMatrix(), Color.White);
 
-            if (selected is ProjectShockGL.Core.Light light)
-            {
-                LightGizmo.Draw(graphics, light);
-            }
         }
     }
 
@@ -700,9 +697,19 @@ public static class Editor
             ImGui.OpenPopup("Editor error"); _requestErrorPopup = false;
         }
         
-        if (ImGui.BeginPopupModal("Editor error", ImGuiWindowFlags.AlwaysAutoResize))
+        var errorSize = Vector2.Min(new Vector2(560, 280), ImGui.GetIO().DisplaySize * 0.9f);
+        ImGui.SetNextWindowSize(errorSize, ImGuiCond.Appearing);
+
+        if (ImGui.BeginPopupModal("Editor error"))
         {
-            ImGui.TextWrapped(_error ?? "");
+            if (ImGui.BeginChild("##errorMessage", new Vector2(0, -ImGui.GetFrameHeightWithSpacing())))
+            {
+                ImGui.PushTextWrapPos(0);
+                ImGui.TextUnformatted(_error ?? "");
+                ImGui.PopTextWrapPos();
+            }
+
+            ImGui.EndChild();
 
             if (ImGui.Button("OK"))
             {

@@ -360,7 +360,7 @@ static void Mouse(ProjectShockGL.UI.Pointer pointer, Vector2 position, params Mo
 
 static void Configure(string canvasClass)
 {
-    File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "Settings.ini"),
+    File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "GameSettings.ini"),
         $"[Window]\nWidth=800\nHeight=600\n[Game]\nUICanvasClass={canvasClass}\n");
     Settings.Initialize();
 }
@@ -407,3 +407,4 @@ public sealed class MouseProbe : Widget
     protected override void OnMouseReleased(MouseButton button) => Events.Add($"release:{button}");
     protected override void OnMouseCancelled(MouseButton button) => Events.Add($"cancel:{button}");
 }
+

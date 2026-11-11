@@ -1,8 +1,6 @@
-﻿using ProjectShockGL.Core;
+﻿namespace ProjectOxygenGL.Core;
 
-namespace ProjectDungeon.Core;
-
-public class Character : Entity
+public class Character : DamageableEntity
 {
     private Controller? _controller;
     
@@ -31,6 +29,16 @@ public class Character : Entity
         OnStopControlling(_controller);
         
         _controller = null;
+    }
+
+    public void Heal(float amount)
+    {
+        if (IsDestroyed || IsDead() || !float.IsFinite(amount) || amount <= 0f)
+        {
+            return;
+        }
+        
+        SetCurrentHealth(CurrentHealth + MathF.Min(amount, MaxHealth - CurrentHealth));
     }
 
     public Controller? GetController()

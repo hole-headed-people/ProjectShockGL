@@ -11,13 +11,13 @@ public class QuadComponent : RenderComponent
     {
         base.Render(queue);
 
-        var parentScale = Parent.Transform.Scale;
+        var parentScale = Owner.Transform.Scale;
         
         var command = new QuadCommand()
         {
             Color = Color,
-            Position = Parent.Transform.Position + Offset,
-            Rotation = Parent.Transform.Rotation,
+            Position = Owner.Transform.Position + Offset,
+            Rotation = Owner.Transform.Rotation,
             Size = UseParentScale ? new Vector2(parentScale.X, parentScale.Y) * Scale : new Vector2(Scale),
             Texture = Texture,
             Shader = Shader,

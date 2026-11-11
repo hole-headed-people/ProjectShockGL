@@ -17,7 +17,7 @@ public class BoxCollider : Collider
     {
         get
         {
-            var scale = Parent.Transform.Scale;
+            var scale = Owner.Transform.Scale;
             
             return new Vector3(
                 HalfExtents.X * MathF.Abs(scale.X),
@@ -66,8 +66,8 @@ public class BoxCollider : Collider
         var centerA = a.GetWorldCenter();
         var centerB = other.GetWorldCenter();
 
-        var rotA = a.Parent.Transform.Rotation;
-        var rotB = other.Parent.Transform.Rotation;
+        var rotA = a.Owner.Transform.Rotation;
+        var rotB = other.Owner.Transform.Rotation;
 
         var axesA = new Vector3[]
         {
@@ -247,7 +247,7 @@ public class BoxCollider : Collider
     public Vector3[] GetCorners()
     {
         var center = GetWorldCenter();
-        var rotation = Parent.Transform.Rotation;
+        var rotation = Owner.Transform.Rotation;
         var h = WorldHalfExtents;
 
         var localCorners = new Vector3[]

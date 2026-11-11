@@ -1,4 +1,4 @@
-﻿using ProjectShockGL.Rendering;
+using ProjectShockGL.Rendering;
 using Silk.NET.Input;
 using Silk.NET.Core;
 using StbImageSharp;
@@ -112,6 +112,8 @@ public static class Application
         }
         
         options.Size = new Vector2D<int>(width, height);
+        options.WindowState = Settings.GetBool("Window", "StartMaximized", false)
+            ? WindowState.Maximized : WindowState.Normal;
         options.WindowBorder = Settings.GetBool("Window", "CanResize", false)
             ? WindowBorder.Resizable : WindowBorder.Fixed;
         
@@ -225,6 +227,7 @@ public static class Application
             _fpsTimer = 0;
         }
         
+        Camera.SynchronizeComponents();
         _graphics.BeginDraw(Camera.Active);
 
         BeforeRender?.Invoke((float)deltaTime);

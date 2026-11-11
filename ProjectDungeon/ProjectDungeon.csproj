@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
@@ -10,6 +10,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\ProjectShockGL\ProjectShockGL.csproj" />
+        <ProjectReference Include="..\ProjectOxygenGL\ProjectOxygenGL.csproj" />
     </ItemGroup>
 
     <ItemGroup>
@@ -23,9 +24,11 @@
       <None Update="Layers.ini">
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </None>
-      <None Update="Settings.ini">
+      <None Update="GameSettings.ini">
+        <CopyToPublishDirectory>Always</CopyToPublishDirectory>
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </None>
     </ItemGroup>
 
 </Project>
+

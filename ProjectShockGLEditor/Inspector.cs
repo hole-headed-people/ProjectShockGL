@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Reflection;
 using ImGuiNET;
 using ProjectShockGL;
 using ProjectShockGL.Core;
@@ -11,9 +12,10 @@ namespace ProjectShockGLEditor;
 public static class Inspector
 {
     private static Object _frameObject = null!;
+    
     private static string _before = "";
     private static string _textureSearch = "";
-
+    private static string _targetSearch = "";
 
     public static void Draw()
     {
@@ -49,7 +51,7 @@ public static class Inspector
         _before = InspectorState.Capture(obj);
         
         ImGui.PushID(obj.GetHashCode());
-        ImGui.TextUnformatted(obj.GetType().Name);
+        ImGui.TextUnformatted("Transform");
         
         // Position
         var pos = obj.Transform.Position;
@@ -92,6 +94,7 @@ public static class Inspector
             Changed("IsActive", true);
         }
 
+
         if (obj is BrushBox brush)
         {
             var movable = brush.Movable;
@@ -100,8 +103,21 @@ public static class Inspector
                 brush.Movable = movable;
                 Changed("Movable", true);
             }
+
+            var simulatePhysics = brush.SimulatePhysics;
+            if (ImGui.Checkbox("Simulate physics", ref simulatePhysics))
+            {
+                brush.SimulatePhysics = simulatePhysics;
+                Changed("SimulatePhysics", true);
+            }
+
+            if (brush.GetComponent<Rigidbody>() is { IsDestroyed: false } brushBody)
+            {
+                DrawMass(brushBody);
+            }
+
             ImGui.Separator();
-            ImGui.TextUnformatted("BrushBox");
+            ImGui.TextUnformatted("Properties");
             
             var brushName = brush.Name;
 
@@ -196,7 +212,7 @@ public static class Inspector
         if (obj is Entity entity)
         {
             ImGui.Separator();
-            ImGui.Text("Entity");
+            ImGui.TextUnformatted("Properties");
 
             // Name
             var name = entity.Name;
@@ -210,6 +226,17 @@ public static class Inspector
             Finish("Name");
             
             //Properties
+            if (entity.Rigidbody is { } body)
+            {
+                var simulatePhysics = body.IsEnabled;
+                if (ImGui.Checkbox("Simulate physics", ref simulatePhysics))
+                {
+                    entity.SetSimulatePhysics(simulatePhysics);
+                    Changed("SimulatePhysics", true);
+                }
+
+                DrawMass(body);
+            }
             
             foreach (var prop in EditableProperties.Get(entity.GetType()))
             {
@@ -266,6 +293,10 @@ public static class Inspector
                         
                         Changed("Property/" + prop.Name, type == typeof(bool) || type.IsEnum);
                     }
+                }
+                else if (type == typeof(string[]))
+                {
+                    DrawStringArray(entity, prop, value as string[] ?? []);
                 }
                 else if (type == typeof(Vector3))
                 {
@@ -342,6 +373,9 @@ public static class Inspector
 
             ImGui.Separator();
             ImGui.Text("Outputs");
+            var eventNames = GetOutputEventNames(entity.GetType());
+            var world = ProjectShockGL.Core.Game.Instance.World;
+            var targetNames = entity.Outputs.Count > 0 ? GetOutputTargetNames(world) : [];
 
             for (var i = 0; i < entity.Outputs.Count; i++)
             {
@@ -358,6 +392,13 @@ public static class Inspector
                 }
 
                 Finish($"Output/{i}/Event");
+
+                if (ChooseOutputValue("##EventChoices", output.Event, eventNames) is { } eventChoice)
+                {
+                    output.Event = eventChoice;
+                    Changed($"Output/{i}/Event", true);
+                }
+
                 var targetName = output.TargetName;
                 
                 if (ImGui.InputText("Target", ref targetName, 64))
@@ -367,7 +408,14 @@ public static class Inspector
                 }
 
                 Finish($"Output/{i}/Target");
-                var target = ProjectShockGL.Core.Game.Instance.World.Find(output.TargetName);
+
+                if (ChooseOutputValue("##TargetChoices", output.TargetName, targetNames, searchable: true) is { } targetChoice)
+                {
+                    output.TargetName = targetChoice;
+                    Changed($"Output/{i}/Target", true);
+                }
+
+                var target = world.Find(output.TargetName);
 
                 if (target != null)
                 {
@@ -387,6 +435,11 @@ public static class Inspector
 
                             foreach (var inputName in inputNames)
                             {
+                                if (inputName == nameof(Entity.SetSimulatePhysics) && target is Entity { Rigidbody: null })
+                                {
+                                    continue;
+                                }
+
                                 var selected = output.Input == inputName;
                                 
                                 if (ImGui.Selectable(inputName, selected))
@@ -455,6 +508,12 @@ public static class Inspector
             }
         }
 
+        DrawCollisionLayers(obj);
+
+        PrefabTools.DrawSave();
+
+        ImGui.Separator();
+
         if (ImGui.Button("Focus (F)"))
         {
             SceneCamera.Focus(obj);
@@ -488,13 +547,246 @@ public static class Inspector
             return;
         }
         
-        ImGui.Separator();
-
-        PrefabTools.DrawSave();
         ImGui.PopID();
         ImGui.End();
     }
     
+    private static string[] GetOutputEventNames(Type type)
+    {
+        return type.GetCustomAttributes<OutputEventAttribute>(inherit: true)
+            .Select(attribute => attribute.Name)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static string[] GetOutputTargetNames(World world)
+    {
+        return world.GetAllObjects(includePending: true)
+            .Select(obj => obj.Name)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static string? ChooseOutputValue(string id, string current, string[] choices, bool searchable = false)
+    {
+        if (choices.Length == 0)
+        {
+            return null;
+        }
+
+        ImGui.SameLine();
+
+        if (!ImGui.BeginCombo(id, "", ImGuiComboFlags.NoPreview))
+        {
+            return null;
+        }
+
+        if (searchable)
+        {
+            if (ImGui.IsWindowAppearing())
+            {
+                _targetSearch = "";
+                ImGui.SetKeyboardFocusHere();
+            }
+
+            ImGui.SetNextItemWidth(220);
+            ImGui.InputTextWithHint("##TargetSearch", "Search targets...", ref _targetSearch, 256);
+        }
+
+        var search = searchable ? _targetSearch.Trim() : "";
+        var hasMatches = false;
+        string? choice = null;
+
+        foreach (var value in choices)
+        {
+            if (!value.Contains(search, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            hasMatches = true;
+            var selected = value == current;
+
+            if (ImGui.Selectable(value, selected) && !selected)
+            {
+                choice = value;
+            }
+
+            if (selected && !searchable)
+            {
+                ImGui.SetItemDefaultFocus();
+            }
+        }
+
+        if (!hasMatches)
+        {
+            ImGui.TextDisabled("No matching targets");
+        }
+
+        ImGui.EndCombo();
+        return choice;
+    }
+
+    private static void DrawCollisionLayers(Object obj)
+    {
+        var layers = Layers.GetAll();
+        var layerName = layers.FirstOrDefault(layer => layer.Value == obj.Layer).Key;
+        var layerPreview = layerName ?? (obj.Layer == Layers.None ? "None" : $"0x{obj.Layer:X8}");
+
+        if (ImGui.BeginCombo("Layer", layerPreview))
+        {
+            if (ImGui.Selectable("None##layer", obj.Layer == Layers.None))
+            {
+                obj.Layer = Layers.None;
+                Changed(nameof(obj.Layer), true);
+            }
+
+            foreach (var (name, bit) in layers)
+            {
+                if (ImGui.Selectable(name, obj.Layer == bit))
+                {
+                    obj.Layer = bit;
+                    Changed(nameof(obj.Layer), true);
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        var maskPreview = obj.CollidesWith switch
+        {
+            Layers.None => "None",
+            Layers.Everything => "Everything",
+            _ => string.Join(", ", layers.Where(layer => (obj.CollidesWith & layer.Value) != 0)
+                .Select(layer => layer.Key))
+        };
+
+        if (maskPreview.Length == 0)
+        {
+            maskPreview = $"0x{obj.CollidesWith:X8}";
+        }
+
+        if (!ImGui.BeginCombo("CollidesWith", maskPreview))
+        {
+            return;
+        }
+
+        if (ImGui.Button("Everything"))
+        {
+            obj.CollidesWith = Layers.Everything;
+            Changed(nameof(obj.CollidesWith), true);
+        }
+
+        ImGui.SameLine();
+
+        if (ImGui.Button("None"))
+        {
+            obj.CollidesWith = Layers.None;
+            Changed(nameof(obj.CollidesWith), true);
+        }
+
+        foreach (var (name, bit) in layers)
+        {
+            var enabled = (obj.CollidesWith & bit) != 0;
+            if (ImGui.Checkbox(name, ref enabled))
+            {
+                obj.CollidesWith = enabled ? obj.CollidesWith | bit : obj.CollidesWith & ~bit;
+                Changed(nameof(obj.CollidesWith), true);
+            }
+        }
+
+        ImGui.EndCombo();
+    }
+
+    private static void DrawMass(Rigidbody body)
+    {
+        var mass = body.Mass;
+        if (ImGui.DragFloat("Mass", ref mass, 0.1f) && float.IsFinite(mass))
+        {
+            body.Mass = MathF.Max(0.001f, mass);
+            Changed("RigidbodyMass");
+        }
+
+        Finish("RigidbodyMass");
+    }
+
+    private static void DrawStringArray(Entity entity, PropertyInfo property, string[] entries)
+    {
+        var options = property.GetCustomAttribute<EditableAttribute>()!;
+        var field = "Property/" + property.Name;
+        ImGui.TextUnformatted(property.Name);
+
+        for (var index = 0; index < entries.Length; index++)
+        {
+            ImGui.PushID(index);
+            var text = entries[index] ?? "";
+            var rowField = $"{field}/{index}";
+            var reservedWidth = string.IsNullOrWhiteSpace(options.ContentDirectory) ? 28f : 62f;
+            ImGui.SetNextItemWidth(MathF.Max(30f, ImGui.GetContentRegionAvail().X - reservedWidth));
+            if (ImGui.InputText("##Entry", ref text, 256))
+            {
+                SetEntry(text);
+                Changed(rowField);
+            }
+
+            Finish(rowField);
+
+            if (options.ContentDirectory is { Length: > 0 } directory)
+            {
+                ImGui.SameLine();
+                if (ImGui.BeginCombo("##Asset", "", ImGuiComboFlags.NoPreview))
+                {
+                    var root = Path.Combine(Content.Path, directory);
+                    if (Directory.Exists(root))
+                    {
+                        foreach (var file in Directory.EnumerateFiles(root, "*.json", SearchOption.AllDirectories)
+                                     .Order(StringComparer.OrdinalIgnoreCase))
+                        {
+                            var name = Path.ChangeExtension(Path.GetRelativePath(root, file), null)!.Replace('\\', '/');
+                            if (ImGui.Selectable(name, name == text))
+                            {
+                                SetEntry(name);
+                                Changed(field, true);
+                            }
+                        }
+                    }
+
+                    ImGui.EndCombo();
+                }
+            }
+
+            ImGui.SameLine();
+            var remove = ImGui.SmallButton("X");
+            ImGui.PopID();
+            if (remove)
+            {
+                property.SetValue(entity, entries.Where((_, entryIndex) => entryIndex != index).ToArray());
+                Changed(field, true);
+                return;
+            }
+
+            void SetEntry(string value)
+            {
+                entries = (string[])entries.Clone();
+                entries[index] = value;
+                property.SetValue(entity, entries);
+            }
+        }
+
+        ImGui.BeginDisabled(entries.Length >= options.MaxEntries);
+        if (ImGui.SmallButton("Add"))
+        {
+            property.SetValue(entity, entries.Append("").ToArray());
+            Changed(field, true);
+        }
+
+        ImGui.EndDisabled();
+    }
+
     private static void Changed(string field, bool discrete = false)
     {
         var obj = _frameObject;

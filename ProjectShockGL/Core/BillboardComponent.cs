@@ -11,14 +11,14 @@ public class BillboardComponent : RenderComponent
     {
         base.Render(queue);
         
-        var parentScale = Parent.Transform.Scale;
+        var parentScale = Owner.Transform.Scale;
         
         var command = new BillboardCommand()
         {
             Color = Color,
             Texture = Texture,
             Size = UseParentScale ? new Vector2(parentScale.X, parentScale.Y) * Scale : new Vector2(Scale),
-            Position = Parent.Transform.Position + Offset,
+            Position = Owner.Transform.Position + Offset,
             Shader = Shader,
             ShaderParameters = Shader == null ? null : ShaderParameters.Snapshot(),
             Lit = Lit,

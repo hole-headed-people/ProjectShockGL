@@ -1,5 +1,5 @@
 ﻿{
-  "Class": "ProjectDungeon.Placeables.PlayerStart, ProjectDungeon",
+  "Class": "ProjectOxygenGL.Placeables.PlayerStart, ProjectOxygenGL",
   "Parameters": {
     "DebugBillboard": "Editor/PlayerStart"
   }

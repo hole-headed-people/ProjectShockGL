@@ -6,10 +6,45 @@ namespace ProjectShockGL.Core;
 public class BrushBox : Object
 {
     private Vector3 _size = Vector3.One;
+    
     public bool Movable
     {
         get => !IsStatic;
-        set => ConfigureStatic(!value);
+        set
+        {
+            ConfigureStatic(!value);
+            
+            if (!value)
+            {
+                SimulatePhysics = false;
+            }
+        }
+    }
+
+    public bool SimulatePhysics
+    {
+        get => GetComponent<Rigidbody>() is { IsEnabled: true, IsDestroyed: false };
+        set
+        {
+            if (!value)
+            {
+                RemoveComponent<Rigidbody>();
+                return;
+            }
+
+            var body = GetComponent<Rigidbody>();
+            
+            if (body is { IsDestroyed: true })
+            {
+                RemoveComponent<Rigidbody>();
+                body = null;
+            }
+
+            body ??= AddComponent<Rigidbody>();
+            body.IsEnabled = true;
+            
+            Movable = true;
+        }
     }
     
     private float _textureScale = 1;
@@ -22,6 +57,7 @@ public class BrushBox : Object
     private Vector3 _meshScale;
     
     private float _meshTextureScale;
+    
     private (string Name, TextureFormat Format)? _failedTexture;
     
     public Vector3 Size
@@ -30,8 +66,13 @@ public class BrushBox : Object
         set
         {
             BrushBoxMesh.Validate(value, nameof(Size));
+            
             _size = value;
-            if (_box != null) _box.HalfExtents = value * 0.5f;
+            
+            if (_box != null)
+            {
+                _box.HalfExtents = value * 0.5f;
+            }
         }
     }
 
@@ -63,7 +104,7 @@ public class BrushBox : Object
         
         AddComponent<BrushRenderer>();
         
-        IsStatic = true;
+        IsStatic = !SimulatePhysics;
     }
 
     private void Prepare(BrushRenderer renderer)
@@ -128,7 +169,7 @@ public class BrushBox : Object
     {
         public override void Render(RenderQueue queue)
         {
-            ((BrushBox)Parent).Prepare(this);
+            ((BrushBox)Owner).Prepare(this);
             
             base.Render(queue);
         }

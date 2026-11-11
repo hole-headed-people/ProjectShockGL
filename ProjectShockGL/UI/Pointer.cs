@@ -9,13 +9,17 @@ public sealed class Pointer
         .Where(button => (int)button >= 0).ToArray();
     
     private readonly Canvas _canvas;
+    
     private readonly Dictionary<MouseButton, Widget> _captures = [];
+    
     private readonly HashSet<MouseButton> _previousButtons = [];
     private readonly HashSet<MouseButton> _currentButtons = [];
+    
     private readonly List<MouseButton> _polledButtons = [];
     
     private bool _wasAvailable;
     private bool _isUpdating;
+    
     private int _resetVersion;
 
     public Vector2 Position { get; private set; }
@@ -72,7 +76,10 @@ public sealed class Pointer
 
             foreach (var button in pressedButtons)
             {
-                if ((int)button >= 0) _currentButtons.Add(button);
+                if ((int)button >= 0)
+                {
+                    _currentButtons.Add(button);
+                }
             }
 
             if (!available || !IsEnabled || !CanvasAvailable() || !Finite(mousePosition) ||
@@ -94,6 +101,7 @@ public sealed class Pointer
             _wasAvailable = true;
             
             var version = _resetVersion;
+            
             CancelInvalidCaptures();
 
             if (version != _resetVersion)
@@ -128,8 +136,14 @@ public sealed class Pointer
                 else if (!_currentButtons.Contains(button) && _previousButtons.Contains(button) &&
                          _captures.Remove(button, out var target))
                 {
-                    if (Interactive(target)) target.MouseReleased(button);
-                    else if (!target.IsDestroyed) target.MouseCancelled(button);
+                    if (Interactive(target))
+                    {
+                        target.MouseReleased(button);
+                    }
+                    else if (!target.IsDestroyed)
+                    {
+                        target.MouseCancelled(button);
+                    }
                 }
 
                 if (version != _resetVersion)
@@ -182,7 +196,10 @@ public sealed class Pointer
 
         foreach (var (button, target) in captures)
         {
-            if (!target.IsDestroyed) target.MouseCancelled(button);
+            if (!target.IsDestroyed)
+            {
+                target.MouseCancelled(button);
+            }
         }
 
         if (hovered is { IsDestroyed: false })
@@ -206,7 +223,10 @@ public sealed class Pointer
 
         for (var current = widget; current != null; current = current.Parent)
         {
-            if (current.IsDestroyed || !current.Visible || !current.IsEnabled) return false;
+            if (current.IsDestroyed || !current.Visible || !current.IsEnabled)
+            {
+                return false;
+            }
         }
         
         return true;
@@ -265,6 +285,7 @@ public sealed class Pointer
         if (old != null)
         {
             old.IsMouseOver = false;
+            
             if (!old.IsDestroyed)
             {
                 old.MouseExit();

@@ -1,10 +1,11 @@
-﻿using ProjectDungeon.Core;
+﻿using ProjectOxygenGL.Core;
 using ProjectShockGL;
 using ProjectShockGL.Core;
 using Object = ProjectShockGL.Core.Object;
 
-namespace ProjectDungeon.Placeables;
+namespace ProjectOxygenGL.Placeables;
 
+[OutputEvent("OnTriggerEnter")]
 public class Trigger : Entity
 {
     [Editable] public bool CanTriggeredByPlayer { get; set; }

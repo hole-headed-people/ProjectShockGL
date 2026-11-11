@@ -45,8 +45,8 @@ public class CapsuleCollider : Collider
             
             var v = Vector3.Cross(LocalAxis, u);
             
-            u *= Parent.Transform.Scale;
-            v *= Parent.Transform.Scale;
+            u *= Owner.Transform.Scale;
+            v *= Owner.Transform.Scale;
             
             var a = Dot(u, u);
             var b = Dot(u, v);
@@ -61,24 +61,22 @@ public class CapsuleCollider : Collider
     public float WorldHeight =>
         MathF.Max(
             (float)(Height *
-                    Math.Sqrt(Dot(LocalAxis * Parent.Transform.Scale, LocalAxis * Parent.Transform.Scale))),
+                    Math.Sqrt(Dot(LocalAxis * Owner.Transform.Scale, LocalAxis * Owner.Transform.Scale))),
             2 * WorldRadius);
 
     public (Vector3 a, Vector3 b) GetWorldSegment()
     {
         var center = GetWorldCenter();
-        var scaledAxis = LocalAxis * Parent.Transform.Scale;
-
-        if (!PhysicsHelper.TryNormalize(scaledAxis, out var axis))
-        {
-            axis = LocalAxis;
-        }
-        
-        axis = Vector3.Transform(axis, Parent.Transform.Rotation);
+        var axis = Vector3.Transform(GetScaledLocalAxis(), Owner.Transform.Rotation);
         
         var halfCylinder = MathF.Max(0, WorldHeight * 0.5f - WorldRadius);
         
         return (center - axis * halfCylinder, center + axis * halfCylinder);
+    }
+
+    internal Vector3 GetScaledLocalAxis()
+    {
+        return PhysicsHelper.TryNormalize(LocalAxis * Owner.Transform.Scale, out var axis) ? axis : LocalAxis;
     }
 
     public override (Vector3 min, Vector3 max) GetLocalBounds()

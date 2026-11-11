@@ -1,6 +1,6 @@
 ﻿namespace ProjectDungeon.Game;
 
-public class ShockGame : Core.Game
+public class ShockGame : ProjectOxygenGL.Core.Game
 {
     protected override void Load()
     {

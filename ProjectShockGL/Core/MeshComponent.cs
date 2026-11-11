@@ -7,6 +7,7 @@ public class MeshComponent : RenderComponent
 {
     public Mesh? Mesh {get; set;}
     public Texture? Texture {get; set;}
+    public Quaternion LocalRotation { get; set; } = Quaternion.Identity;
 
     public override void Render(RenderQueue queue)
     {
@@ -21,9 +22,9 @@ public class MeshComponent : RenderComponent
         {
             Color = Color,
             Mesh = Mesh,
-            Position = Parent.Transform.Position + Offset,
-            Rotation = Parent.Transform.Rotation,
-            Scale = UseParentScale ? Parent.Transform.Scale * Scale : new Vector3(Scale),
+            Position = Owner.Transform.Position + Offset,
+            Rotation = Owner.Transform.Rotation * LocalRotation,
+            Scale = UseParentScale ? Owner.Transform.Scale * Scale : new Vector3(Scale),
             Texture = Texture,
             Shader = Shader,
             ShaderParameters = Shader == null ? null : ShaderParameters.Snapshot(),

@@ -15,6 +15,7 @@ public class Object
     private bool _activityInitialized;
     private bool _hasStarted;
     private bool _isReleasing;
+    private bool? _saveable;
     
     private (Vector3 min, Vector3 max)? _cachedWorldBounds;
 
@@ -23,6 +24,18 @@ public class Object
     public Collider? Collider { get; private set; }
     public int Layer { get; set; } = 1;
     public int CollidesWith { get; set; } = ~0;
+    
+    public Guid Guid { get; internal set; }
+    internal World? OwningWorld { get; set; }
+    internal ObjectSpawnSource? SpawnSource { get; set; }
+    
+    public virtual bool Saveable
+    {
+        get => _saveable ?? IsSaveableByDefault;
+        set => _saveable = value;
+    }
+
+    protected virtual bool IsSaveableByDefault => false;
 
     public List<string> EditorGroups { get; } = [];
     public bool IsEditorVisible => !Application.IsEditor || !EditorGroups.Any(World.HiddenEditorGroups.Contains);
@@ -52,6 +65,9 @@ public class Object
     public bool IsDestroyed { get; private set; }
 
     public virtual void Create(){}
+
+    public virtual void OnCaptureState(IObjectStateWriter state){}
+    public virtual void OnRestoreState(IObjectStateReader state){}
 
     internal void InitializeActivity()
     {
@@ -140,12 +156,55 @@ public class Object
         }
     }
 
+    public virtual void DebugRender(DebugDraw draw){}
+    public virtual void DebugRenderSelected(DebugDraw draw){}
+
+    internal void DrawDebug(DebugDraw draw, bool selected)
+    {
+        if (IsDestroyed || !IsEditorVisible || (!Application.IsEditor && !IsActive))
+        {
+            return;
+        }
+
+        if (selected)
+        {
+            DebugRenderSelected(draw);
+        }
+        else
+        {
+            DebugRender(draw);
+        }
+
+        foreach (var component in _components.ToArray())
+        {
+            if (IsDestroyed || !IsEditorVisible || (!Application.IsEditor && !IsActive))
+            {
+                break;
+            }
+
+            if (component.IsDestroyed || (!Application.IsEditor && !component.IsEnabled))
+            {
+                continue;
+            }
+
+            if (selected)
+            {
+                component.DebugRenderSelected(draw);
+            }
+            else
+            {
+                component.DebugRender(draw);
+            }
+        }
+    }
+
     public virtual void OnActiveChanged(bool isActive){}
     
     public virtual void OnCollisionEnter(Object other){}
     public virtual void OnCollisionExit(Object other){}
     
     public virtual void OnTriggerEnter(Object other){}
+    public virtual void OnTriggerStay(Object other){}
     public virtual void OnTriggerExit(Object other){}
     
     public virtual void Destroy()
@@ -181,7 +240,12 @@ public class Object
         }
         
         IsDestroyed = true;
+        
+        OwningWorld?.RecordRemoval(this);
+        OwningWorld = null;
+        
         StopAllCoroutines();
+        
         List<Exception> errors = [];
         
         if (_isActive)
@@ -418,6 +482,10 @@ public class Object
         }
         
         _isActive = isActive;
+        foreach (var component in _components.ToArray())
+        {
+            component.OnOwnerActiveChanged(isActive);
+        }
         
         if (_activityInitialized)
         {

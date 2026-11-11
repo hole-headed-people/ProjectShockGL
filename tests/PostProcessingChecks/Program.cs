@@ -24,7 +24,7 @@ foreach (var file in Directory.GetFiles(Path.Combine(root, "ProjectDungeon/Conte
     File.Copy(file, Path.Combine(fixture, "Shaders", Path.GetFileName(file)), overwrite: true);
 File.Copy(Path.Combine(root, "ProjectDungeon/Content/PostProcessProfiles/Default.json"),
     Path.Combine(profiles, "Default.json"), overwrite: true);
-File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "Settings.ini"), "[Content]\nCustomPath=" + fixture + "\n");
+File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "GameSettings.ini"), "[Content]\nCustomPath=" + fixture + "\n");
 Settings.Initialize();
 Content.Initialize(gl);
 Camera.Initialize(window);
@@ -36,6 +36,115 @@ PostProcessSettings.Enabled = true;
 PostProcessSettings.Parameters.Set("uVignetteStrength", 0.8f);
 using var renderer = new Renderer(gl, 640, 240);
 var graphics = new Graphics(renderer);
+
+if (args.Contains("--debug-draw"))
+{
+    var draw = new DebugDraw(graphics);
+    var actions = new Action[]
+    {
+        () => draw.Line(new Vector3(-1, 0, -2), new Vector3(1, 0, -2), Color.Black),
+        () => draw.Box(new Vector3(0, 0, -2), Quaternion.CreateFromYawPitchRoll(.4f, .3f, .2f), Vector3.One, Color.Black),
+        () => draw.Sphere(new Vector3(0, 0, -2), .5f, Color.Black),
+        () => draw.Billboard(new Vector3(0, 0, -2), Vector2.One, Content.GetWhitePixel(), Color.Black)
+    };
+    PostProcessSettings.Enabled = false;
+
+    foreach (var action in actions)
+    {
+        graphics.BeginDraw(Camera.Active);
+        gl.Enable(EnableCap.CullFace);
+        action();
+        Check(gl.IsEnabled(EnableCap.CullFace));
+        var image = new byte[640 * 240 * 4];
+        unsafe
+        {
+            fixed (byte* data = image)
+            {
+                gl.ReadPixels(0, 0, 640, 240, PixelFormat.Rgba, PixelType.UnsignedByte, data);
+            }
+        }
+        Check(Enumerable.Range(0, 640 * 240).Any(i => image[i * 4] < 100));
+        Check(gl.GetError() == GLEnum.NoError);
+        graphics.EndDraw();
+    }
+    Console.WriteLine("PASS: Debug line, rotated wire box, sphere and billboard draw with CullFace enabled and preserve its state");
+    return;
+}
+
+if (args.Contains("--simple-pbr"))
+{
+    var program = Content.LoadShaderProgram("Lit", "SimplePBR");
+    _ = Content.LoadShaderProgram("Deform", "SimplePBR");
+    using var scene = new PbrScene();
+    var environment = ProjectShockGL.Environment.Capture();
+    byte[] Draw(float roughness, float metallic, ShaderParameters? supplied = null)
+    {
+        var parameters = supplied ?? new ShaderParameters();
+        if (supplied == null)
+        {
+            parameters.Set("uRoughness", roughness);
+            parameters.Set("uMetallic", metallic);
+        }
+        graphics.BeginDraw(Camera.Active);
+        graphics.DrawQuad(new Vector3(0, 0, -2), Quaternion.Identity, Vector2.One,
+            Content.GetWhitePixel(), new Color(.5f, .2f, .1f), shader: program, shaderParameters: parameters);
+        return Pixel(320, 120);
+    }
+    try
+    {
+        ProjectShockGL.Environment.AmbientColor = new Color(0, 0, 0);
+        ProjectShockGL.Environment.IsFogEnabled = false;
+        var light = scene.World.Spawn<Light>();
+        light.Type = LightType.Directional;
+        light.Intensity = .1f;
+        Run("SimplePBR roughness changes direct specular lighting", () =>
+        {
+            var smooth = Draw(.4f, 0); var rough = Draw(1, 0);
+            Check(smooth[0] >= rough[0] + 2 && rough[0] > 0);
+        });
+        Run("SimplePBR metallic changes reflection and parameters reset between draws", () =>
+        {
+            var dielectric = Draw(.6f, 0); var metal = Draw(.6f, 1);
+            Check(!dielectric.SequenceEqual(metal));
+            Check(dielectric.SequenceEqual(Draw(0, 0, new ShaderParameters())));
+        });
+        light.SetActive(false);
+        var point = scene.World.Spawn<Light>(); point.Intensity = 1; point.Radius = 10;
+        Run("SimplePBR supports point radius and spot direction", () =>
+        {
+            Check(Draw(1, 0)[0] > 5);
+            point.Radius = 1; Check(Draw(1, 0)[0] == 0);
+            point.Radius = 10; point.Type = LightType.Spot;
+            Check(Draw(1, 0)[0] > 5);
+            point.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI);
+            Check(Draw(1, 0)[0] == 0);
+        });
+        Run("SimplePBR applies fog and has no metallic ambient reflections", () =>
+        {
+            point.SetActive(false);
+            ProjectShockGL.Environment.AmbientColor = Color.White;
+            Check(Draw(.6f, 0)[0] > 100 && Draw(.6f, 1)[0] == 0);
+            ProjectShockGL.Environment.IsFogEnabled = true;
+            ProjectShockGL.Environment.FogNear = 0; ProjectShockGL.Environment.FogFar = 1;
+            ProjectShockGL.Environment.FogColor = new Color(0, 1, 0);
+            var fog = Draw(.6f, 1); Check(fog[0] == 0 && fog[1] > 250);
+        });
+        Run("SimplePBR obeys the editor Unlit preview", () =>
+        {
+            ProjectShockGL.Environment.IsFogEnabled = false;
+            using var unlitRenderer = new Renderer(gl, 640, 240, new RenderPreviewSettings { Unlit = true });
+            var unlitGraphics = new Graphics(unlitRenderer);
+            unlitGraphics.BeginDraw(Camera.Active);
+            unlitGraphics.DrawQuad(new Vector3(0, 0, -2), Quaternion.Identity, Vector2.One,
+                Content.GetWhitePixel(), new Color(.5f, .2f, .1f), shader: program);
+            var pixel = Pixel(320, 120);
+            Check(pixel[0] is > 120 and < 135 && pixel[1] is > 45 and < 58);
+        });
+    }
+    finally { ProjectShockGL.Environment.Apply(environment); }
+    Console.WriteLine("All SimplePBR checks passed.");
+    return;
+}
 
 Run("Vignette preserves the center, darkens corners and keeps UI/overlays untouched", () =>
 {
@@ -555,3 +664,13 @@ void Run(string name, Action test)
     Console.WriteLine("PASS: " + name);
 }
 static void Check(bool condition) { if (!condition) throw new Exception("Postprocessing check failed."); }
+
+sealed class PbrScene : IDisposable
+{
+    public World World { get; } = new();
+    public void Dispose()
+    {
+        World.Clear();
+    }
+}
+

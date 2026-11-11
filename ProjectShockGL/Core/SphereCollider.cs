@@ -17,7 +17,7 @@ public class SphereCollider : Collider
     {
         get
         {
-            var scale = Vector3.Abs(Parent.Transform.Scale);
+            var scale = Vector3.Abs(Owner.Transform.Scale);
             return Radius * MathF.Max(scale.X, MathF.Max(scale.Y, scale.Z));
         }
     }

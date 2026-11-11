@@ -1,8 +1,8 @@
-﻿using ProjectShockGL;
-using ProjectShockGL.Core;
+﻿using ProjectShockGL.Core;
 
-namespace ProjectDungeon.Placeables;
+namespace ProjectOxygenGL.Placeables;
 
+[OutputEvent("OnBeginPlay")]
 public class BeginPlayEvent : Entity
 {
     public static void InvokeAll()

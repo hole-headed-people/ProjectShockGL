@@ -2,7 +2,7 @@ using ProjectShockGL;
 using ProjectShockGL.Core;
 using ProjectShockGL.Rendering;
 
-namespace ProjectDungeon.Placeables;
+namespace ProjectOxygenGL.Placeables;
 
 public class DeformationExample : Entity
 {

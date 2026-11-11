@@ -1,9 +1,10 @@
-﻿using ProjectDungeon.Core;
+﻿using ProjectOxygenGL.Core;
 using ProjectShockGL;
 using ProjectShockGL.Core;
 
-namespace ProjectDungeon.Placeables;
+namespace ProjectOxygenGL.Placeables;
 
+[OutputEvent("OnInteract")]
 public class TestInteractive : Interactive
 {
     
@@ -19,6 +20,10 @@ public class TestInteractive : Interactive
         mesh.Mesh = Content.LoadMesh("Suzanne");
         mesh.Texture = Content.LoadTexture("Default");
         mesh.Lit = true;
+        
+        mesh.Shader = Content.LoadShaderProgram("Lit", "SimplePBR");
+        mesh.ShaderParameters.Set("uRoughness", 0.4f);
+        mesh.ShaderParameters.Set("uMetallic", 0.0f);
     }
 
     public override void Interact(Character character)

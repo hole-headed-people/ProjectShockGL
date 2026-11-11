@@ -1,5 +1,5 @@
 ﻿{
-  "Class": "ProjectDungeon.Placeables.BeginPlayEvent, ProjectDungeon",
+  "Class": "ProjectOxygenGL.Placeables.BeginPlayEvent, ProjectOxygenGL",
   "Parameters": {
     "DebugBillboard": "Editor/Entity"
   }

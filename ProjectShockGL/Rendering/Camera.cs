@@ -5,9 +5,20 @@ using Silk.NET.Windowing;
 
 namespace ProjectShockGL.Rendering;
 
-public class Camera
+public class Camera : IDisposable
 {
     private static bool _isInitialized;
+    
+    private static Vector2D<int> _framebufferSize = new(1, 1);
+    
+    private static Camera _active = new(new Vector2D<int>(1, 1));
+    
+    private static readonly List<CameraComponent> Components = [];
+    
+    public static Camera Default { get; private set; } = _active;
+    public bool IsDisposed { get; private set; }
+    
+    internal CameraComponent? Component { get; set; }
     
     public Transform Transform { get; } = new();
     public bool Orthographic { get; set; }
@@ -18,7 +29,19 @@ public class Camera
     public float AspectRatio { get; set; }
     public Color ClearColor { get; set; } = Color.Black;
     
-    public static Camera Active { get; private set; } = null!;
+    public static Camera Active
+    {
+        get
+        {
+            if (_active.IsDisposed || (_active.Component != null && !_active.Component.CanActivate))
+            {
+                _active = Default;
+            }
+            
+            return _active;
+        }
+    }
+    
     private static IWindow Window { get; set; } = null!;
     
     public static void Initialize(IWindow window)
@@ -33,29 +56,67 @@ public class Camera
         Window = window;
         Window.FramebufferResize += OnFramebufferResize;
         
-        Active = Create();
+        var size = window.FramebufferSize;
+        
+        if (size.X > 0 && size.Y > 0)
+        {
+            _framebufferSize = size;
+        }
+        
+        Default = new Camera(_framebufferSize);
+        
+        _active = Default;
     }
 
     public static Camera Create()
     {
-        var camera = new Camera(Window.Size);
+        var camera = new Camera(_framebufferSize);
         
         return camera;
     }
 
     public static void ToggleTo(Camera camera)
     {
-        Active = camera;
+        ArgumentNullException.ThrowIfNull(camera);
+        ObjectDisposedException.ThrowIf(camera.IsDisposed, camera);
+        
+        if (camera.Component != null)
+        {
+            if (!camera.Component.CanActivate || Application.IsEditor)
+            {
+                throw new InvalidOperationException("Cannot activate an unavailable component camera.");
+            }
+            camera.Component.Synchronize();
+        }
+        
+        if (_isInitialized)
+        {
+            camera.AspectRatio = (float)_framebufferSize.X / _framebufferSize.Y;
+        }
+        
+        _active = camera;
     }
 
-    private static void OnFramebufferResize(Vector2D<int> size)
+    public static void UseDefault()
     {
-        Active.AspectRatio = (float)size.X / size.Y;
+        ToggleTo(Default);
     }
-        
+    
     private Camera(Vector2D<int> size)
     {
         AspectRatio = (float)size.X / size.Y;
+    }
+
+    public void Dispose()
+    {
+        if (ReferenceEquals(this, Default) || IsDisposed)
+        {
+            return;
+        }
+        
+        IsDisposed = true;
+        
+        ReleaseActive(this);
     }
     
     public Matrix4x4 GetViewMatrix()
@@ -99,5 +160,40 @@ public class Camera
         world /= world.W;
 
         return new Vector3(world.X, world.Y, world.Z);
+    }
+    
+    private static void OnFramebufferResize(Vector2D<int> size)
+    {
+        if (size.X <= 0 || size.Y <= 0)
+        {
+            return;
+        }
+        
+        _framebufferSize = size;
+        
+        Default.AspectRatio = (float)size.X / size.Y;
+        Active.AspectRatio = Default.AspectRatio;
+    }
+    
+    internal static void ReleaseActive(Camera camera)
+    {
+        if (ReferenceEquals(_active, camera))
+        {
+            _active = Default;
+        }
+    }
+
+    internal static void Register(CameraComponent component) => Components.Add(component);
+    internal static void Unregister(CameraComponent component) => Components.Remove(component);
+
+    internal static void SynchronizeComponents()
+    {
+        foreach (var component in Components.ToArray())
+        {
+            if (component.CanActivate)
+            {
+                component.Synchronize();
+            }
+        }
     }
 }

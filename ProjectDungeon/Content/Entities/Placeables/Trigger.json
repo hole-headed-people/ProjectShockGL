@@ -1,5 +1,5 @@
 ﻿{
-  "Class": "ProjectDungeon.Placeables.Trigger, ProjectDungeon",
+  "Class": "ProjectOxygenGL.Placeables.Trigger, ProjectOxygenGL",
   "Parameters": {
     "DebugBillboard": "Editor/Trigger"
   }

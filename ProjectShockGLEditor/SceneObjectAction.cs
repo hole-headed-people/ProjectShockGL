@@ -90,7 +90,7 @@ internal sealed class SceneObjectAction : IUndoableAction
             return;
         }
         var placement = JsonConvert.DeserializeObject<Placeable>(_snapshot, JsonHelper.GetSettings())!;
-        var restored = EditorLevelManager.CreatePlacement(placement);
+        var restored = EditorLevelManager.CreatePlacement(placement, restoreGuid: true);
         
         restored.Transform.Rotation = placement.Rotation;
         

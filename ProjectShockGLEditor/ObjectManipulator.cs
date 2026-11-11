@@ -5,7 +5,13 @@ using Object = ProjectShockGL.Core.Object;
 
 namespace ProjectShockGLEditor;
 
-public enum ManipulationMode { Move, Rotate, Scale, Resize }
+public enum ManipulationMode
+{
+    Move,
+    Rotate, 
+    Scale, 
+    Resize
+}
 
 public static class ObjectManipulator
 {
@@ -14,34 +20,52 @@ public static class ObjectManipulator
     private static TransformState _before;
     
     private static int _dragAxis = -1;
+
+    private static Vector3 _axis;
+    private static Vector3 _planeNormal;
+    private static Vector3 _lastDirection;
     
-    private static Vector3 _axis, _planeNormal, _lastDirection;
     private static Vector2 _startMouse;
-    
-    private static float _startOffset, _length, _angle;
+
+    private static float _startOffset;
+    private static float _length;
+    private static float _angle;
     
     private static readonly Vector3[] Axes = [Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ];
     private static readonly uint[] Colors = [0xFF5555EF, 0xFF65CF65, 0xFFFFAA55];
 
+    private static (EditorObjectReference Reference, TransformState State)[] _members = [];
+    private static readonly ProjectShockGL.Core.Transform GroupTransform = new();
+    
     public static ManipulationMode Mode { get; set; } = ManipulationMode.Move;
     public static bool Local { get; set; }
     public static bool SnapEnabled { get; set; }
     public static float RotationStep { get; set; } = 15;
     public static float ScaleStep { get; set; } = 0.1f;
     public static bool IsDragging => _target != null || BrushResizer.IsDragging;
-
-    private static (EditorObjectReference Reference, TransformState State)[] _members = [];
-    private static readonly ProjectShockGL.Core.Transform GroupTransform = new();
     private static bool IsGroup => _members.Length > 1;
+    
     public static Vector3 Pivot => GetPivot(Selection.Objects.Where(o => o.IsEditorVisible).ToArray());
-    private static Vector3 GetPivot(Object[] objects) => objects.Length == 0 ? Vector3.Zero :
-        objects.Aggregate(Vector3.Zero, (sum, obj) => sum + obj.Transform.Position) / objects.Length;
+    
+    private static Vector3 GetPivot(Object[] objects)
+    {
+        return objects.Length == 0
+            ? Vector3.Zero
+            : objects.Aggregate(Vector3.Zero, (sum, obj) => sum + obj.Transform.Position) / objects.Length;
+    }
 
     public static void Cancel()
     {
         BrushResizer.Cancel();
+        
         foreach (var member in _members)
-            if (!member.Reference.Current.IsDestroyed) member.State.Apply(member.Reference.Current.Transform);
+        {
+            if (!member.Reference.Current.IsDestroyed)
+            {
+                member.State.Apply(member.Reference.Current.Transform);
+            }
+        }
+        
         _target = null;
         _members = [];
         _dragAxis = -1;
@@ -50,20 +74,37 @@ public static class ObjectManipulator
     public static void Commit()
     {
         BrushResizer.Commit();
-        if (_target == null) return;
+
+        if (_target == null)
+        {
+            return;
+        }
+        
         var members = _members;
         var before = members.Select(m => m.State).ToArray();
         var after = members.Select(m => TransformState.Capture(m.Reference.Current.Transform)).ToArray();
+        
         _target = null;
         _members = [];
         _dragAxis = -1;
-        if (before.SequenceEqual(after)) return;
+
+        if (before.SequenceEqual(after))
+        {
+            return;
+        }
+        
         UndoRedo.Register(new PropertyChangeAction<TransformState[]>(states =>
         {
             for (var i = 0; i < members.Length; i++)
-                if (!members[i].Reference.Current.IsDestroyed) states[i].Apply(members[i].Reference.Current.Transform);
+            {
+                if (!members[i].Reference.Current.IsDestroyed)
+                {
+                    states[i].Apply(members[i].Reference.Current.Transform);
+                }
+            }
         }, before, after));
     }
+    
     public static bool Draw(Vector2 screenSize, Vector2 sceneMin, Vector2 sceneMax, bool allowInput)
     {
         if (Mode == ManipulationMode.Resize)

@@ -2,6 +2,10 @@
 
 namespace ProjectShockGL.Placeables;
 
+[OutputEvent("OnCountChanged")]
+[OutputEvent("OnNumberReached")]
+[OutputEvent("OnAddCount")]
+[OutputEvent("OnSubtractCount")]
 public class Counter : Entity
 {
     [Editable] public int Number { get; set; } = 0;

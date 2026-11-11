@@ -32,7 +32,7 @@
 
 ProjectDungeon показывает один из способов построения игры. Оно не является обязательным устройством игры на ProjectShockGL. Можно создать собственный игровой проект или решение со своими классами и правилами.
 
-В текущем репозитории редактор ссылается на ProjectDungeon через ProjectReference, чтобы иметь доступ к его классам сущностей. При подключении собственной игры эту зависимость нужно заменить или дополнить. Само ядро ProjectShockGL от ProjectDungeon не зависит.
+Редактор ссылается на движок и ProjectOxygenGL — библиотеку конкретной игровой архитектуры. ProjectDungeon остаётся отдельным примером и не является зависимостью редактора. Для пользовательских классов игры добавьте небольшой проект запуска редактора в решение игры со ссылками на игру и ProjectShockGLEditor. Само ядро ProjectShockGL от игровых проектов не зависит.
 
 ## Сборка и запуск
 
@@ -62,7 +62,7 @@ dotnet run --project ProjectDungeon/ProjectDungeon.csproj
 
 ### Папка ресурсов редактора
 
-Редактору необходимо указать папку Content той игры, уровни которой он будет редактировать. Настройки находятся в [ProjectShockGLEditor/Settings.ini](ProjectShockGLEditor/Settings.ini):
+Редактору необходимо указать папку Content той игры, уровни которой он будет редактировать. Настройки находятся в [ProjectShockGLEditor/EditorSettings.ini](ProjectShockGLEditor/EditorSettings.ini):
 
 ```ini
 [Content]
@@ -77,16 +77,16 @@ CustomPath=D:\MyGame\Content
 3. Относительный CustomPath вычисляется от папки запущенного приложения — AppDomain.CurrentDomain.BaseDirectory, а не от корня репозитория и не от расположения исходного Settings.ini.
 4. При пустом CustomPath используется Path относительно папки приложения. По умолчанию это Content рядом с exe.
 
-В репозитории редактор использует `..\..\..\..\ProjectDungeon\Content`. Этот путь рассчитан на обычную папку вывода проекта; при изменении расположения сборок он может перестать подходить. Для подключения внешнего проекта удобнее абсолютный путь.
+В общей опубликованной папке оба приложения используют Path=Content и пустой CustomPath. Для отдельного запуска редактора из IDE укажите путь к Content в его EditorSettings.ini или обеспечьте копирование ресурсов в папку вывода.
 
-Settings читается из Settings.ini рядом с приложением. Исходный файл редактора копируется туда при сборке; после изменения исходного INI пересоберите и перезапустите редактор. В консоль выводится выбранный корень Content.
+Settings.Initialize(isEditor: true) читает EditorSettings.ini, Settings.Initialize(isEditor: false) (или вызов без аргумента) — GameSettings.ini. Оба файла ищутся рядом с запущенным приложением. Настройте CopyToOutputDirectory и CopyToPublishDirectory, чтобы INI попадали в сборку. После изменения исходного INI пересоберите приложение; уже опубликованные файлы можно редактировать непосредственно. Выбранный корень Content выводится в консоль.
 
 Одной смены папки недостаточно для загрузки пользовательских классов: сборка с ними также должна быть доступна редактору. В JSON сущности указывается полное имя типа и сборки, например `MyGame.Placeables.Switch, MyGame`.
 
 ### Минимальная основа собственной игры
 
 1. Создайте исполняемый проект .NET 8 со ссылкой на ProjectShockGL.
-2. Добавьте Settings.ini и Layers.ini с копированием в папку сборки.
+2. Добавьте GameSettings.ini и Layers.ini с копированием в папку сборки.
 3. Подготовьте Content и настройте его копирование либо укажите CustomPath.
 4. Создайте наследника ProjectShockGL.Core.Game и укажите его в Game/Class.
 5. Подключите сборку игровых сущностей к редактору и задайте редактору этот же Content.
@@ -97,7 +97,7 @@ Settings читается из Settings.ini рядом с приложением
 using ProjectShockGL;
 using ProjectShockGL.Core;
 
-Settings.Initialize();
+Settings.Initialize(isEditor: false);
 Game.Initialize();
 Application.Run();
 ```
@@ -123,7 +123,7 @@ PostProcessingProfile=Default
 5. Создайте PlayerStart из категории Placeables и поставьте над полом.
 6. Добавьте свет; откройте Edit → Environment для окружения уровня.
 7. Сохраните карту как Content/Levels/MyLevel.map.
-8. В Settings.ini игрового проекта задайте `[Game] StartupLevel=MyLevel` и запустите игру.
+8. В GameSettings.ini игрового проекта задайте `[Game] StartupLevel=MyLevel` и запустите игру.
 
 В примере стартовый уровень читает [ProjectDungeon.Core.Game](ProjectDungeon/Core/Game.cs), он же создаёт игрока и персонажа после загрузки. В собственной игре эти действия определяет ваш Game.
 
@@ -290,12 +290,54 @@ Application создаёт окно и вызывает события цикл�
 
 В редакторе выполняется Create, загрузка свойств и отображение, но не игровая активация, Start, Update или корутины. Не размещайте запуск таймеров и игровой сценарий в Create. World.Find<T>() и Find(name) видят также созданные объекты, ожидающие Start.
 
+### Уничтожение ниже уровня
+
+World.KillY задаёт общий нижний порог по мировой координате Y (по умолчанию -1000). При Position.Y < KillY у активной Entity вызывается виртуальный Kill(), который по умолчанию вызывает Destroy(). Порог задаётся полем Kill Y в окне Environment и сохраняется в поле KillY файла уровня. Изменение поддерживает Undo/Redo. Reset to defaults возвращает -1000. При загрузке старых карт без поля используется -1000, а не значение предыдущего уровня. Из игрового кода порог доступен через World.KillY.
+
+Проверка выполняется после обновлений и корутин мира при положительном игровом шаге, включая статичные Entity. Обычные Object и геометрия не затрагиваются. В редакторе, при simulate=false и на паузе автоматического вызова нет. Переопределите Kill() для смерти персонажа или возврата на безопасную позицию; base.Kill() уничтожит сущность. Если переопределение оставляет её ниже границы, вызов не повторяется каждый кадр: сущность должна вернуться к границе или выше, чтобы следующее падение снова вызвало Kill().
+
+### Отладочная отрисовка
+
+Object и Component имеют виртуальные методы DebugRender(DebugDraw draw) и DebugRenderSelected(DebugDraw draw). Первый вызывается в редакторе и в игре при Application.IsDebug (IsDebug=true в разделе Application файла настроек). Второй дополнительно вызывается только в редакторе для каждого выделенного объекта и его компонентов, включая множественное выделение. Базовый метод для обслуживания компонентов вызывать здесь не требуется: движок вызывает их отдельно.
+
+DebugDraw находится в ProjectShockGL.Rendering. Доступны Line(from, to, color), Box(position, rotation, size, color), Sphere(position, radius, color) и Billboard(position, size, texture, color). Координаты мировые, size куба — полный размер. Куб каркасный, сфера изображается тремя окружностями. Билборд обращён к текущей камере и имеет размер в мировых единицах. Последний необязательный параметр ignoreDepth=true позволяет рисовать поверх стен. Примитивы не освещаются и рисуются после постобработки мира, до UI.
+
+```csharp
+public override void DebugRenderSelected(DebugDraw draw)
+{
+    draw.Box(Transform.Position, Transform.Rotation,
+        new Vector3(2f, 1f, 2f), Color.White);
+    draw.Line(Transform.Position, Transform.Position + Transform.Forward * 2f,
+        Color.White, ignoreDepth: true);
+}
+```
+
+Отладочная отрисовка не запускает Start или Update. В редакторе она доступна для неактивных объектов и отключённых компонентов; скрытые Groups и уничтоженные объекты исключаются. В игре рисуются только активные объекты и включённые компоненты. Методы предназначены для рисования, игровую логику в них размещать не следует. Существующие отладочные RenderComponent и манипуляторы редактора продолжают работать отдельно.
+
 ### Загрузка уровня
 
 LevelManager.Load("MyLevel") читает Levels/MyLevel.map; можно передать Level. Доступны Loading/Loaded/Unloading/Unloaded, ActiveLevel, IsLoading и Unload(). В Loaded объекты и Environment уже назначены, но Start ещё не выполнен — здесь удобно создавать игрока.
 
 Загрузка синхронная и подготавливает новый мир до замены старого. Вложенные переходы из обработчика загрузки запрещены. Подписки на события нужно снимать при Unload; пример находится в [ProjectDungeon/Core/Game.cs](ProjectDungeon/Core/Game.cs).
 
+### Камеры и CameraComponent
+
+Application при инициализации окна создаёт запасную Camera.Default, которая не принадлежит World и сохраняется при смене уровня. Camera.Active — текущая камера. Camera.UseDefault() явно возвращает запасной вид. В редакторе запасной камерой управляет SceneCamera.
+
+Для камеры игрового объекта добавьте CameraComponent в Create:
+
+```csharp
+_cameraComponent = AddComponent<CameraComponent>();
+_cameraComponent.LocalPosition = new System.Numerics.Vector3(0, 0.6f, 0);
+```
+
+В игровом Start настройте `_cameraComponent.Camera.Fov` (радианы), Near/Far и остальные параметры, затем вызовите `_cameraComponent.MakeActive()`. Создание компонента само по себе вид не переключает. MakeActive возвращает false для выключенного/уничтоженного владельца или компонента, освобождённой камеры и в режиме редактора.
+
+LocalPosition задаётся в локальных координатах владельца с учётом его масштаба и вращения. LocalRotation — локальный Quaternion; мировое вращение равно Owner.Rotation * LocalRotation. Например, персонаж вращает свой объект по yaw, а наклон взгляда задаёт через LocalRotation камеры. Компонент владеет отдельным экземпляром Camera; запись в Camera.Active не требуется.
+
+Камеры автоматически синхронизируются непосредственно перед отрисовкой в Application, после завершения обновления игровой логики и физики. В Game.Update синхронизация не выполняется. Если игровому коду нужен актуальный трансформ раньше, вызовите Synchronize(). Отключение IsEnabled, SetActive(false), удаление компонента, уничтожение владельца или выгрузка уровня возвращают активный вид к Camera.Default. Уничтожение неактивной камеры не переключает текущий вид. Повторное включение само по себе не активирует камеру: вызовите MakeActive явно. Персонажи примера и ProjectA делают это при повторном включении.
+
+FramebufferResize обновляет пропорции запасной и активной камеры; при переключении неактивная получает актуальный AspectRatio. Нулевой framebuffer при сворачивании игнорируется. Camera.Create/ToggleTo остаются низкоуровневым API, но для камер объектов используйте компонент, чтобы жизненный цикл был связан с владельцем.
 ## Время, таймеры и корутины
 
 ### Источники времени
@@ -395,6 +437,23 @@ mesh.ShaderParameters.Set("uAmplitude", 0.15f);
 
 В ресурсах примера есть [Deform.vert](ProjectDungeon/Content/Shaders/Deform.vert) и [Pulse.frag](ProjectDungeon/Content/Shaders/Pulse.frag). Для Pulse можно использовать пару Unlit/Pulse и параметры uPulseColor, uPulseSpeed, uPulseStrength. Деформация изображения не изменяет физический коллайдер и границы объекта.
 
+### SimplePBR: упрощённое освещение поверхности
+
+В Content примера добавлен Shaders/SimplePBR.frag. Он совместим с Lit.vert и Deform.vert, Directional/Point/Spot Light, Ambient, туманом, цветом и текстурой объекта. Обычный Lit не заменяется. Назначение MeshComponent:
+
+```csharp
+mesh.Shader = Content.LoadShaderProgram("Lit", "SimplePBR");
+mesh.ShaderParameters.Set("uRoughness", 0.6f);
+mesh.ShaderParameters.Set("uMetallic", 0.0f);
+```
+
+Roughness задаёт шероховатость (0..1, для устойчивости вычислений минимум ограничен 0.08), Metallic — долю металлического поведения (0..1). Значения по умолчанию: 0.6 и 0.0. Параметры отдельных объектов не переносятся на следующие отрисовки.
+
+Модель использует GGX-блик, Schlick Fresnel и уменьшение диффузной составляющей для металлов. Радиусы, затухание и конусы света соответствуют существующему освещению движка. Unlit-предпросмотр показывает исходный цвет без освещения. Alpha cutout и туман работают по соглашению Lit.
+
+Это PBR-подобное прямое освещение, без карт roughness/metallic, normal maps, отражений, карт окружения, IBL и отдельного HDR/sRGB-конвейера. Ambient применяется только к неметаллической диффузной составляющей: металл без прямого света может быть чёрным. Яркость и блики отличаются от обычного Lit; начните с Metallic=0 и подберите Roughness. Нормали поступают из выбранного вершинного шейдера; SimplePBR.frag не меняет его обработку неравномерного масштаба.
+
+Проверка компиляции и изображения в скрытом OpenGL-окне: `dotnet run --project tests/PostProcessingChecks -- . --simple-pbr`.
 ### Постобработка
 
 Профили — JSON в PostProcessProfiles. Пример собственного профиля:
@@ -462,7 +521,7 @@ Text поддерживает растровый TTF-атлас, английс�
 
 Уровень сохраняет размещения, трансформы, активность, Editable-свойства, Outputs, параметры brush, окружение и Groups. Текущее выполнение корутин и таймеров не является сохранением игры и в map не записывается.
 
-### Settings.ini и окно
+### GameSettings.ini, EditorSettings.ini и окно
 
 ```ini
 [Window]
@@ -490,7 +549,7 @@ Windowed использует Width/Height. Borderless использует ра
 
 Icon — изображение для окна, путь относительно приложения. Иконка exe задаётся отдельно через ApplicationIcon в csproj и ICO-файл: изменение INI не пересобирает значок exe. В репозитории эти файлы уже настроены для игры и редактора.
 
-Game/Class и UICanvasClass читает движок. StartupLevel, PlayerClass и PlayerCharacterClass читает архитектура ProjectDungeon: собственная игра не обязана использовать эти ключи. Layers.ini задаёт именованные слои; пример находится в [ProjectDungeon/Layers.ini](ProjectDungeon/Layers.ini).
+Game/Class и UICanvasClass читает движок. StartupLevel, PlayerClass и PlayerCharacterClass читает архитектура ProjectOxygenGL: собственная игра не обязана использовать эти ключи. Layers.ini задаёт именованные слои; пример находится в [ProjectDungeon/Layers.ini](ProjectDungeon/Layers.ini).
 
 ## Проверки и ограничения
 
@@ -521,4 +580,44 @@ dotnet run --project tests/PostProcessingChecks -- .
 
 
 
+
+
+
+### Общая поставка игры и редактора
+
+Игра и отдельный запускатель редактора могут публиковаться рядом: ProjectA.exe, ProjectAEditor.exe, их DLL/deps/runtimeconfig, GameSettings.ini, EditorSettings.ini, Layers.ini, Icons и общий Content. Оба INI используют относительный Path=Content без CustomPath. В EditorSettings.ini обязательны Application/IsEditor=true и редакторский Game/Class; GameSettings.ini выбирает Game игры. Разные имена настроек исключают перезапись конфигурации игры конфигурацией редактора.
+
+Проект запуска редактора может ссылаться на игру для доступа к её Entity-классам. Игровой Game и редакторский Game запускаются раздельно. После изменения C# обновляйте комплект и перезапускайте приложения; изменение ресурсов на диске учитывает правила кеширования Content. Публикация с self-contained включает .NET, но все DLL и JSON запуска нужно хранить вместе с exe.
+
+### Подключение редактора к следующей игре
+
+В решении новой игры создайте отдельный исполняемый проект, например MyGame.Editor, со ссылками на MyGame.csproj и ProjectShockGLEditor.csproj. Файлы движка копировать не нужно. Добавьте существующие проекты движка в решение, если хотите редактировать их в Rider. ProjectOxygenGL уже является зависимостью редактора.
+
+Точка входа MyGame.Editor:
+
+```csharp
+using ProjectShockGL;
+using ProjectShockGLEditor;
+using Game = ProjectShockGL.Core.Game;
+
+Settings.Initialize(isEditor: true);
+Game.Initialize();
+Editor.Initialize();
+Application.Run();
+```
+
+Добавьте EditorSettings.ini с копированием в вывод и публикацию. В нём задайте Application/IsEditor=true, Game/Class=ProjectShockGLEditor.Game, ProjectShockGLEditor, Game/PostProcessingProfile=Default и Content/CustomPath к исходному Content новой игры. У игры остаётся отдельный GameSettings.ini. В редакторе создаются классы из той игры, на которую ссылается её запускатель.
+
+Чтобы ресурсы сохраняли структуру при копировании между проектами, явно задавайте у Content метаданные:
+
+```xml
+<Content Include="Content\**\*.*">
+    <Link>Content\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    <TargetPath>Content\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+</Content>
+```
+
+Для разработки запускайте игру и её редактор из одного решения Rider с исходным Content. Для поставки используйте папку dist внутри проекта игры, общий вложенный Content и отдельные INI с пустым CustomPath. Публикуемые ресурсы — копии, поэтому правки из dist автоматически в исходники не возвращаются.
 

@@ -1,6 +1,7 @@
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using ProjectShockGL;
+using ProjectShockGL.Core;
 using ProjectShockGL.Tools;
 using Object = ProjectShockGL.Core.Object;
 using System.Numerics;
@@ -76,6 +77,7 @@ public static class PrefabTools
             }
             
             member.Remove("EditorGroups");
+            member.Remove(nameof(Placeable.Guid));
             members.Add(member);
         }
         

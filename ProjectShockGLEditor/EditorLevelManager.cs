@@ -62,9 +62,14 @@ public static class EditorLevelManager
 
             var placeable = new Placeable
             {
+                Guid = obj.Guid,
                 Name = obj.Name, Path = path,
                 
                 IsActive = obj.IsActive,
+                Layer = obj.Layer,
+                CollidesWith = obj.CollidesWith,
+                SimulatePhysics = (obj as Entity)?.Rigidbody?.IsEnabled,
+                RigidbodyMass = obj.GetComponent<Rigidbody>() is { IsDestroyed: false } body ? body.Mass : null,
                 EditorGroups = obj.EditorGroups.ToArray(),
                 
                 Type = obj switch
@@ -77,6 +82,7 @@ public static class EditorLevelManager
                 Brush = obj is BrushBox brush ? new BrushBoxData
                 {
                     Movable = brush.Movable,
+                    SimulatePhysics = brush.SimulatePhysics,
                     Size = brush.Size, Texture = brush.TextureName, TextureFormat = brush.TextureFormat,
                     TextureScale = brush.TextureScale, Color = brush.Color, Lit = brush.Lit
                 } : null,
@@ -106,6 +112,8 @@ public static class EditorLevelManager
         return new Level
         {
             Environment = ProjectShockGL.Environment.Capture(),
+            KillY = ProjectShockGL.Core.Game.Instance.World.KillY,
+            SaveLevelState = ProjectShockGL.Core.Game.Instance.World.SaveLevelState,
             Groups = SceneGroups.Capture(),
             Placeables = result.ToArray()
         };
@@ -162,6 +170,10 @@ public static class EditorLevelManager
         {
             Name = name, Path = snapshot.Path, Type = snapshot.Type,
             IsActive = snapshot.IsActive,
+            Layer = snapshot.Layer,
+            CollidesWith = snapshot.CollidesWith,
+            SimulatePhysics = snapshot.SimulatePhysics,
+            RigidbodyMass = snapshot.RigidbodyMass,
             EditorGroups = snapshot.EditorGroups,
             Brush = snapshot.Brush,
             Position = snapshot.Position, Rotation = snapshot.Rotation, Scale = snapshot.Scale,
@@ -173,12 +185,17 @@ public static class EditorLevelManager
 
     public static Object CreatePlacement(Placeable placement)
     {
+        return CreatePlacement(placement, restoreGuid: false);
+    }
+
+    internal static Object CreatePlacement(Placeable placement, bool restoreGuid)
+    {
         var world = ProjectShockGL.Core.Game.Instance.World;
         var existing = world.GetAllObjects(true).ToHashSet();
 
         try
         {
-            return LevelManager.CreateObject(world, placement);
+            return restoreGuid ? LevelManager.RestoreObject(world, placement) : LevelManager.CreateObject(world, placement);
         }
         catch (Exception error)
         {
@@ -218,7 +235,7 @@ public static class EditorLevelManager
     {
         var fullPath = Path.GetFullPath(path);
         
-        (level.Environment ?? new EnvironmentData()).Validate();
+        level.Validate();
         
         var directory = Path.GetDirectoryName(fullPath)!;
         var json = Serialize(level);

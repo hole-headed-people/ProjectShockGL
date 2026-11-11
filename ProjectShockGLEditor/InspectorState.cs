@@ -13,6 +13,10 @@ public static class InspectorState
     {
         public string Name { get; set; } = "";
         public bool IsActive { get; set; }
+        public int Layer { get; set; }
+        public int CollidesWith { get; set; }
+        public bool? SimulatePhysics { get; set; }
+        public float? RigidbodyMass { get; set; }
         public TransformState Transform { get; set; }
         public BrushBoxData? Brush { get; set; }
         public Dictionary<string, JToken> Properties { get; set; } = new();
@@ -26,9 +30,13 @@ public static class InspectorState
         var state = new State
         {
             Name = obj.Name, IsActive = obj.IsActive, Transform = TransformState.Capture(obj.Transform),
+            Layer = obj.Layer, CollidesWith = obj.CollidesWith,
+            SimulatePhysics = (obj as Entity)?.Rigidbody?.IsEnabled,
+            RigidbodyMass = obj.GetComponent<Rigidbody>() is { IsDestroyed: false } body ? body.Mass : null,
             Brush = obj is BrushBox brush ? new BrushBoxData
             {
                 Movable = brush.Movable,
+                SimulatePhysics = brush.SimulatePhysics,
                 Size = brush.Size, Texture = brush.TextureName, TextureFormat = brush.TextureFormat,
                 TextureScale = brush.TextureScale, Color = brush.Color, Lit = brush.Lit
             } : null,
@@ -65,6 +73,7 @@ public static class InspectorState
         {
             brush.Size = data.Size;
             brush.Movable = data.Movable;
+            brush.SimulatePhysics = data.SimulatePhysics;
             brush.TextureName = data.Texture;
             brush.TextureFormat = data.TextureFormat;
             brush.TextureScale = data.TextureScale;
@@ -74,6 +83,11 @@ public static class InspectorState
         
         if (obj is Entity entity)
         {
+            if (state.SimulatePhysics is { } enabled)
+            {
+                entity.SetSimulatePhysics(enabled);
+            }
+
             foreach (var property in EditableProperties.Get(obj.GetType()))
             {
                 if (state.Properties.TryGetValue(property.Name, out var value))
@@ -95,6 +109,13 @@ public static class InspectorState
             }
         }
         
+        if (state.RigidbodyMass is { } mass && obj.GetComponent<Rigidbody>() is { IsDestroyed: false } body)
+        {
+            body.Mass = mass;
+        }
+
+        obj.Layer = state.Layer;
+        obj.CollidesWith = state.CollidesWith;
         obj.SetActive(state.IsActive);
     }
 }

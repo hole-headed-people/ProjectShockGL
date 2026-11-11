@@ -1,4 +1,7 @@
-﻿using ProjectShockGL.Rendering;
+using System.Numerics;
+using DebugColor = ProjectShockGL.Rendering.Color;
+using ProjectShockGL.Rendering;
+using ProjectShockGL.Tools;
 
 namespace ProjectShockGL.Core;
 
@@ -131,6 +134,60 @@ public class Light : Entity
             }
             
             All.Remove(this);
+        }
+    }
+    
+    public override void DebugRenderSelected(DebugDraw draw)
+    {
+        if (Type == LightType.Directional)
+        {
+            var origin = Transform.Position;
+            
+            var forward = Transform.Forward;
+            var right = Transform.Right;
+            var up = Transform.Up;
+            
+            var tip = origin + forward * 2f;
+            var head = tip - forward * 0.45f;
+            
+            draw.Line(origin, tip, DebugColor.Yellow, ignoreDepth: true, thickness: 0.025f);
+            draw.Line(tip, head + right * 0.22f, DebugColor.Yellow, ignoreDepth: true, thickness: 0.025f);
+            draw.Line(tip, head - right * 0.22f, DebugColor.Yellow, ignoreDepth: true, thickness: 0.025f);
+            draw.Line(tip, head + up * 0.22f, DebugColor.Yellow, ignoreDepth: true, thickness: 0.025f);
+            draw.Line(tip, head - up * 0.22f, DebugColor.Yellow, ignoreDepth: true, thickness: 0.025f);
+            
+            return;
+        }
+
+        if (Type == LightType.Point)
+        {
+            foreach (var (from, to) in Utils.GetRadiusLines(Transform.Position, Radius))
+            {
+                draw.Line(from, to, DebugColor.Yellow, ignoreDepth: true, thickness: 0.012f);
+            }
+            
+            return;
+        }
+
+        if (Type != LightType.Spot)
+        {
+            return;
+        }
+
+        foreach (var (from, to) in Utils.GetConeLines(Transform, Radius, OuterAngle))
+        {
+            draw.Line(from, to, DebugColor.Yellow, ignoreDepth: true, thickness: 0.012f);
+        }
+
+        foreach (var (from, to) in Utils.GetConeLines(Transform, Radius, InnerAngle))
+        {
+            draw.Line(from, to, DebugColor.Cyan, ignoreDepth: true, thickness: 0.008f);
+        }
+        
+        if (float.IsFinite(Radius) && Radius > 0)
+        {
+            draw.Line(Transform.Position, Transform.Position + Transform.Forward * Radius,
+                DebugColor.White, ignoreDepth: true, thickness: 0.012f);
         }
     }
 }

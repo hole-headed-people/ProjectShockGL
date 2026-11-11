@@ -12,10 +12,20 @@ public enum PlaceableType
 [Serializable]
 public class Placeable
 {
+    [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+    public Guid? Guid { get; init; }
     public string Name { get; init; } = "";
     public string Path { get; init; } = string.Empty;
     public PlaceableType Type { get; init; }
     public bool IsActive { get; init; } = true;
+    [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+    public int? Layer { get; init; }
+    [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+    public int? CollidesWith { get; init; }
+    [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+    public bool? SimulatePhysics { get; init; }
+    [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+    public float? RigidbodyMass { get; init; }
     public string[] EditorGroups { get; init; } = [];
     public BrushBoxData? Brush { get; init; }
     public Vector3 Position { get; init; }

@@ -10,7 +10,9 @@ public class Canvas
     private bool _isInitialized;
     
     public IReadOnlyList<Widget> Children { get; }
+    
     public Vector2 Size { get; private set; }
+    
     public bool Visible { get; set; } = true;
     public bool IsEnabled { get; set; } = true;
     public bool IsDestroyed { get; private set; }
@@ -32,6 +34,21 @@ public class Canvas
         _isInitialized = true;
         
         OnCreate();
+    }
+
+    public T Add<T>(Type type) where T : Widget
+    {
+        ObjectDisposedException.ThrowIf(IsDestroyed, this);
+
+        if (!typeof(T).IsAssignableFrom(type))
+        {
+            throw new ArgumentException($"Type {type} is not assignable to {typeof(T)}", nameof(type));
+        }
+    
+        var widget = (T)Activator.CreateInstance(type)!;
+        widget.Initialize(this, null);
+    
+        return widget;
     }
 
     public T Add<T>() where T : Widget, new()

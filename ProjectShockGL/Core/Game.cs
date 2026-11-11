@@ -1,4 +1,5 @@
-﻿using ProjectShockGL.Rendering;
+﻿using ProjectShockGL.Localization;
+using ProjectShockGL.Rendering;
 using ProjectShockGL.UI;
 
 namespace ProjectShockGL.Core;
@@ -62,8 +63,10 @@ public class Game
         
         Layers.Load();
         Physics.Initialize();
-
+        
         PostProcessSettings.Apply(Settings.GetString("Game", "PostProcessingProfile", "Default"));
+        
+        LocalizationManager.Initialize();
         
         UIManager = new UIManager();
         UIManager.Initialize();
@@ -81,7 +84,7 @@ public class Game
 
             if (gameDeltaSeconds > 0f)
             {
-                Physics.Update();
+                Physics.Update(gameDeltaSeconds);
             }
             
             UIManager.Update(deltaSeconds);
@@ -96,13 +99,14 @@ public class Game
 
     private void RenderDebug(Graphics graphics)
     {
-        if (!Application.IsDebug)
+        if (!Application.IsEditor && !Application.IsDebug)
         {
             return;
         }
         
         World.Render(_renderQueue, true);
         _renderQueue.Flush(graphics);
+        World.DebugRender(new DebugDraw(graphics));
     }
     
     protected virtual void Unload()

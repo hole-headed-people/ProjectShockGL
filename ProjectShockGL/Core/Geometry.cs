@@ -10,6 +10,18 @@ public class Geometry : Object
     private MeshComponent _meshComponent = null!;
 
     public string Path { get; private set; } = "";
+
+    public sealed override bool Saveable
+    {
+        get => false;
+        set
+        {
+            if (value)
+            {
+                throw new InvalidOperationException("Geometry cannot be saved as game state.");
+            }
+        }
+    }
     
     public override void Create()
     {
@@ -37,6 +49,11 @@ public class Geometry : Object
 
     public static Geometry? Create(string name, World? world = null)
     {
+        return Create(name, world, null);
+    }
+
+    internal static Geometry? Create(string name, World? world, Guid? guid)
+    {
         var data = Content.LoadGeometry(name);
 
         if (data == null)
@@ -44,7 +61,7 @@ public class Geometry : Object
             return null;
         }
         
-        var geometry = (world ?? Game.Instance.World).Spawn<Geometry>();
+        var geometry = (world ?? Game.Instance.World).Spawn<Geometry>(guid);
 
         geometry.Path = name;
         geometry.SetVisual(data.Model, data.Texture, data.Color, data.Lit);

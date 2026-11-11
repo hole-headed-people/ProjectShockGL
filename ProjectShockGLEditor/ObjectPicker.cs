@@ -1,5 +1,4 @@
 ﻿using System.Numerics;
-using ProjectShockGL;
 using ProjectShockGL.Rendering;
 
 namespace ProjectShockGLEditor;

@@ -69,6 +69,11 @@ public static class Layers
         }
     }
     
+    public static KeyValuePair<string, int>[] GetAll()
+    {
+        return ByName.ToArray();
+    }
+
     public static int Get(string name)
     {
         return ByName.TryGetValue(name, out var bit) ? bit : None;

@@ -17,8 +17,8 @@ public class CharacterController : CapsuleCollider
     private float _skinWidth = 0.01f;
     private float _stepOffset = 0.3f;
     private float _slopeLimit = 45f;
-    
     private Vector3? _stairSupportPosition;
+    
     
     private const int MaxSubsteps = 4096;
 
@@ -53,7 +53,7 @@ public class CharacterController : CapsuleCollider
     
     internal void ResolveOverlaps(IEnumerable<Collider> colliders)
     {
-        if (IsTrigger || IsDestroyed || !IsEnabled || Parent.IsDestroyed || !Parent.IsActive)
+        if (IsTrigger || IsDestroyed || !IsEnabled || Owner.IsDestroyed || !Owner.IsActive)
         {
             return;
         }
@@ -67,116 +67,156 @@ public class CharacterController : CapsuleCollider
         
         radius -= MathF.Min(SkinWidth, radius * 0.1f);
         
-        var obstacles = colliders.Where(other => other.Parent != Parent && !other.IsTrigger &&
-            (CollisionMask & Parent.CollidesWith & other.Parent.Layer) != 0 &&
-            (other.Parent.CollidesWith & Parent.Layer) != 0).ToArray();
-        
-        var margin = MathF.Max(radius * 0.0001f, 0.000001f);
-        var corrected = false;
-        
-        for (var iteration = 0; iteration < 8; iteration++)
+        var (a, b) = GetWorldSegment();
+        if (!PhysicsHelper.IsFinite(a) || !PhysicsHelper.IsFinite(b))
         {
-            var moved = false;
-            
-            foreach (var obstacle in obstacles)
+            return;
+        }
+
+        var obstacles = colliders.Where(other => other.Owner != Owner && !other.IsTrigger &&
+            (CollisionMask & Owner.CollidesWith & other.Owner.Layer) != 0 &&
+            (other.Owner.CollidesWith & Owner.Layer) != 0)
+            .Select(other => (Collider: other, Bounds: other.GetWorldBounds())).ToArray();
+        var overlaps = obstacles.Where(other => Intersects(other, Vector3.Zero)).ToArray();
+        if (overlaps.Length == 0)
+        {
+            return;
+        }
+
+        var directions = new List<Vector3>();
+        var min = Vector3.Min(a, b) - new Vector3(radius);
+        var max = Vector3.Max(a, b) + new Vector3(radius);
+        foreach (var obstacle in overlaps)
+        {
+            min = Vector3.Min(min, obstacle.Bounds.min);
+            max = Vector3.Max(max, obstacle.Bounds.max);
+            AddDirection(PhysicsHelper.CapsuleContactNormal(a, b, obstacle.Collider));
+            var rotation = obstacle.Collider is BoxCollider
+                ? obstacle.Collider.Owner.Transform.Rotation : Quaternion.Identity;
+            foreach (var axis in new[] { Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ })
             {
-                var (a, b) = GetWorldSegment();
-                
-                if (!PhysicsHelper.IsFinite(a) || !PhysicsHelper.IsFinite(b) ||
-                    !PhysicsHelper.CapsuleIntersectsCollider(a, b, radius, obstacle))
-                {
-                    continue;
-                }
-                
-                var bounds = obstacle.GetWorldBounds();
-                var limit = Vector3.Distance(Vector3.Min(Vector3.Min(a, b), bounds.min),
-                    Vector3.Max(Vector3.Max(a, b), bounds.max)) + radius * 2;
-
-                if (!float.IsFinite(limit) || limit <= 0)
-                {
-                    continue;
-                }
-                
-                var directions = new List<Vector3> { PhysicsHelper.CapsuleContactNormal(a, b, obstacle) };
-                var rotation = obstacle is BoxCollider ? obstacle.Parent.Transform.Rotation : Quaternion.Identity;
-                
-                foreach (var axis in new[] { Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ })
-                {
-                    var direction = Vector3.Transform(axis, rotation);
-                    
-                    directions.Add(direction);
-                    directions.Add(-direction);
-                }
-                
-                var best = float.PositiveInfinity;
-                var correction = Vector3.Zero;
-                
-                foreach (var candidate in directions)
-                {
-                    if (!PhysicsHelper.TryNormalize(candidate, out var direction))
-                    {
-                        continue;
-                    }
-
-                    if (PhysicsHelper.CapsuleIntersectsCollider(a + direction * limit, b + direction * limit, radius,
-                            obstacle))
-                    {
-                        continue;
-                    }
-                    
-                    var low = 0f;
-                    var high = limit;
-                    
-                    for (var j = 0; j < 24; j++)
-                    {
-                        var mid = (low + high) * 0.5f;
-                        
-                        if (PhysicsHelper.CapsuleIntersectsCollider(a + direction * mid, b + direction * mid, radius,
-                                obstacle))
-                        {
-                            low = mid;
-                        }
-
-                        else
-                        {
-                            high = mid;
-                        }
-                    }
-
-                    if (high >= best)
-                    {
-                        continue;
-                    }
-                    
-                    best = high;
-                    correction = direction * (high + margin);
-                }
-
-                if (!float.IsFinite(best))
-                {
-                    continue;
-                }
-                
-                Parent.Transform.Position += correction;
-                
-                _stairSupportPosition = null;
-                
-                moved = true;
-                corrected = true;
-            }
-
-            if (!moved)
-            {
-                break;
+                var direction = Vector3.Transform(axis, rotation);
+                AddDirection(direction);
+                AddDirection(-direction);
             }
         }
-        
-        if (corrected)
+
+        var limit = Vector3.Distance(min, max) + radius * 2f;
+        if (!float.IsFinite(limit))
         {
-            var displacement = LastDisplacement;
-            
-            Move(Vector3.Zero);
-            LastDisplacement = displacement;
+            return;
+        }
+
+        var overlapSet = overlaps.Select(other => other.Collider).ToHashSet();
+        var margin = MathF.Max(radius * 0.0001f, 0.000001f);
+        var best = float.PositiveInfinity;
+        var correction = Vector3.Zero;
+        foreach (var direction in directions)
+        {
+            var low = 0f;
+            var high = limit;
+            if (OverlapsAt(direction * high))
+            {
+                continue;
+            }
+
+            // All these convex obstacles overlap the starting capsule, so their union
+            // along this ray ends at the last exit. Search for that shared exit.
+            for (var step = 0; step < 24; step++)
+            {
+                var mid = (low + high) * 0.5f;
+                if (OverlapsAt(direction * mid))
+                {
+                    low = mid;
+                }
+                else
+                {
+                    high = mid;
+                }
+            }
+
+            var distance = high + margin;
+            var candidate = direction * distance;
+            if (distance >= best || !ClearPath(candidate))
+            {
+                continue;
+            }
+
+            best = distance;
+            correction = candidate;
+        }
+
+        if (!float.IsFinite(best))
+        {
+            return;
+        }
+
+        Owner.Transform.Position += correction;
+        _stairSupportPosition = null;
+        var displacement = LastDisplacement;
+        Move(Vector3.Zero);
+        LastDisplacement = displacement;
+
+        bool OverlapsAt(Vector3 offset)
+        {
+            foreach (var obstacle in overlaps)
+            {
+                if (Intersects(obstacle, offset))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        bool Intersects((Collider Collider, (Vector3 min, Vector3 max) Bounds) obstacle, Vector3 offset)
+        {
+            var bounds = (Vector3.Min(a, b) + offset - new Vector3(radius),
+                Vector3.Max(a, b) + offset + new Vector3(radius));
+            return PhysicsHelper.AabbOverlap(bounds, obstacle.Bounds) &&
+                PhysicsHelper.CapsuleIntersectsCollider(a + offset, b + offset, radius, obstacle.Collider);
+        }
+
+        void AddDirection(Vector3 candidate)
+        {
+            if (PhysicsHelper.TryNormalize(candidate, out var direction) &&
+                !directions.Any(existing => Vector3.Dot(existing, direction) > 0.99999f))
+            {
+                directions.Add(direction);
+            }
+        }
+
+        bool ClearPath(Vector3 offset)
+        {
+            var sweptBounds = (Vector3.Min(Vector3.Min(a, b), Vector3.Min(a, b) + offset) - new Vector3(radius),
+                Vector3.Max(Vector3.Max(a, b), Vector3.Max(a, b) + offset) + new Vector3(radius));
+            var blockers = obstacles.Where(other => !overlapSet.Contains(other.Collider) &&
+                PhysicsHelper.AabbOverlap(sweptBounds, other.Bounds)).ToArray();
+            if (blockers.Length == 0)
+            {
+                return true;
+            }
+
+            var steps = Math.Ceiling(offset.Length() / (radius * 0.25f));
+            if (steps > MaxSubsteps)
+            {
+                return false;
+            }
+
+            for (var step = 1; step <= (int)steps; step++)
+            {
+                var at = offset * (step / (float)steps);
+                foreach (var obstacle in blockers)
+                {
+                    if (Intersects(obstacle, at))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
         }
     }
 
@@ -192,10 +232,9 @@ public class CharacterController : CapsuleCollider
         IsGrounded = false;
         GroundNormal = Vector3.Zero;
         
-        if (IsDestroyed || Parent.IsDestroyed || !IsEnabled || !Parent.IsActive)
+        if (IsDestroyed || Owner.IsDestroyed || !IsEnabled || !Owner.IsActive)
         {
             _stairSupportPosition = null;
-            
             return CollisionFlags;
         }
 
@@ -206,9 +245,8 @@ public class CharacterController : CapsuleCollider
 
         var radius = WorldRadius;
         var (a, b) = GetWorldSegment();
-        var start = Parent.Transform.Position;
-        var allowStairEdge = displacement.Y <= 0 && _stairSupportPosition == start;
-        
+        var start = Owner.Transform.Position;
+        var allowStairEdge = displacement.Y <= 0f && _stairSupportPosition == start;
         _stairSupportPosition = null;
 
         if (!float.IsFinite(radius) || radius <= 0 || !PhysicsHelper.IsFinite(a) ||
@@ -233,14 +271,22 @@ public class CharacterController : CapsuleCollider
             throw new ArgumentOutOfRangeException(nameof(displacement), "Move is too large; split it across updates or teleport explicitly.");
         }
 
-        var filter = new PhysicsQueryFilter { IgnoreObject = Parent, IgnoreTriggers = true };
-        var mask = CollisionMask & Parent.CollidesWith;
+        var filter = new PhysicsQueryFilter { IgnoreObject = Owner, IgnoreTriggers = true };
+        var mask = CollisionMask & Owner.CollidesWith;
+        var searchMin = Vector3.Min(a, b) + Vector3.Min(displacement, Vector3.Zero) - new Vector3(queryRadius);
+        var searchMax = Vector3.Max(a, b) + Vector3.Max(displacement, Vector3.Zero) + new Vector3(queryRadius);
+        // Stair and slope probes can move vertically beyond the requested displacement.
+        searchMin.Y = float.NegativeInfinity;
+        searchMax.Y = float.PositiveInfinity;
+        var candidates = Physics.GetQueryCandidates((searchMin, searchMax), mask, filter);
         var offset = Vector3.Zero;
         var step = displacement / (int)count;
+        var movesHorizontally = step.X != 0f || step.Z != 0f;
 
         for (var i = 0; i < (int)count; i++)
         {
-            var supported = displacement.Y <= 0 && GroundAt(offset, probe, out _, out _);
+            var previousOffset = offset;
+            var supported = movesHorizontally && displacement.Y <= 0 && GroundAt(offset, probe, out _, out _);
             
             if (step.Y != 0)
             {
@@ -250,17 +296,27 @@ public class CharacterController : CapsuleCollider
                 {
                     CollisionFlags |= step.Y > 0 ? CollisionFlags.Above :
                         Walkable(normal) ? CollisionFlags.Below : CollisionFlags.Sides;
+
+                    if (!movesHorizontally)
+                    {
+                        break;
+                    }
                 }
             }
             
             MoveHorizontal(new Vector3(step.X, 0, 0));
             MoveHorizontal(new Vector3(0, 0, step.Z));
             
-            if (supported && displacement.Y <= 0 && (step.X != 0 || step.Z != 0) &&
+            if (supported &&
                 GroundAt(offset, MathF.Max(StepOffset, probe), out var landing, out _, true))
             {
                 offset = landing;
                 allowStairEdge = true;
+            }
+
+            if (offset == previousOffset)
+            {
+                break;
             }
         }
 
@@ -271,14 +327,13 @@ public class CharacterController : CapsuleCollider
         if (IsGrounded)
         {
             GroundNormal = ground;
+            if (allowStairEdge || displacement.Y < 0f)
+            {
+                _stairSupportPosition = start + offset;
+            }
         }
         
-        Parent.Transform.Position = start + offset;
-
-        if (allowStairEdge && IsGrounded)
-        {
-            _stairSupportPosition = Parent.Transform.Position;
-        }
+        Owner.Transform.Position = start + offset;
         
         LastDisplacement = offset;
         
@@ -291,7 +346,20 @@ public class CharacterController : CapsuleCollider
 
         bool Blocked(Vector3 at, out Collider? hit)
         {
-            return Physics.OverlapCapsule(a + at, b + at, queryRadius, mask, out hit, filter);
+            var bounds = (Vector3.Min(a, b) + at - new Vector3(queryRadius),
+                Vector3.Max(a, b) + at + new Vector3(queryRadius));
+            foreach (var candidate in candidates)
+            {
+                if (PhysicsHelper.AabbOverlap(bounds, candidate.Bounds) &&
+                    PhysicsHelper.CapsuleIntersectsCollider(a + at, b + at, queryRadius, candidate.Collider))
+                {
+                    hit = candidate.Collider;
+                    return true;
+                }
+            }
+
+            hit = null;
+            return false;
         }
         
         bool Travel(Vector3 from, Vector3 movement, out Vector3 destination, out Vector3 normal)
@@ -334,7 +402,8 @@ public class CharacterController : CapsuleCollider
                 var low = 0f;
                 var high = 1f;
                 
-                for (var j = 0; j < 20; j++)
+                var precision = margin / (8f * delta.Length());
+                for (var j = 0; j < 20 && high - low > precision; j++)
                 {
                     var mid = (low + high) * 0.5f;
                     
@@ -368,7 +437,8 @@ public class CharacterController : CapsuleCollider
         {
             var clear = Travel(at, -Vector3.UnitY * distance, out landing, out normal);
 
-            if ((allowStairEdge || stairLanding) && !clear && normal.Y > 0 && !Walkable(normal) && StepOffset > 0 &&
+            if ((allowStairEdge || stairLanding || displacement.Y < 0f) &&
+                !clear && normal.Y > 0 && !Walkable(normal) && StepOffset > 0 &&
                 Blocked(landing - Vector3.UnitY * (margin * 3), out var obstacle) &&
                 obstacle is BoxCollider box &&
                 PhysicsHelper.TryGetStairSupport(a + landing, b + landing, queryRadius, box,
@@ -388,14 +458,14 @@ public class CharacterController : CapsuleCollider
             }
             
             var original = offset;
-            var supported = displacement.Y <= 0 && GroundAt(original, probe, out _, out _);
-            
             if (Travel(original, movement, out var stopped, out var normal))
             {
                 offset = stopped;
                 
                 return;
             }
+
+            var supported = displacement.Y <= 0 && GroundAt(original, probe, out _, out _);
             
             if (supported && Walkable(normal))
             {

@@ -17,11 +17,17 @@ public static class LevelManager
     public static event Action<Level>? Unloaded;
 
     public static Level? ActiveLevel { get; private set; }
+    public static string? ActiveLevelName { get; private set; }
     public static bool IsLoading { get; private set; }
     
     private static bool _isChangingLevel;
     
     public static void Load(Level level)
+    {
+        Load(level, null, null, null);
+    }
+
+    private static void Load(Level level, string? name, IReadOnlySet<Guid>? removedObjects, Action<World>? restore)
     {
         ArgumentNullException.ThrowIfNull(level);
         
@@ -43,12 +49,24 @@ public static class LevelManager
             }
             
             var environment = level.Environment ?? new EnvironmentData();
-            environment.Validate();
+            level.Validate();
 
             foreach (var placeable in level.Placeables)
             {
-                CreateObject(staged, placeable);
+                if (placeable?.Guid is { } guid && removedObjects?.Contains(guid) == true)
+                {
+                    continue;
+                }
+
+                CreatePlacement(staged, placeable, placeable?.Guid);
             }
+
+            if (removedObjects != null)
+            {
+                staged.RemovedSaveableObjects.UnionWith(removedObjects);
+            }
+
+            restore?.Invoke(staged);
             
             var previous = ActiveLevel;
 
@@ -58,9 +76,12 @@ public static class LevelManager
             }
             
             Game.Instance.World.ReplaceWith(staged);
+            Game.Instance.World.KillY = level.KillY;
+            Game.Instance.World.SaveLevelState = level.SaveLevelState;
             Environment.Apply(environment);
             
             ActiveLevel = level;
+            ActiveLevelName = name;
             RefreshLights();
 
             if (previous != null)
@@ -126,6 +147,9 @@ public static class LevelManager
             finally
             {
                 ActiveLevel = null;
+                ActiveLevelName = null;
+                world.KillY = new Level().KillY;
+                world.SaveLevelState = true;
                 Environment.Reset();
             }
             
@@ -141,6 +165,22 @@ public static class LevelManager
     }
 
     public static Object CreateObject(World world, Placeable placeable)
+    {
+        return CreatePlacement(world, placeable, null);
+    }
+
+    public static Object RestoreObject(World world, Placeable placeable)
+    {
+        if (placeable?.Guid is { } guid && guid != Guid.Empty &&
+            world.GetAllObjects(true).Any(obj => obj.Guid == guid))
+        {
+            throw new InvalidDataException($"An object with GUID '{guid}' already exists in this world.");
+        }
+
+        return CreatePlacement(world, placeable, placeable?.Guid);
+    }
+
+    private static Object CreatePlacement(World world, Placeable? placeable, Guid? guid)
     {
         if (placeable == null || (placeable.Type != PlaceableType.BrushBox && string.IsNullOrWhiteSpace(placeable.Path)))
         {
@@ -160,9 +200,9 @@ public static class LevelManager
 
         Object? obj = placeable.Type switch
         {
-            PlaceableType.Entity => Entity.Create(placeable.Path, world),
-            PlaceableType.Geometry => Geometry.Create(placeable.Path, world),
-            PlaceableType.BrushBox => CreateBrush(world, placeable),
+            PlaceableType.Entity => Entity.Create(placeable.Path, world, guid),
+            PlaceableType.Geometry => Geometry.Create(placeable.Path, world, guid),
+            PlaceableType.BrushBox => CreateBrush(world, placeable, guid),
             _ => throw new InvalidDataException($"Unknown object type: {placeable.Type}")
         };
 
@@ -194,17 +234,29 @@ public static class LevelManager
                 
                 property.SetValue(obj, ConvertProperty(value, property.PropertyType));
             }
+
+            if (placeable.SimulatePhysics is { } enabled)
+            {
+                entity.SetSimulatePhysics(enabled);
+            }
+        }
+
+        if (placeable.RigidbodyMass is { } mass && obj.GetComponent<Rigidbody>() is { IsDestroyed: false } body)
+        {
+            body.Mass = mass;
         }
 
         obj.Transform.Position = placeable.Position;
         obj.Transform.Rotation = Quaternion.Normalize(placeable.Rotation);
         obj.Transform.Scale = placeable.Scale;
+        obj.Layer = placeable.Layer ?? obj.Layer;
+        obj.CollidesWith = placeable.CollidesWith ?? obj.CollidesWith;
         obj.SetActive(placeable.IsActive);
         
         return obj;
     }
 
-    private static BrushBox CreateBrush(World world, Placeable placement)
+    private static BrushBox CreateBrush(World world, Placeable placement, Guid? guid)
     {
         var data = placement.Brush ?? new BrushBoxData();
         
@@ -231,10 +283,11 @@ public static class LevelManager
             StbImageSharp.ImageResult.FromStream(stream, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
         }
         
-        var brush = world.Spawn<BrushBox>();
+        var brush = world.Spawn<BrushBox>(guid);
         
         brush.Size = data.Size;
         brush.Movable = data.Movable;
+        brush.SimulatePhysics = data.SimulatePhysics;
         brush.TextureName = data.Texture;
         brush.TextureFormat = data.TextureFormat;
         brush.TextureScale = data.TextureScale;
@@ -271,10 +324,15 @@ public static class LevelManager
 
     public static void Load(string name)
     {
+        Load(name, null, null);
+    }
+
+    internal static void Load(string name, IReadOnlySet<Guid>? removedObjects, Action<World>? restore)
+    {
         EnsureIdle();
         
         var level = Content.LoadLevel(name) ?? throw new FileNotFoundException($"Cannot load level '{name}'.");
-        Load(level);
+        Load(level, name, removedObjects, restore);
     }
 }
 

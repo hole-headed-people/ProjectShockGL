@@ -12,6 +12,9 @@ public class Physics
     
     private bool _isUpdating;
     
+    private BepuSimulation? _bepuSimulation;
+    private CollisionBroadPhase? _broadPhase;
+    
     private static Physics? _instance;
 
     private sealed class Contact(Collider a, Collider b, bool trigger)
@@ -41,29 +44,50 @@ public class Physics
         if (_instance != null && _instance._registered.Remove(collider))
         {
             _instance._colliders.Remove(collider);
+            if (_instance._colliders.Count == 0)
+            {
+                _instance._broadPhase?.Dispose();
+                _instance._broadPhase = null;
+            }
+            
+            if (_instance._bepuSimulation is { } simulation)
+            {
+                simulation.Remove(collider);
+                
+                _instance.ReleaseEmptyBepuSimulation();
+            }
         }
     }
 
-    public static void Update()
+    public static void Update(float deltaSeconds = 0f)
     {
-        _instance?.UpdateInternal();
+        _instance?.UpdateInternal(deltaSeconds);
+    }
+
+    private void ReleaseEmptyBepuSimulation()
+    {
+        if (_bepuSimulation is { HasDynamicBodies: false } simulation)
+        {
+            _bepuSimulation = null;
+            simulation.Dispose();
+        }
     }
 
     private static bool Alive(Collider collider)
     {
-        return !collider.IsDestroyed && !collider.Parent.IsDestroyed;
+        return !collider.IsDestroyed && !collider.Owner.IsDestroyed;
     }
 
     private static bool Enabled(Collider collider)
     {
-        return Alive(collider) && collider.IsEnabled && collider.Parent.IsActive;
+        return Alive(collider) && collider.IsEnabled && collider.Owner.IsActive;
     }
 
     private bool CanCollide(Collider a, Collider b)
     {
         return _registered.Contains(a) && _registered.Contains(b) && Enabled(a) && Enabled(b) &&
-               a.Parent != b.Parent && !(a.Parent.IsStatic && b.Parent.IsStatic) &&
-               (a.Parent.CollidesWith & b.Parent.Layer) != 0 && (b.Parent.CollidesWith & a.Parent.Layer) != 0;
+               a.Owner != b.Owner && !(a.Owner.IsStatic && b.Owner.IsStatic) &&
+               (a.Owner.CollidesWith & b.Owner.Layer) != 0 && (b.Owner.CollidesWith & a.Owner.Layer) != 0;
     }
 
     private bool ContactValid(Contact contact)
@@ -81,16 +105,16 @@ public class Physics
 
         if (contact.AEntered && Alive(contact.A))
         {
-            contact.A.NotifyExit(contact.B.Parent, contact.Trigger);
+            contact.A.NotifyExit(contact.B.Owner, contact.Trigger);
         }
 
         if (contact.BEntered && Alive(contact.B))
         {
-            contact.B.NotifyExit(contact.A.Parent, contact.Trigger);
+            contact.B.NotifyExit(contact.A.Owner, contact.Trigger);
         }
     }
 
-    private void UpdateInternal()
+    private void UpdateInternal(float deltaSeconds)
     {
         if (_isUpdating)
         {
@@ -102,8 +126,20 @@ public class Physics
         try
         {
             var snapshot = _colliders.ToArray();
+            
             if (!Application.IsEditor)
             {
+                if (float.IsFinite(deltaSeconds) && deltaSeconds > 0f)
+                {
+                    if (_bepuSimulation != null || snapshot.Any(BepuSimulation.IsDynamic))
+                    {
+                        _bepuSimulation ??= new BepuSimulation();
+                        _bepuSimulation.Update(snapshot, deltaSeconds);
+                        
+                        ReleaseEmptyBepuSimulation();
+                    }
+                }
+
                 foreach (var controller in snapshot.OfType<CharacterController>())
                 {
                     if (_registered.Contains(controller) && Enabled(controller))
@@ -115,23 +151,14 @@ public class Physics
             
             var current = new Dictionary<(Collider, Collider), bool>();
 
-            for (var i = 0; i < snapshot.Length; i++)
+            if (snapshot.Length > 1)
             {
-                var a = snapshot[i];
-
-                if (!Enabled(a))
+                _broadPhase ??= new CollisionBroadPhase();
+                foreach (var (i, j) in _broadPhase.FindPairs(snapshot, Enabled))
                 {
-                    continue;
-                }
-
-                var boundsA = a.GetWorldBounds();
-
-                for (var j = i + 1; j < snapshot.Length; j++)
-                {
+                    var a = snapshot[i];
                     var b = snapshot[j];
-
-                    if (!CanCollide(a, b) || !PhysicsHelper.AabbOverlap(boundsA, b.GetWorldBounds()) ||
-                        !a.Intersects(b))
+                    if (!CanCollide(a, b) || !a.Intersects(b))
                     {
                         continue;
                     }
@@ -145,8 +172,21 @@ public class Physics
                 if (!current.TryGetValue(key, out var trigger) || trigger != contact.Trigger || !ContactValid(contact))
                 {
                     EndContact(key, contact);
+                    continue;
                 }
 
+                if (contact.Trigger)
+                {
+                    if (contact.AEntered)
+                    {
+                        contact.A.Owner.OnTriggerStay(contact.B.Owner);
+                    }
+
+                    if (contact.BEntered && ContactValid(contact))
+                    {
+                        contact.B.Owner.OnTriggerStay(contact.A.Owner);
+                    }
+                }
             }
 
             foreach (var (key, trigger) in current)
@@ -166,12 +206,12 @@ public class Physics
                 _activePairs.Add(key, contact);
 
                 contact.AEntered = true;
-                contact.A.NotifyEnter(contact.B.Parent, trigger);
+                contact.A.NotifyEnter(contact.B.Owner, trigger);
 
                 if (ContactValid(contact))
                 {
                     contact.BEntered = true;
-                    contact.B.NotifyEnter(contact.A.Parent, trigger);
+                    contact.B.NotifyEnter(contact.A.Owner, trigger);
                 }
 
                 if (!ContactValid(contact))
@@ -193,7 +233,7 @@ public class Physics
 
     private static bool Matches(Collider collider, int layerMask, PhysicsQueryFilter filter)
     {
-        return Enabled(collider) && (collider.Parent.Layer & layerMask) != 0 && filter.Allows(collider);
+        return Enabled(collider) && (collider.Owner.Layer & layerMask) != 0 && filter.Allows(collider);
     }
 
     public static bool OverlapSphere(Vector3 center, float radius, int layerMask, out Collider? hit,
@@ -311,6 +351,32 @@ public class Physics
             return true;
         }
         return false;
+    }
+
+    internal static (Collider Collider, (Vector3 min, Vector3 max) Bounds)[] GetQueryCandidates(
+        (Vector3 min, Vector3 max) bounds, int layerMask, PhysicsQueryFilter filter)
+    {
+        if (_instance == null)
+        {
+            return [];
+        }
+
+        var candidates = new List<(Collider, (Vector3, Vector3))>();
+        foreach (var collider in _instance._colliders)
+        {
+            if (!Matches(collider, layerMask, filter))
+            {
+                continue;
+            }
+
+            var colliderBounds = collider.GetWorldBounds();
+            if (PhysicsHelper.AabbOverlap(bounds, colliderBounds))
+            {
+                candidates.Add((collider, colliderBounds));
+            }
+        }
+
+        return candidates.ToArray();
     }
 
     private static bool ValidRadius(float radius)

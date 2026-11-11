@@ -1,8 +1,7 @@
 using ProjectShockGL;
 using Silk.NET.Input;
-using Core_Object = ProjectShockGL.Core.Object;
 
-namespace ProjectDungeon.Core;
+namespace ProjectOxygenGL.Core;
 
 public enum InputMode
 {
@@ -12,6 +11,8 @@ public enum InputMode
 
 public class Player : Controller
 {
+    protected override bool IsSaveableByDefault => false;
+
     private InputMode _inputMode;
     private bool _isInputEnabled;
 
@@ -39,16 +40,22 @@ public class Player : Controller
     protected virtual void OnGameInput(){}
     protected virtual void OnUIInput(){}
     protected virtual void OnGameOrUIInput(){}
+    protected virtual void OnInputModeChanged(InputMode mode){}
+    protected virtual void OnInputEnabledChanged(bool isEnabled){}
 
     public void SetInputMode(InputMode mode)
     {
         _inputMode = mode;
         
         Input.SetCursorMode(mode == InputMode.Game ? CursorMode.Raw : CursorMode.Normal);
+        
+        OnInputModeChanged(_inputMode);
     }
 
     public void SetInputEnabled(bool isEnabled)
     {
         _isInputEnabled = isEnabled;
+        
+        OnInputEnabledChanged(_isInputEnabled);
     }
 }

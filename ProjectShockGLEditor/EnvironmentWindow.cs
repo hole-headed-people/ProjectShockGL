@@ -87,9 +87,31 @@ public static class EnvironmentWindow
 
             Finish("FogFar");
             ImGui.Separator();
+            var killY = Game.Instance.World.KillY;
+
+            if (ImGui.DragFloat("Kill Y", ref killY, 1f) && float.IsFinite(killY))
+            {
+                Game.Instance.World.KillY = killY;
+                Changed("KillY");
+            }
+
+            Finish("KillY");
+
+            var saveLevelState = Game.Instance.World.SaveLevelState;
+
+            if (ImGui.Checkbox("Save Level State", ref saveLevelState))
+            {
+                Game.Instance.World.SaveLevelState = saveLevelState;
+                Changed("SaveLevelState", true);
+            }
+
+            ImGui.Separator();
             if (ImGui.Button("Reset to defaults"))
             {
+                var defaults = new Level();
                 Environment.Reset();
+                Game.Instance.World.KillY = defaults.KillY;
+                Game.Instance.World.SaveLevelState = defaults.SaveLevelState;
                 Changed("Reset", true);
             }
             
@@ -99,10 +121,21 @@ public static class EnvironmentWindow
         ImGui.End();
     }
 
-    private static string Capture() => JsonConvert.SerializeObject(Environment.Capture(), JsonHelper.GetSettings());
+    private static string Capture() => JsonConvert.SerializeObject(new Level
+    {
+        Environment = Environment.Capture(),
+        KillY = Game.Instance.World.KillY,
+        SaveLevelState = Game.Instance.World.SaveLevelState
+    }, JsonHelper.GetSettings());
 
-    private static void Apply(string state) => Environment.Apply(
-        JsonConvert.DeserializeObject<EnvironmentData>(state, JsonHelper.GetSettings())!);
+    private static void Apply(string state)
+    {
+        var level = JsonConvert.DeserializeObject<Level>(state, JsonHelper.GetSettings())!;
+        level.Validate();
+        Environment.Apply(level.Environment ?? new EnvironmentData());
+        Game.Instance.World.KillY = level.KillY;
+        Game.Instance.World.SaveLevelState = level.SaveLevelState;
+    }
 
     private static Vector3 ToVector(Color color)
     {

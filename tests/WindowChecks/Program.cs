@@ -6,7 +6,7 @@ using Silk.NET.Windowing;
 
 WindowOptions Options(string settings)
 {
-    File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "Settings.ini"), settings);
+    File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "GameSettings.ini"), settings);
     Settings.Initialize();
     var method = typeof(Application).GetMethod("CreateWindowOptions", BindingFlags.NonPublic | BindingFlags.Static)!;
     try { return (WindowOptions)method.Invoke(null, null)!; }
@@ -17,6 +17,15 @@ WindowOptions Options(string settings)
     }
 }
 void Check(bool condition) { if (!condition) throw new Exception("Window mode check failed."); }
+File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "GameSettings.ini"), "[Game]\nName=Game configuration\n");
+File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "EditorSettings.ini"), "[Game]\nName=Editor configuration\n");
+Settings.Initialize(isEditor: true);
+Check(Settings.GetString("Game", "Name", "") == "Editor configuration");
+Settings.Initialize(isEditor: false);
+Check(Settings.GetString("Game", "Name", "") == "Game configuration");
+Settings.Initialize();
+Check(Settings.GetString("Game", "Name", "") == "Game configuration");
+Console.WriteLine("PASS: Game and editor settings are independent and the default selects game settings");
 var defaults = Options("");
 Check(defaults.Size == new Vector2D<int>(1024, 768) && defaults.WindowBorder == WindowBorder.Fixed);
 var fixedWindow = Options("[Window]\nMode=Windowed\nWidth=800\nHeight=600\nCanResize=false\n");
@@ -48,3 +57,4 @@ if (args.Contains("--native"))
     Console.WriteLine($"PASS: Hidden Borderless window matches primary monitor {window.Size}, at {window.Position}, without exclusive Fullscreen");
 }
 Console.WriteLine("All window checks passed.");
+

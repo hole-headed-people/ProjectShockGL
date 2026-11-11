@@ -6,6 +6,8 @@ namespace ProjectShockGL.UI;
 
 public class Widget
 {
+    private bool _isVisible = true;
+    
     private Canvas? _canvas;
     private readonly List<Widget> _children = [];
     
@@ -13,7 +15,23 @@ public class Widget
     public Widget? Parent { get; private set; }
     public IReadOnlyList<Widget> Children { get; }
     public RectTransform Rect { get; }
-    public bool Visible { get; set; } = true;
+
+    public bool Visible
+    {
+        get => _isVisible;
+        set
+        {
+            if (_isVisible == value)
+            {
+                return;
+            }
+            
+            _isVisible = value;
+            
+            OnVisibleChanged(_isVisible);
+        }
+    }
+    
     public bool IsEnabled { get; set; } = true;
     public bool HitTestVisible { get; set; } = true;
     public bool IsMouseOver { get; internal set; }
@@ -41,6 +59,22 @@ public class Widget
         }
         
         OnCreate();
+    }
+    
+    
+    public T Add<T>(Type type) where T : Widget
+    {
+        ObjectDisposedException.ThrowIf(IsDestroyed || Canvas.IsDestroyed, this);
+
+        if (!typeof(T).IsAssignableFrom(type))
+        {
+            throw new ArgumentException($"Type {type} is not assignable to {typeof(T)}", nameof(type));
+        }
+    
+        var widget = (T)Activator.CreateInstance(type)!;
+        widget.Initialize(Canvas, this);
+    
+        return widget;
     }
 
     public T Add<T>() where T : Widget, new()
@@ -183,6 +217,7 @@ public class Widget
     protected virtual void OnCreate() { }
     protected virtual void OnUpdate(float deltaSeconds) { }
     protected virtual void OnDraw(Graphics graphics) { }
+    protected virtual void OnVisibleChanged(bool isVisible) { }
     protected virtual void OnDestroy() { }
 
     internal void MouseEnter() => OnMouseEnter();

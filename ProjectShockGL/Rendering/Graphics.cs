@@ -114,13 +114,13 @@ public class Graphics
     public void DrawBoxWireframe(
         Vector3 min, Vector3 max,
         Color color,
-        float thickness = 0.02f)
+        float thickness = 0.02f, bool ignoreDepth = false)
     {
-        DrawBoxWireframe(min, max, Matrix4x4.Identity, color, thickness);
+        DrawBoxWireframe(min, max, Matrix4x4.Identity, color, thickness, ignoreDepth);
     }
 
     public void DrawBoxWireframe(Vector3 min, Vector3 max, Matrix4x4 transform,
-        Color color, float thickness = 0.02f)
+        Color color, float thickness = 0.02f, bool ignoreDepth = false)
     {
         var corners = new Vector3[]
         {
@@ -146,7 +146,7 @@ public class Graphics
 
         foreach (var (a, b) in edges)
         {
-            DrawLine(corners[a], corners[b], Content.GetWhitePixel(), color, thickness);
+            DrawLine(corners[a], corners[b], Content.GetWhitePixel(), color, thickness, ignoreDepth: ignoreDepth);
         }
     }
 

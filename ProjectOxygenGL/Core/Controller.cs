@@ -1,6 +1,6 @@
 ﻿using Object = ProjectShockGL.Core.Object;
 
-namespace ProjectDungeon.Core;
+namespace ProjectOxygenGL.Core;
 
 public class Controller : Object
 {
