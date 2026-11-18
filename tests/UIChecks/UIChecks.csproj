@@ -8,4 +8,9 @@
   <ItemGroup>
     <ProjectReference Include="../../ProjectShockGL/ProjectShockGL.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="../../StarterContent/Shaders/PostProcess.vert" Link="TestContent/Shaders/PostProcess.vert" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../StarterContent/Shaders/PostProcess.frag" Link="TestContent/Shaders/PostProcess.frag" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../StarterContent/PostProcessProfiles/Default.json" Link="TestContent/PostProcessProfiles/Default.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

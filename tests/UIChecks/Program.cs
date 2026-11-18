@@ -3,6 +3,9 @@ using ProjectShockGL;
 using ProjectShockGL.Rendering;
 using ProjectShockGL.UI;
 using Silk.NET.Input;
+using Silk.NET.Maths;
+using Silk.NET.OpenGL;
+using Silk.NET.Windowing;
 
 Run("Button colors, left release, cancellation and callback mutation", () =>
 {
@@ -218,14 +221,44 @@ Run("Game loads, updates and destroys its configured UI", () =>
 {
     Configure("ConfiguredCanvas, UIChecks");
     File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "Layers.ini"), "[Layers]\n0=Default\n");
+    // Game.Load applies the postprocess profile, so Content needs a live GL context first.
+    var options = WindowOptions.Default;
+    options.Size = new Vector2D<int>(800, 600);
+    options.IsVisible = false;
+    options.API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.Default, new APIVersion(3, 3));
+    using var window = Window.Create(options);
+    window.Initialize();
+    using var gl = window.CreateOpenGL();
+    Content.Initialize(gl);
+
     var game = new TestGame();
-    game.LoadForTest();
-    var canvas = (ConfiguredCanvas)game.UIManager.Canvas;
-    var probe = canvas.Add<Probe>();
-    game.UpdateForTest();
-    Check(probe.Updates == 1);
-    game.UnloadForTest();
-    Check(canvas.IsDestroyed && probe.Destroys == 1);
+    var loaded = false;
+    try
+    {
+        Check(Content.Path == Path.Combine(AppContext.BaseDirectory, "TestContent"));
+        game.LoadForTest();
+        loaded = true;
+        Check(PostProcessSettings.Enabled && PostProcessSettings.Shader is { Handle: not 0 });
+        var canvas = (ConfiguredCanvas)game.UIManager.Canvas;
+        var probe = canvas.Add<Probe>();
+        game.UpdateForTest();
+        Check(probe.Updates == 1);
+        game.UnloadForTest();
+        loaded = false;
+        Check(canvas.IsDestroyed && probe.Destroys == 1);
+    }
+    finally
+    {
+        try
+        {
+            if (loaded) game.UnloadForTest();
+        }
+        finally
+        {
+            PostProcessSettings.Reset();
+            Content.UnloadAll();
+        }
+    }
 });
 
 Run("Mouse enter/exit target only the topmost widget, without repeated enter", () =>
@@ -435,7 +468,7 @@ static void Mouse(ProjectShockGL.UI.Pointer pointer, Vector2 position, params Mo
 static void Configure(string canvasClass)
 {
     File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "GameSettings.ini"),
-        $"[Window]\nWidth=800\nHeight=600\n[Game]\nUICanvasClass={canvasClass}\n");
+        $"[Window]\nWidth=800\nHeight=600\n[Game]\nUICanvasClass={canvasClass}\n[Content]\nPath=TestContent\n");
     Settings.Initialize();
 }
 
