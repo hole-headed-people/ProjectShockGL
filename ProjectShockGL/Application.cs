@@ -19,6 +19,7 @@ public static class Application
     public static event Action<float>? BeforeRender;
     internal static event Action? RenderCaptures;
     public static event Action<Graphics>? Render;
+    public static event Action<Graphics>? RenderOverlayBackground;
     public static event Action<Graphics>? RenderOverlay;
     public static event Action<Graphics>? RenderUI;
     public static event Action<float>? AfterRender;
@@ -254,6 +255,7 @@ public static class Application
         try { Render?.Invoke(_graphics); }
         finally { _graphics.EndWorld(); }
 
+        RenderOverlayBackground?.Invoke(_graphics);
         RenderOverlay?.Invoke(_graphics);
 
         RenderUI?.Invoke(_graphics);

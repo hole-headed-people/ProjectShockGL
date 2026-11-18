@@ -49,6 +49,7 @@ public static class Editor
         Application.Load += SceneCamera.Initialize;
         Application.Update += OnUpdate;
         Application.BeforeRender += OnBeforeRender;
+        Application.RenderOverlayBackground += OnRenderBackground;
         Application.RenderOverlay += OnRender;
         Application.AfterRender += OnAfterRender;
         Application.Resized += OnResized;
@@ -157,10 +158,14 @@ public static class Editor
         _imGui.Update(deltaTime);
     }
 
-    private static void OnRender(Graphics graphics)
+    private static void OnRenderBackground(Graphics graphics)
     {
         UIEditor.Render(graphics);
         SceneGrid.Render(graphics);
+    }
+
+    private static void OnRender(Graphics graphics)
+    {
         ProjectShockGL.Core.Game.Instance.World.DebugRenderSelected(new DebugDraw(graphics), Selection.Objects);
         
         foreach (var selected in Selection.Targets.Where(o => o.IsEditorVisible))

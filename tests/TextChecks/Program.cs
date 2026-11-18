@@ -1508,7 +1508,7 @@ void Render()
         Check(commands.Count == 2); // Repeated Load reuses the debug components.
         var meshCommand = commands.OfType<MeshCommand>().Single();
         var billboardCommand = commands.OfType<BillboardCommand>().Single();
-        Check(!meshCommand.IgnoreDepth && !billboardCommand.IgnoreDepth);
+        Check(meshCommand.IgnoreDepth && billboardCommand.IgnoreDepth);
         meshCommand.Color = billboardCommand.Color = Color.Red;
         meshCommand.Lit = false;
         meshCommand.Texture = billboardCommand.Texture = Content.GetWhitePixel();
@@ -1527,9 +1527,9 @@ void Render()
         foreach (var command in commands)
         {
             graphics.BeginDraw(debugCamera);
+            typeof(ProjectShockGLEditor.Editor).GetMethod("OnRenderBackground",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!.Invoke(null, [graphics]);
             command.Execute(graphics);
-            Check(Pixel()[0] > 240);
-            ProjectShockGLEditor.SceneGrid.Render(graphics);
             var pixel = Pixel();
             Check(pixel[0] > 240 && pixel[1] < 10 && pixel[2] < 10);
             graphics.EndDraw();
@@ -1540,11 +1540,11 @@ void Render()
                 Content.GetWhitePixel(), Color.Blue);
             command.Execute(graphics);
             pixel = Pixel();
-            Check(pixel[2] > 240 && pixel[0] < 10);
+            Check(pixel[0] > 240 && pixel[2] < 10);
             graphics.EndDraw();
         }
         Check(gl.GetError() == GLEnum.NoError);
-        Console.WriteLine("PASS: Entity debug assets do not replace gameplay meshes, respect walls and occlude the grid with mesh/billboard depth");
+        Console.WriteLine("PASS: Entity debug assets do not replace gameplay meshes and render over walls and the editor background grid");
     }
     finally
     {

@@ -52,7 +52,7 @@ public class Entity : Object
             _debugBillboardComponent ??= AddComponent<BillboardComponent>();
             
             _debugBillboardComponent.IsDebug = true;
-            _debugBillboardComponent.IgnoreDepth = false;
+            _debugBillboardComponent.IgnoreDepth = true;
             _debugBillboardComponent.UseParentScale = false;
             
             _debugBillboardComponent.RenderOrder = 1000;
@@ -65,7 +65,7 @@ public class Entity : Object
             _debugMeshComponent ??= AddComponent<MeshComponent>();
             
             _debugMeshComponent.IsDebug = true;
-            _debugMeshComponent.IgnoreDepth = false;
+            _debugMeshComponent.IgnoreDepth = true;
             _debugMeshComponent.UseParentScale = false;
             
             _debugMeshComponent.RenderOrder = 500;
