@@ -17,6 +17,15 @@ public class Object
     private bool _hasStarted;
     private bool _isReleasing;
     private bool? _saveable;
+
+    private readonly HashSet<Object> _attachedObjects = [];
+    
+    private Vector3 _attachmentPosition;
+    private Quaternion _attachmentRotation = Quaternion.Identity;
+    
+    private bool _applyingAttachment;
+
+    public Object? AttachmentTarget { get; private set; }
     
     private (Vector3 min, Vector3 max)? _cachedWorldBounds;
 
@@ -28,6 +37,7 @@ public class Object
     
     public Guid Guid { get; internal set; }
     internal World? OwningWorld { get; set; }
+    public World World => OwningWorld ?? throw new InvalidOperationException("The object does not belong to a World.");
     internal ObjectSpawnSource? SpawnSource { get; set; }
     
     public virtual bool Saveable
@@ -39,7 +49,7 @@ public class Object
     protected virtual bool IsSaveableByDefault => false;
 
     public List<string> EditorGroups { get; } = [];
-    public bool IsEditorVisible => !Application.IsEditor || !EditorGroups.Any(World.HiddenEditorGroups.Contains);
+    public bool IsEditorVisible => !Application.IsEditor || !EditorGroups.Any(ProjectShockGL.World.HiddenEditorGroups.Contains);
     
     protected virtual bool CanBeStatic => true;
     protected virtual bool AlwaysStatic => false;
@@ -47,7 +57,7 @@ public class Object
 
     public Object()
     {
-        Transform = new Transform(() => !IsRuntimeStaticLocked, () => _cachedWorldBounds = null);
+        Transform = new Transform(() => !IsRuntimeStaticLocked, OnTransformChanged);
     }
 
     public bool IsStatic
@@ -58,6 +68,11 @@ public class Object
 
     protected bool ConfigureStatic(bool value)
     {
+        if (value && AttachmentTarget != null)
+        {
+            throw new InvalidOperationException("An attached object cannot be static.");
+        }
+
         if (value && !CanBeStatic)
         {
             throw new InvalidOperationException($"{GetType().Name} cannot be static.");
@@ -268,6 +283,8 @@ public class Object
         }
         
         IsDestroyed = true;
+        Detach();
+        foreach (var attached in _attachedObjects.ToArray()) attached.Detach();
         
         OwningWorld?.RecordRemoval(this);
         OwningWorld = null;
@@ -443,6 +460,7 @@ public class Object
         
         component.Initialize(this);
         _components.Add(component);
+        
         try
         {
             component.Create();
@@ -451,11 +469,16 @@ public class Object
         catch (Exception creationError)
         {
             _components.Remove(component);
+            
             try
             {
                 component.Release();
             }
-            catch (Exception cleanupError) { throw new AggregateException(creationError, cleanupError); }
+            catch (Exception cleanupError)
+            {
+                throw new AggregateException(creationError, cleanupError);
+            }
+            
             throw;
         }
 
@@ -492,16 +515,25 @@ public class Object
         }
 
         _components.Remove(component);
+        
         component.IsEnabled = false;
         component.Release();
     }
 
     internal void RenderCameraCaptures(World world)
     {
-        if (IsDestroyed || !IsActive || !IsEditorVisible) return;
+        if (IsDestroyed || !IsActive || !IsEditorVisible)
+        {
+            return;
+        }
+        
         foreach (var capture in _components.OfType<CameraCaptureComponent>().ToArray())
         {
-            if (IsDestroyed || !IsActive) break;
+            if (IsDestroyed || !IsActive)
+            {
+                break;
+            }
+            
             capture.Capture(world);
         }
     }
@@ -510,6 +542,128 @@ public class Object
         return _components.OfType<T>().FirstOrDefault();
     }
 
+    public void AttachTo(Object target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ObjectDisposedException.ThrowIf(IsDestroyed, this);
+        ObjectDisposedException.ThrowIf(target.IsDestroyed, target);
+
+        if (OwningWorld == null || OwningWorld != target.OwningWorld)
+        {
+            throw new InvalidOperationException("Attached objects must belong to the same World.");
+        }
+        
+        if (IsStatic)
+        {
+            throw new InvalidOperationException("A static object cannot be attached.");
+        }
+        
+        if (GetComponent<Rigidbody>() is { IsEnabled: true, IsDestroyed: false })
+        {
+            throw new InvalidOperationException("Disable Rigidbody before attaching the object.");
+        }
+        
+        for (var current = target; current != null; current = current.AttachmentTarget)
+        {
+            if (ReferenceEquals(current, this))
+            {
+                throw new InvalidOperationException("Attachment cannot create a cycle.");
+            }
+        }
+
+        var rotation = Quaternion.Normalize(target.Transform.Rotation);
+        var inverse = Quaternion.Inverse(rotation);
+        var position = Vector3.Transform(Transform.Position - target.Transform.Position, inverse);
+        var relativeRotation = Quaternion.Normalize(inverse * Transform.Rotation);
+        
+        Detach();
+        
+        AttachmentTarget = target;
+        
+        _attachmentPosition = position;
+        _attachmentRotation = relativeRotation;
+        
+        target._attachedObjects.Add(this);
+    }
+
+    [Input("AttachTo")]
+    public void AttachTo(string targetName)
+    {
+        ObjectDisposedException.ThrowIf(IsDestroyed, this);
+        
+        var target = string.IsNullOrWhiteSpace(targetName) ? null : OwningWorld?.Find(targetName);
+        
+        if (target == null)
+        {
+            Log.PrintWarning($"Object '{Name}': attachment target '{targetName}' was not found.");
+            return;
+        }
+        
+        AttachTo(target);
+    }
+
+    [Input("Detach")]
+    public void Detach()
+    {
+        AttachmentTarget?._attachedObjects.Remove(this);
+        AttachmentTarget = null;
+        
+        _attachmentPosition = Vector3.Zero;
+        _attachmentRotation = Quaternion.Identity;
+    }
+
+    private void OnTransformChanged()
+    {
+        _cachedWorldBounds = null;
+
+        if (_applyingAttachment)
+        {
+            return;
+        }
+        
+        if (AttachmentTarget is { } target)
+        {
+            var inverse = Quaternion.Inverse(Quaternion.Normalize(target.Transform.Rotation));
+            
+            _attachmentPosition = Vector3.Transform(Transform.Position - target.Transform.Position, inverse);
+            _attachmentRotation = Quaternion.Normalize(inverse * Transform.Rotation);
+        }
+        
+        UpdateAttachedObjects();
+    }
+
+    private void UpdateAttachedObjects()
+    {
+        foreach (var attached in _attachedObjects)
+        {
+            attached.UpdateAttachment();
+        }
+    }
+
+    private void UpdateAttachment()
+    {
+        if (AttachmentTarget is not { } target || IsDestroyed)
+        {
+            return;
+        }
+        
+        _applyingAttachment = true;
+        
+        try
+        {
+            var rotation = Quaternion.Normalize(target.Transform.Rotation);
+            
+            Transform.Position = target.Transform.Position + Vector3.Transform(_attachmentPosition, rotation);
+            Transform.Rotation = Quaternion.Normalize(rotation * _attachmentRotation);
+        }
+        finally
+        {
+            _applyingAttachment = false;
+        }
+        
+        UpdateAttachedObjects();
+    }
+    
     [Input("SetActive")]
     public void SetActive(bool isActive)
     {
@@ -519,6 +673,7 @@ public class Object
         }
         
         _isActive = isActive;
+        
         foreach (var component in _components.ToArray())
         {
             component.OnOwnerActiveChanged(isActive);

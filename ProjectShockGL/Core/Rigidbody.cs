@@ -10,6 +10,27 @@ public sealed class Rigidbody : Component
     private Vector3 _linearVelocity;
     private Vector3 _angularVelocity;
 
+    public override bool IsEnabled
+    {
+        get => base.IsEnabled;
+        set
+        {
+            if (value && Owner?.AttachmentTarget != null)
+            {
+                throw new InvalidOperationException("Detach the object before enabling Rigidbody.");
+            }
+            base.IsEnabled = value;
+        }
+    }
+
+    public override void Create()
+    {
+        base.Create();
+        if (IsEnabled && Owner.AttachmentTarget != null)
+        {
+            throw new InvalidOperationException("Cannot add an enabled Rigidbody to an attached object.");
+        }
+    }
     public float Mass
     {
         get => _mass;

@@ -40,6 +40,156 @@ Content.Initialize(null!); // Fixture assets deliberately contain no GPU resourc
 Game.Initialize();
 ((CheckGame)Game.Instance).LoadForTest();
 
+Run("Object.World refers to its actual owner during Create and supports local spawn/find/destroy", () =>
+{
+    var world = new World();
+    try
+    {
+        var obj = world.Spawn<WorldAccessProbe>();
+        Check(ReferenceEquals(obj.World, world) && ReferenceEquals(obj.WorldAtCreate, world));
+        Check(obj.Spawned != null && ReferenceEquals(obj.Spawned.World, world));
+        Check(obj.World.Find("CreatedInsideCreate") == obj.Spawned);
+        obj.World.Destroy(obj.Spawned);
+        Check(obj.Spawned!.IsDestroyed);
+        Throws(() => _ = obj.Spawned.World);
+        var removed = (HashSet<Guid>)typeof(World).GetProperty("RemovedSaveableObjects", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(world)!;
+        var removals = removed.ToHashSet();
+        Throws(() => world.Spawn<FailingWorldAccessProbe>());
+        Check(removed.SetEquals(removals));
+        world.Destroy(obj);
+        Throws(() => _ = obj.World);
+        Throws(() => _ = new GameObject().World);
+    }
+    finally { world.Clear(); }
+});
+Run("AttachTo preserves world pose, follows rotations without scale, supports chains and detaches without jumps", () =>
+{
+    var world = new World();
+    try
+    {
+        var parent = world.Spawn<GameObject>(); parent.Name = "Box";
+        parent.Transform.Position = new Vector3(3, 1, 4);
+        parent.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, .7f);
+        parent.Transform.Scale = new Vector3(3, 0, -2);
+        var child = world.Spawn<GameObject>();
+        child.Transform.Position = new Vector3(5, 3, 1);
+        child.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, .3f);
+        child.Transform.Scale = new Vector3(2, 3, 4);
+        var position = child.Transform.Position; var rotation = child.Transform.Rotation;
+        var local = Vector3.Transform(position - parent.Transform.Position, Quaternion.Inverse(parent.Transform.Rotation));
+        var localRotation = Quaternion.Inverse(parent.Transform.Rotation) * rotation;
+        child.AttachTo(parent);
+        Check(child.AttachmentTarget == parent && child.Transform.Position == position && child.Transform.Rotation == rotation);
+        parent.Transform.Position += Vector3.One;
+        Check(Vector3.Distance(child.Transform.Position, position + Vector3.One) < .0001f);
+        parent.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitX, .5f);
+        Check(Vector3.Distance(child.Transform.Position, parent.Transform.Position + Vector3.Transform(local, parent.Transform.Rotation)) < .0001f);
+        Check(Math.Abs(Quaternion.Dot(child.Transform.Rotation, parent.Transform.Rotation * localRotation)) > .9999f);
+        position = child.Transform.Position;
+        parent.Transform.Scale = new Vector3(100);
+        Check(child.Transform.Position == position && child.Transform.Scale == new Vector3(2, 3, 4));
+        child.Transform.Position = new Vector3(7, 8, 9);
+        child.Transform.Rotation = Quaternion.Identity;
+        var grandchild = world.Spawn<GameObject>();
+        grandchild.Transform.Position = child.Transform.Position + Vector3.UnitY;
+        grandchild.AttachTo(child);
+        parent.Transform.Position += Vector3.UnitX;
+        Check(Vector3.Distance(child.Transform.Position, new Vector3(8, 8, 9)) < .0001f);
+        Check(Vector3.Distance(grandchild.Transform.Position, new Vector3(8, 9, 9)) < .0001f);
+        var other = world.Spawn<GameObject>(); other.Name = "Other";
+        position = child.Transform.Position; rotation = child.Transform.Rotation;
+        InputInvoker.Invoke(child, "AttachTo", "Other");
+        Check(child.AttachmentTarget == other && child.Transform.Position == position && child.Transform.Rotation == rotation);
+        other.SetActive(false);
+        other.Transform.Position += Vector3.UnitZ;
+        Check(Vector3.Distance(child.Transform.Position, position + Vector3.UnitZ) < .0001f && child.IsActive);
+        InputInvoker.Invoke(child, "Detach", "");
+        position = child.Transform.Position;
+        other.Transform.Position += Vector3.One;
+        Check(child.AttachmentTarget == null && child.Transform.Position == position);
+        child.AttachTo(parent);
+        position = child.Transform.Position;
+        world.Destroy(parent);
+        Check(child.AttachmentTarget == null && !child.IsDestroyed && child.Transform.Position == position &&
+            grandchild.AttachmentTarget == child);
+        world.Destroy(child);
+        Check(grandchild.AttachmentTarget == null && !grandchild.IsDestroyed);
+    }
+    finally { world.Clear(); }
+});
+
+Run("Attachments reject cycles, other worlds, static children and enabled Rigidbody without breaking existing links", () =>
+{
+    var world = new World(); var otherWorld = new World();
+    try
+    {
+        var a = world.Spawn<GameObject>(); a.Name = "A";
+        var b = world.Spawn<GameObject>(); var c = world.Spawn<GameObject>();
+        b.AttachTo(a); c.AttachTo(b);
+        Throws(() => a.AttachTo(c));
+        Throws(() => b.AttachTo(b));
+        Throws(() => b.AttachTo(otherWorld.Spawn<GameObject>()));
+        Check(b.AttachmentTarget == a && c.AttachmentTarget == b);
+        InputInvoker.Invoke(b, "AttachTo", "Missing");
+        Check(b.AttachmentTarget == a);
+        Throws(() => b.IsStatic = true);
+        var stationary = world.Spawn<GameObject>(); stationary.IsStatic = true;
+        Throws(() => stationary.AttachTo(a));
+        Throws(() => b.AddComponent<Rigidbody>());
+        Check(b.GetComponent<Rigidbody>() == null && b.AttachmentTarget == a);
+        var moving = world.Spawn<GameObject>();
+        var body = moving.AddComponent<Rigidbody>();
+        Throws(() => moving.AttachTo(a));
+        body.IsEnabled = false; moving.AttachTo(a);
+        Throws(() => body.IsEnabled = true);
+        Check(!body.IsEnabled && moving.AttachmentTarget == a);
+        moving.Detach(); body.IsEnabled = true;
+        Check(body.IsEnabled);
+    }
+    finally { world.Clear(); otherWorld.Clear(); }
+});
+
+Run("A camera attached to a Bepu box follows the current physics pose before camera synchronization", () =>
+{
+    var world = new World();
+    var active = ProjectShockGL.Rendering.Camera.Active;
+    try
+    {
+        var box = world.Spawn<GameObject>();
+        box.Transform.Position = new Vector3(0, 5, 0);
+        box.AddComponent<BoxCollider>();
+        var body = box.AddComponent<Rigidbody>();
+        body.AngularVelocity = Vector3.UnitZ;
+        var cameraOwner = world.Spawn<GameObject>();
+        cameraOwner.Transform.Position = new Vector3(0, 6, 0);
+        var camera = cameraOwner.AddComponent<CameraComponent>();
+        cameraOwner.AttachTo(box);
+        world.Update(0);
+        for (var i = 0; i < 30; i++) Physics.Update(1f / 60);
+        var expected = box.Transform.Position + Vector3.Transform(Vector3.UnitY, box.Transform.Rotation);
+        Check(box.Transform.Position.Y < 5 && Vector3.Distance(cameraOwner.Transform.Position, expected) < .0001f);
+        Check(Math.Abs(Quaternion.Dot(box.Transform.Rotation, Quaternion.Identity)) < .999f);
+        typeof(ProjectShockGL.Rendering.Camera).GetMethod("SynchronizeComponents",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!.Invoke(null, null);
+        Check(Vector3.Distance(camera.Camera.Transform.Position, expected) < .0001f &&
+            Math.Abs(Quaternion.Dot(camera.Camera.Transform.Rotation, box.Transform.Rotation)) > .9999f);
+        Check(ProjectShockGL.Rendering.Camera.Active == active);
+    }
+    finally { world.Clear(); }
+});
+
+RunScene("Runtime attachment links are not saved in map properties", () =>
+{
+    var parent = SceneObjects.Create(PlaceableType.Entity, "Check");
+    var child = SceneObjects.Create(PlaceableType.Entity, "Check");
+    child.Transform.Position = Vector3.One;
+    child.AttachTo(parent);
+    var path = Path.Combine(testRoot, "without-attachments.map");
+    EditorLevelManager.SaveCurrentLevel(path);
+    Check(!File.ReadAllText(path).Contains("AttachmentTarget"));
+    EditorLevelManager.OpenLevel(path);
+    Check(Game.Instance.World.GetAllObjects(true).All(obj => obj.AttachmentTarget == null));
+});
 Run("Saveable defaults exclude geometry and players without excluding other characters", () =>
 {
     Check(!new GameObject().Saveable && !new BrushBox().Saveable);
@@ -3715,3 +3865,26 @@ public sealed class ThrowingDeleteEntity : CheckEntity
 
 
 
+
+public sealed class WorldAccessProbe : GameObject
+{
+    public World? WorldAtCreate;
+    public GameObject? Spawned;
+    public override void Create()
+    {
+        base.Create();
+        WorldAtCreate = World;
+        Spawned = World.Spawn<GameObject>();
+        Spawned.Name = "CreatedInsideCreate";
+    }
+}
+
+public sealed class FailingWorldAccessProbe : Entity
+{
+    public override void Create()
+    {
+        base.Create();
+        _ = World;
+        throw new InvalidOperationException("Creation failure");
+    }
+}

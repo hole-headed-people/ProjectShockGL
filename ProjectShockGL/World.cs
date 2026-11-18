@@ -234,9 +234,18 @@ public class World
     {
         obj.Guid = guid is { } id && id != Guid.Empty ? id : Guid.NewGuid();
         obj.SpawnSource = source;
+        obj.OwningWorld = this;
         _spawnedObjects.Enqueue(obj);
-        
-        CreateObject(obj);
+
+        try
+        {
+            CreateObject(obj);
+        }
+        catch
+        {
+            RemovedSaveableObjects.Remove(obj.Guid);
+            throw;
+        }
 
         if (obj.IsDestroyed)
         {
