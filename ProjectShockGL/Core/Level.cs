@@ -1,4 +1,4 @@
-﻿namespace ProjectShockGL.Core;
+namespace ProjectShockGL.Core;
 
 public class Level
 {
@@ -6,6 +6,7 @@ public class Level
     public bool SaveLevelState { get; init; } = true;
     public EnvironmentData? Environment { get; init; } = new();
     public Placeable[] Placeables { get; init; } = [];
+    public DetailPlacement[] Details { get; init; } = [];
     public EditorGroupData[] Groups { get; init; } = [];
 
     public void Validate()
@@ -15,6 +16,18 @@ public class Level
         if (!float.IsFinite(KillY))
         {
             throw new InvalidDataException("KillY must be finite.");
+        }
+
+        if (Details == null) throw new InvalidDataException("Map has no Details array.");
+        var detailIds = new HashSet<Guid>();
+        foreach (var detail in Details)
+        {
+            if (detail == null) throw new InvalidDataException("Map contains a null Detail.");
+            detail.Validate();
+            if (!detailIds.Add(detail.Id))
+            {
+                throw new InvalidDataException($"Map has more than one Detail with ID '{detail.Id}'.");
+            }
         }
 
         var guids = new HashSet<Guid>();

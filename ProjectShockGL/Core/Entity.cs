@@ -1,4 +1,4 @@
-﻿namespace ProjectShockGL.Core;
+namespace ProjectShockGL.Core;
 
 public class Entity : Object
 {
@@ -6,6 +6,8 @@ public class Entity : Object
     
     private bool _belowKillY;
     
+    protected sealed override bool CanBeStatic => false;
+    protected sealed override bool AlwaysStatic => false;
     protected override bool IsSaveableByDefault => true;
     
     public string Path { get; private set; } = "";

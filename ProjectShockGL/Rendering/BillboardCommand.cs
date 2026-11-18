@@ -4,6 +4,7 @@ namespace ProjectShockGL.Rendering;
 
 public class BillboardCommand : RenderCommand
 {
+    public BillboardMode Mode { get; set; } = BillboardMode.ViewAligned;
     public Vector3 Position { get; set; }
     public Vector2 Size { get; set; }
     public Texture? Texture { get; set; }
@@ -17,7 +18,7 @@ public class BillboardCommand : RenderCommand
     {
         if (Texture != null)
         {
-            graphics.DrawBillboard(Position, Size, Texture, Color, Lit, IgnoreDepth, Shader, ShaderParameters);
+            graphics.DrawBillboard(Position, Size, Texture, Color, Lit, IgnoreDepth, Shader, ShaderParameters, Mode);
         }
     }
 }

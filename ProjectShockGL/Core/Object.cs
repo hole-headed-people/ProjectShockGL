@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using ProjectShockGL.Rendering;
 
 namespace ProjectShockGL.Core;
@@ -11,6 +11,7 @@ public class Object
     private readonly List<Component> _components = [];
 
     private bool _isStatic;
+    private bool _placementComplete;
     private bool _isActive = true;
     private bool _activityInitialized;
     private bool _hasStarted;
@@ -20,7 +21,7 @@ public class Object
     private (Vector3 min, Vector3 max)? _cachedWorldBounds;
 
     public string Name { get; set; } = string.Empty;
-    public Transform Transform { get; } = new();
+    public Transform Transform { get; }
     public Collider? Collider { get; private set; }
     public int Layer { get; set; } = 1;
     public int CollidesWith { get; set; } = ~0;
@@ -40,26 +41,53 @@ public class Object
     public List<string> EditorGroups { get; } = [];
     public bool IsEditorVisible => !Application.IsEditor || !EditorGroups.Any(World.HiddenEditorGroups.Contains);
     
+    protected virtual bool CanBeStatic => true;
+    protected virtual bool AlwaysStatic => false;
+    protected bool IsRuntimeStaticLocked => IsStatic && _placementComplete && !Application.IsEditor;
+
+    public Object()
+    {
+        Transform = new Transform(() => !IsRuntimeStaticLocked, () => _cachedWorldBounds = null);
+    }
+
     public bool IsStatic
     {
-        get => _isStatic;
-        set
-        {
-            if (_isStatic && !Application.IsEditor)
-            {
-                return;
-            }
-            
-            ConfigureStatic(value);
-        }
+        get => _isStatic || AlwaysStatic;
+        set => ConfigureStatic(value);
     }
 
-    protected void ConfigureStatic(bool value)
+    protected bool ConfigureStatic(bool value)
     {
+        if (value && !CanBeStatic)
+        {
+            throw new InvalidOperationException($"{GetType().Name} cannot be static.");
+        }
+
+        if (!value && AlwaysStatic)
+        {
+            throw new InvalidOperationException($"{GetType().Name} must remain static.");
+        }
+
+        if (_placementComplete && !Application.IsEditor && IsStatic != value)
+        {
+            return false;
+        }
+
         _isStatic = value;
         _cachedWorldBounds = null;
+        if (IsStatic && !_isActive)
+        {
+            SetActive(true);
+        }
+
+        return true;
     }
 
+    internal void CompletePlacement()
+    {
+        _placementComplete = true;
+        if (IsStatic && !_isActive) SetActive(true);
+    }
     public bool IsActive => _isActive;
     
     public bool IsDestroyed { get; private set; }
@@ -234,7 +262,7 @@ public class Object
 
     private void DestroyCore()
     {
-        if (IsDestroyed)
+        if (IsDestroyed || (IsStatic && !Application.IsEditor && !_isReleasing))
         {
             return;
         }
@@ -476,7 +504,7 @@ public class Object
     [Input("SetActive")]
     public void SetActive(bool isActive)
     {
-        if (IsDestroyed || _isActive == isActive)
+        if (IsDestroyed || _isActive == isActive || (IsStatic && !isActive))
         {
             return;
         }

@@ -4,6 +4,7 @@ namespace ProjectShockGL.Rendering;
 
 public class MeshCommand : RenderCommand
 {
+    internal bool StaticBatchEligible { get; set; }
     public Mesh? Mesh { get; set; }
     public Vector3 Position { get; set; }
     public Quaternion Rotation { get; set; }

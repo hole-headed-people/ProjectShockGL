@@ -28,10 +28,11 @@ public static class EditorLevelManager
     public static Level CaptureCurrentLevel()
     {
         return CaptureLevel(
-            ProjectShockGL.Core.Game.Instance.World.GetAllObjects(includePending: true));
+            ProjectShockGL.Core.Game.Instance.World.GetAllObjects(includePending: true),
+            ProjectShockGL.Core.Game.Instance.World.Details);
     }
 
-    public static Level CaptureLevel(IEnumerable<Object> objects)
+    public static Level CaptureLevel(IEnumerable<Object> objects, IEnumerable<DetailPlacement>? details = null)
     {
         var result = new List<Placeable>();
         
@@ -116,6 +117,7 @@ public static class EditorLevelManager
             KillY = ProjectShockGL.Core.Game.Instance.World.KillY,
             SaveLevelState = ProjectShockGL.Core.Game.Instance.World.SaveLevelState,
             Groups = SceneGroups.Capture(),
+            Details = details?.ToArray() ?? [],
             Placeables = result.ToArray()
         };
     }

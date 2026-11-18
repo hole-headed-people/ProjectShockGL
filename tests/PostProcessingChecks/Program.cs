@@ -7,6 +7,7 @@ using ProjectShockGL.Rendering;
 using Silk.NET.Maths;
 using Silk.NET.OpenGL;
 using Silk.NET.Windowing;
+using Texture = ProjectShockGL.Rendering.Texture;
 
 var root = Path.GetFullPath(args.FirstOrDefault() ?? ".");
 var options = WindowOptions.Default;
@@ -146,6 +147,451 @@ if (args.Contains("--simple-pbr"))
     return;
 }
 
+var detailAssets = Path.Combine(fixture, "Details", "InstanceTests");
+Directory.CreateDirectory(detailAssets);
+Directory.CreateDirectory(Path.Combine(fixture, "Meshes"));
+Directory.CreateDirectory(Path.Combine(fixture, "Textures"));
+File.WriteAllText(Path.Combine(fixture, "Meshes", "InstancePlane.obj"), """
+    v -0.5 -0.5 0
+    v 0.5 -0.5 0
+    v 0.5 0.5 0
+    v -0.5 0.5 0
+    vt 0 0
+    vt 1 0
+    vt 1 1
+    vt 0 1
+    vn 0.6 0 0.8
+    f 1/1/1 2/2/1 3/3/1
+    f 1/1/1 3/3/1 4/4/1
+    """);
+File.Copy(Path.Combine(root, "StarterContent/Textures/Test.jpg"),
+    Path.Combine(fixture, "Textures", "InstanceTest.jpg"), true);
+foreach (var lit in new[] { true, false })
+    File.WriteAllText(Path.Combine(detailAssets, lit ? "Lit.json" : "Unlit.json"),
+        "{\"Mesh\":\"InstancePlane\",\"Texture\":\"InstanceTest\",\"Color\":[0.9,0.8,0.7,1],\"BackfaceCulling\":false,\"Lit\":" +
+        (lit ? "true" : "false") + "}");
+File.WriteAllText(Path.Combine(detailAssets, "Culled.json"),
+    "{\"Mesh\":\"InstancePlane\",\"Texture\":\"WhitePixel\",\"Lit\":false}");
+File.WriteAllText(Path.Combine(detailAssets, "MissingModel.json"),
+    "{\"Mesh\":\"MissingInstanceModel\",\"Lit\":false}");
+
+Run("Details use instancing with matching Lit/Unlit, normals, UVs, lights, fog, statistics and full-resolution UI", () =>
+{
+    using var scene = new PbrScene();
+    var world = scene.World;
+    var environment = ProjectShockGL.Environment.Capture();
+    try
+    {
+        ProjectShockGL.Environment.AmbientColor = new Color(.15f, .1f, .2f);
+        ProjectShockGL.Environment.IsFogEnabled = true;
+        ProjectShockGL.Environment.FogNear = 1;
+        ProjectShockGL.Environment.FogFar = 20;
+        ProjectShockGL.Environment.FogColor = new Color(.2f, .4f, .5f);
+        var sun = world.Spawn<Light>();
+        sun.Type = LightType.Directional; sun.Intensity = .6f;
+        var point = world.Spawn<Light>();
+        point.Transform.Position = new Vector3(2, 2, 0); point.Radius = 10; point.Intensity = .4f;
+        var spot = world.Spawn<Light>();
+        spot.Type = LightType.Spot; spot.OuterAngle = 100; spot.InnerAngle = 60;
+        spot.Transform.Position = new Vector3(-1, 0, 0); spot.Radius = 10; spot.Intensity = .5f;
+        for (var i = 0; i < 5; i++)
+            world.Details.Add(new DetailPlacement
+            {
+                AssetPath = i < 3 ? "InstanceTests/Lit" : "InstanceTests/Unlit",
+                Position = new Vector3((i % 3 - 1) * 2, i < 3 ? .7f : -.7f, -4),
+                Rotation = Quaternion.CreateFromYawPitchRoll(.3f, .1f, .2f),
+                Scale = new Vector3(i == 1 ? -.9f : .9f, .7f, 1.4f)
+            });
+        world.Update(0);
+        (byte[] Image, object[] Instances, int Calls, long Triangles) Draw(bool instanced)
+        {
+            graphics.BeginDraw(Camera.Active);
+            object[] instances = [];
+            if (instanced)
+            {
+                var queue = new RenderQueue();
+                world.Render(queue, false);
+                instances = DetailInstances(queue);
+                gl.Disable(EnableCap.CullFace);
+                queue.Flush(graphics);
+                Check(!gl.IsEnabled(EnableCap.CullFace));
+            }
+            else
+            {
+                foreach (var detail in world.Details)
+                {
+                    var asset = Content.LoadDetail(detail.AssetPath)!;
+                    graphics.DrawMesh(Content.LoadMesh(asset.Mesh)!, detail.Position, detail.Rotation, detail.Scale,
+                        Content.LoadTexture(asset.Texture, asset.TextureFormat)!, asset.Color, asset.Lit,
+                        backfaceCulling: asset.BackfaceCulling);
+                }
+            }
+            var image = new byte[640 * 240 * 4];
+            unsafe { fixed (byte* data = image) gl.ReadPixels(0, 0, 640, 240, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+            graphics.EndDraw();
+            return (image, instances, graphics.Statistics.DrawCalls, graphics.Statistics.Triangles);
+        }
+        var plain = Draw(false);
+        var instanced = Draw(true);
+        Check(plain.Calls == 5 && instanced.Calls == 2 && instanced.Triangles == plain.Triangles && plain.Triangles == 10);
+        Check(plain.Image.Zip(instanced.Image).Count(pair => Math.Abs(pair.First - pair.Second) > 2) < 100);
+        Check(instanced.Instances.Length == 2 && instanced.Instances.Sum(InstanceCount) == 5);
+        var cached = Draw(true);
+        Check(cached.Instances.SequenceEqual(instanced.Instances));
+        sun.Intensity = .1f; point.Intensity = .1f; spot.Intensity = .1f;
+        var relit = Draw(true);
+        Check(relit.Instances.SequenceEqual(instanced.Instances) && !relit.Image.SequenceEqual(instanced.Image));
+        Check(relit.Image.Zip(Draw(false).Image).Count(pair => Math.Abs(pair.First - pair.Second) > 2) < 100);
+
+        graphics.BeginDraw(Camera.Active);
+        graphics.BeginWorld();
+        var queue = new RenderQueue(); world.Render(queue, false); queue.Flush(graphics);
+        graphics.EndWorld();
+        Check(graphics.Statistics.WorldDrawCalls == 2 && graphics.Statistics.PostProcessDrawCalls == 1);
+        graphics.BeginUI(new Vector2(640, 240));
+        graphics.DrawUIRect(new Vector2(0, 220), new Vector2(20), Color.Red);
+        graphics.EndUI();
+        Check(Pixel(5, 5)[0] > 245 && Pixel(5, 5)[1] < 5);
+        graphics.EndDraw();
+        var sourceMesh = Content.LoadMesh("InstancePlane")!;
+        var sourceTexture = Content.LoadTexture("InstanceTest")!;
+        var handles = instanced.Instances.Select(InstanceBuffer).ToArray();
+        var vaos = instanced.Instances.Select(InstanceVao).ToArray();
+        Check(handles.All(handle => gl.IsBuffer(handle)) && vaos.All(handle => gl.IsVertexArray(handle)));
+        world.Clear();
+        Check(handles.All(handle => !gl.IsBuffer(handle)) && vaos.All(handle => !gl.IsVertexArray(handle)) &&
+              instanced.Instances.All(InstanceDisposed));
+        Check(!sourceMesh.IsDisposed && sourceTexture.Handle != 0);
+    }
+    finally { ProjectShockGL.Environment.Apply(environment); }
+});
+
+Run("Details rebuild instance buffers for revisions and editor visibility and preserve the cache on failed rebuild", () =>
+{
+    using var scene = new PbrScene();
+    var world = scene.World;
+    var editor = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+    var wasEditor = Application.IsEditor;
+    var first = world.Details.Add(new DetailPlacement
+    {
+        AssetPath = "InstanceTests/Unlit", Position = new Vector3(-1, 0, -3), EditorGroups = new[] { "hidden-detail-test" }
+    });
+    world.Details.Add(new DetailPlacement { AssetPath = "InstanceTests/Unlit", Position = new Vector3(1, 0, -3) });
+    world.Update(0);
+    object[] Draw()
+    {
+        graphics.BeginDraw(Camera.Active);
+        var queue = new RenderQueue();
+        world.Render(queue, false);
+        var result = DetailInstances(queue);
+        queue.Flush(graphics);
+        graphics.EndDraw();
+        return result;
+    }
+    try
+    {
+        var original = Draw().Single();
+        Check(InstanceCount(original) == 2);
+        editor.SetValue(null, true);
+        world.Details.Update(new DetailPlacement
+        {
+            Id = first.Id, AssetPath = first.AssetPath, Position = new Vector3(-2, 0, -3), EditorGroups = first.EditorGroups
+        });
+        var edited = Draw().Single();
+        Check(InstanceDisposed(original) && !ReferenceEquals(original, edited));
+        World.HiddenEditorGroups.Add("hidden-detail-test");
+        var visible = Draw().Single();
+        Check(InstanceCount(visible) == 1 && InstanceDisposed(edited));
+        editor.SetValue(null, false);
+        Check(InstanceCount(Draw().Single()) == 2);
+        editor.SetValue(null, true);
+        World.HiddenEditorGroups.Remove("hidden-detail-test");
+        var beforeFailure = Draw().Single();
+        var bad = world.Details.Add(new DetailPlacement { AssetPath = "InstanceTests/MissingModel" });
+        try { Draw(); throw new Exception("Missing Detail model was accepted."); }
+        catch (FileNotFoundException) {}
+        Check(!InstanceDisposed(beforeFailure) && gl.IsBuffer(InstanceBuffer(beforeFailure)));
+        world.Details.Remove(bad.Id);
+        Check(InstanceCount(Draw().Single()) == 2 && InstanceDisposed(beforeFailure));
+        world.Details.Clear();
+        Check(Draw().Length == 0 && graphics.Statistics.DrawCalls == 0);
+    }
+    finally
+    {
+        World.HiddenEditorGroups.Remove("hidden-detail-test");
+        editor.SetValue(null, wasEditor);
+    }
+});
+
+Run("Detail instancing obeys editor Unlit and Environment preview overrides", () =>
+{
+    using var scene = new PbrScene();
+    scene.World.Details.Add(new DetailPlacement { AssetPath = "InstanceTests/Lit", Position = new Vector3(0, 0, -3) });
+    scene.World.Update(0);
+    using var previewRenderer = new Renderer(gl, 640, 240, new RenderPreviewSettings { Unlit = true, EnvironmentEnabled = false });
+    var preview = new Graphics(previewRenderer);
+    preview.BeginDraw(Camera.Active);
+    var queue = new RenderQueue(); scene.World.Render(queue, false); queue.Flush(preview);
+    var instanced = Pixel(320, 120);
+    preview.EndDraw();
+    var asset = Content.LoadDetail("InstanceTests/Lit")!;
+    preview.BeginDraw(Camera.Active);
+    preview.DrawMesh(Content.LoadMesh(asset.Mesh)!, new Vector3(0, 0, -3), Quaternion.Identity, Vector3.One,
+        Content.LoadTexture(asset.Texture, asset.TextureFormat)!, asset.Color, false, backfaceCulling: false);
+    Check(instanced.SequenceEqual(Pixel(320, 120)));
+    preview.EndDraw();
+});
+Run("Instanced Details respect BackfaceCulling and leave ordinary meshes usable", () =>
+{
+    using var scene = new PbrScene();
+    var detail = new DetailPlacement
+    {
+        AssetPath = "InstanceTests/Culled", Position = new Vector3(0, 0, -3),
+        Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI)
+    };
+    scene.World.Details.Add(detail);
+    scene.World.Update(0);
+    graphics.BeginDraw(Camera.Active);
+    gl.Enable(EnableCap.CullFace);
+    var queue = new RenderQueue(); scene.World.Render(queue, false); queue.Flush(graphics);
+    Check(Pixel(320, 120)[1] > 245 && gl.IsEnabled(EnableCap.CullFace));
+    graphics.DrawMesh(Content.LoadMesh("InstancePlane")!, new Vector3(0, 0, -2), Quaternion.Identity, Vector3.One,
+        Content.GetWhitePixel(), Color.Red);
+    Check(Pixel(320, 120)[0] > 245 && Pixel(320, 120)[1] < 5);
+    graphics.EndDraw();
+});
+Run("Static Geometry and BrushBox share cached batches with matching lighting, fog, transforms and cleanup", () =>
+{
+    using var scene = new PbrScene();
+    var world = scene.World;
+    var environment = ProjectShockGL.Environment.Capture();
+    float[] vertices = [
+        -.5f, -.5f, 0, .6f, 0, .8f, 0, 0,
+         .5f, -.5f, 0, .6f, 0, .8f, 1, 0,
+         .5f,  .5f, 0, .6f, 0, .8f, 1, 1,
+        -.5f,  .5f, 0, .6f, 0, .8f, 0, 1
+    ];
+    using var plane = new Mesh(gl, vertices, [0, 1, 2, 0, 2, 3]);
+    try
+    {
+        ProjectShockGL.Environment.AmbientColor = new Color(.15f, .1f, .2f);
+        ProjectShockGL.Environment.IsFogEnabled = true;
+        ProjectShockGL.Environment.FogNear = 1;
+        ProjectShockGL.Environment.FogFar = 20;
+        ProjectShockGL.Environment.FogColor = new Color(.2f, .4f, .5f);
+        var sun = world.Spawn<Light>();
+        sun.Type = LightType.Directional;
+        sun.Intensity = .6f;
+        var point = world.Spawn<Light>();
+        point.Transform.Position = new Vector3(2, 2, 0);
+        point.Radius = 10;
+        point.Intensity = .4f;
+        for (var i = 0; i < 2; i++)
+        {
+            var geometry = world.Spawn<Geometry>();
+            geometry.Transform.Position = new Vector3(i * 2 - 1, .8f, -4);
+            geometry.Transform.Rotation = Quaternion.CreateFromYawPitchRoll(.3f, .1f, .2f);
+            geometry.Transform.Scale = new Vector3(i == 0 ? .9f : -.9f, .7f, 1.4f);
+            var component = geometry.GetComponent<MeshComponent>()!;
+            component.Mesh = plane;
+            component.Texture = Content.GetWhitePixel();
+            component.Lit = true;
+            component.BackfaceCulling = false;
+        }
+        var brushes = new List<BrushBox>();
+        for (var i = 0; i < 2; i++)
+        {
+            var brush = world.Spawn<BrushBox>();
+            brush.Size = new Vector3(.8f, .7f, .5f);
+            brush.Transform.Position = new Vector3(i * 2 - 1, -.8f, -4);
+            brush.Transform.Rotation = Quaternion.CreateFromYawPitchRoll(.4f, .2f, -.1f);
+            brush.Transform.Scale = new Vector3(1.2f, .8f, 1.5f);
+            brush.GetComponent<MeshComponent>()!.BackfaceCulling = false;
+            brushes.Add(brush);
+        }
+        world.Update(0);
+        (byte[] Image, Mesh[] Meshes, int Calls) Draw(bool batching)
+        {
+            world.StaticBatchingEnabled = batching;
+            graphics.BeginDraw(Camera.Active);
+            var queue = new RenderQueue();
+            world.Render(queue, false);
+            var commands = (List<RenderCommand>)typeof(RenderQueue).GetField("_commands", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(queue)!;
+            var meshes = commands.OfType<MeshCommand>().Select(command => command.Mesh!).ToArray();
+            queue.Flush(graphics);
+            var image = new byte[640 * 240 * 4];
+            unsafe { fixed (byte* data = image) gl.ReadPixels(0, 0, 640, 240, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+            graphics.EndDraw();
+            return (image, meshes, graphics.Statistics.DrawCalls);
+        }
+        void SameImage(byte[] first, byte[] second) =>
+            Check(first.Zip(second).Count(pair => Math.Abs(pair.First - pair.Second) > 2) < 100);
+
+        var plain = Draw(false);
+        var batched = Draw(true);
+        Check(plain.Calls == 4 && batched.Calls == 1);
+        SameImage(plain.Image, batched.Image);
+        var cached = Draw(true);
+        Check(ReferenceEquals(cached.Meshes[0], batched.Meshes[0]));
+        var brushMesh = brushes[0].GetComponent<MeshComponent>()!.Mesh!;
+        brushes[0].Destroy();
+        Check(!brushes[0].IsDestroyed && !brushMesh.IsDisposed);
+        SameImage(cached.Image, Draw(true).Image);
+        sun.Intensity = .2f;
+        var changedLight = Draw(true);
+        Check(ReferenceEquals(changedLight.Meshes[0], batched.Meshes[0]) &&
+              !changedLight.Image.SequenceEqual(batched.Image));
+        SameImage(changedLight.Image, Draw(false).Image);
+        Check(batched.Meshes[0].IsDisposed);
+
+        var previous = Draw(true).Meshes[0];
+        vertices[0] -= .1f;
+        plane.UpdateVertices(vertices);
+        var updated = Draw(true);
+        Check(previous.IsDisposed && !ReferenceEquals(previous, updated.Meshes[0]));
+        SameImage(updated.Image, Draw(false).Image);
+
+        var finalBatch = Draw(true).Meshes[0];
+        world.Clear();
+        Check(finalBatch.IsDisposed && brushMesh.IsDisposed && !plane.IsDisposed);
+    }
+    finally { ProjectShockGL.Environment.Apply(environment); }
+});
+
+Run("Static batching preserves UVs and Unlit and excludes editor, custom shaders, transparency and movable objects", () =>
+{
+    using var scene = new PbrScene();
+    var world = scene.World;
+    var environment = ProjectShockGL.Environment.Capture();
+    var editor = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+    var wasEditor = Application.IsEditor;
+    using var texture = Texture.FromRgba(gl, 2, 2, new byte[] {
+        255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255 });
+    using var transparent = Texture.CreateSolid(gl, 255, 255, 255, 128);
+    using var plane = new Mesh(gl, [
+        -.5f, -.5f, 0, 0, 0, 1, 0, 0, .5f, -.5f, 0, 0, 0, 1, 1, 0,
+         .5f,  .5f, 0, 0, 0, 1, 1, 1, -.5f, .5f, 0, 0, 0, 1, 0, 1
+    ], [0, 1, 2, 0, 2, 3]);
+    try
+    {
+        ProjectShockGL.Environment.IsFogEnabled = false;
+        var components = new List<MeshComponent>();
+        for (var i = 0; i < 2; i++)
+        {
+            var geometry = world.Spawn<Geometry>();
+            geometry.Transform.Position = new Vector3(i * 2 - 1, 0, -3);
+            var component = geometry.GetComponent<MeshComponent>()!;
+            component.Mesh = plane;
+            component.Texture = texture;
+            components.Add(component);
+        }
+        world.Update(0);
+        int Draw()
+        {
+            graphics.BeginDraw(Camera.Active);
+            var queue = new RenderQueue();
+            world.Render(queue, false);
+            queue.Flush(graphics);
+            graphics.EndDraw();
+            return graphics.Statistics.DrawCalls;
+        }
+        Check(Draw() == 1);
+        var left = Pixel(260, 110); var right = Pixel(380, 110);
+        Check(left.SequenceEqual(right) && left[0] != left[1]);
+        editor.SetValue(null, true);
+        Check(Draw() == 2);
+        editor.SetValue(null, false);
+        Check(Draw() == 1);
+        var component0 = components[0];
+        component0.Shader = Content.LoadShaderProgram("Unlit");
+        Check(Draw() == 2);
+        component0.Shader = null;
+        component0.Texture = transparent;
+        Check(Draw() == 2);
+        component0.Texture = texture;
+        component0.Color = new Color(1, 1, 1, .5f);
+        Check(Draw() == 2);
+        component0.Color = Color.White;
+        component0.IgnoreDepth = true;
+        Check(Draw() == 2);
+        component0.IgnoreDepth = false;
+        component0.BackfaceCulling = false;
+        Check(Draw() == 2);
+        component0.BackfaceCulling = true;
+        component0.RenderOrder = 1;
+        Check(Draw() == 2);
+        component0.RenderOrder = 0;
+        component0.Lit = true;
+        Check(Draw() == 2);
+        component0.Lit = false;
+        component0.IsEnabled = false;
+        Check(Draw() == 1);
+        component0.IsEnabled = true;
+        var movable = world.Spawn<BrushBox>();
+        movable.Movable = true;
+        movable.Transform.Position = new Vector3(3, 0, -3);
+        world.Update(0);
+        Check(Draw() == 2);
+        var entity = world.Spawn<Entity>();
+        var entityMesh = entity.AddComponent<MeshComponent>();
+        entityMesh.Mesh = plane;
+        entityMesh.Texture = texture;
+        entity.Transform.Position = new Vector3(-3, 0, -3);
+        world.Update(0);
+        Check(Draw() == 3);
+    }
+    finally
+    {
+        editor.SetValue(null, wasEditor);
+        ProjectShockGL.Environment.Apply(environment);
+    }
+});
+Run("YAxis billboards face camera position, remain vertical and handle a camera directly above", () =>
+{
+    var camera = Camera.Active;
+    var position = camera.Transform.Position;
+    var rotation = camera.Transform.Rotation;
+    var build = typeof(Graphics).GetMethod("CreateBillboardModel", BindingFlags.Static | BindingFlags.NonPublic)!;
+    Matrix4x4 Model(BillboardMode mode) =>
+        (Matrix4x4)build.Invoke(null, [camera, Vector3.Zero, new Vector2(2, 3), mode])!;
+    try
+    {
+        camera.Transform.Position = new Vector3(4, 10, 5);
+        camera.Transform.Rotation = Quaternion.CreateFromYawPitchRoll(.5f, .7f, .3f);
+        var model = Model(BillboardMode.YAxis);
+        var up = Vector3.TransformNormal(Vector3.UnitY, model);
+        var normal = Vector3.TransformNormal(Vector3.UnitZ, model);
+        var right = Vector3.TransformNormal(Vector3.UnitX, model);
+        Check(up == Vector3.UnitY * 3);
+        Check(Vector3.Distance(normal, Vector3.Normalize(new Vector3(4, 0, 5))) < .0001f);
+        Check(MathF.Abs(right.Length() - 2) < .0001f && MathF.Abs(Vector3.Dot(right, normal)) < .0001f);
+        camera.Transform.Rotation = Quaternion.Identity;
+        Check(Model(BillboardMode.YAxis) == model);
+        var view = Model(BillboardMode.ViewAligned);
+        Check(Vector3.TransformNormal(Vector3.UnitY, view) == camera.Transform.Up * 3 &&
+              Vector3.TransformNormal(Vector3.UnitZ, view) == camera.Transform.Forward);
+        camera.Transform.Position = new Vector3(0, 10, 0);
+        Check(Vector3.TransformNormal(Vector3.UnitZ, Model(BillboardMode.YAxis)) == Vector3.UnitZ);
+        camera.Transform.Position = Vector3.Zero;
+        Check(Vector3.TransformNormal(Vector3.UnitZ, Model(BillboardMode.YAxis)) == Vector3.UnitZ);
+        graphics.BeginDraw(camera);
+        gl.Enable(EnableCap.CullFace);
+        new BillboardCommand
+        {
+            Mode = BillboardMode.YAxis, Position = new Vector3(0, 0, -2), Size = Vector2.One,
+            Texture = Content.GetWhitePixel(), Color = Color.Red
+        }.Execute(graphics);
+        var pixel = Pixel(320, 120);
+        Check(pixel[0] > 245 && pixel[1] < 5 && gl.GetError() == GLEnum.NoError);
+        graphics.EndDraw();
+        Check(new BillboardComponent().Mode == BillboardMode.ViewAligned);
+    }
+    finally
+    {
+        camera.Transform.Position = position;
+        camera.Transform.Rotation = rotation;
+    }
+});
 Run("Render counters separate world, postprocessing and UI, reset every frame and draw the debug overlay", () =>
 {
     graphics.BeginDraw(Camera.Active);
@@ -728,6 +1174,28 @@ Run("A profile change during the world pass takes effect together on the next fr
     Near(ReadUniform("uVignetteStrength")[0], 0.45f);
 });
 
+Run("Level unload releases Detail instance buffers while shared Content meshes and textures survive", () =>
+{
+    ProjectShockGL.Core.Game.Initialize();
+    var world = new World();
+    typeof(ProjectShockGL.Core.Game).GetProperty(nameof(ProjectShockGL.Core.Game.World))!
+        .SetValue(ProjectShockGL.Core.Game.Instance, world);
+    try
+    {
+        LevelManager.Load(new Level { Details = [new DetailPlacement
+            { AssetPath = "InstanceTests/Unlit", Position = new Vector3(0, 0, -3) }] });
+        graphics.BeginDraw(Camera.Active);
+        var queue = new RenderQueue(); world.Render(queue, false);
+        var instance = DetailInstances(queue).Single();
+        queue.Flush(graphics);
+        graphics.EndDraw();
+        var buffer = InstanceBuffer(instance);
+        var mesh = Content.LoadMesh("InstancePlane")!;
+        LevelManager.Unload();
+        Check(world.Details.Count == 0 && !gl.IsBuffer(buffer) && InstanceDisposed(instance) && !mesh.IsDisposed);
+    }
+    finally { LevelManager.Unload(); }
+});
 Run("Disposal releases framebuffer, texture, depth and VAO while Content owns the program", () =>
 {
     var framebuffer = Handle("_framebuffer");
@@ -748,6 +1216,20 @@ Run("Disposal releases framebuffer, texture, depth and VAO while Content owns th
 
 Console.WriteLine("All postprocessing checks passed.");
 
+static object[] DetailInstances(RenderQueue queue)
+{
+    var commands = (List<RenderCommand>)typeof(RenderQueue).GetField("_commands", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(queue)!;
+    return commands.Where(command => command.GetType().Name == "InstancedMeshCommand")
+        .Select(command => command.GetType().GetProperty("Instances", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(command)!).ToArray();
+}
+static uint InstanceVao(object instance) =>
+    (uint)instance.GetType().GetField("_vao", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(instance)!;
+static uint InstanceBuffer(object instance) =>
+    (uint)instance.GetType().GetField("_buffer", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(instance)!;
+static int InstanceCount(object instance) =>
+    (int)instance.GetType().GetProperty("Count", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(instance)!;
+static bool InstanceDisposed(object instance) =>
+    (bool)instance.GetType().GetProperty("IsDisposed", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(instance)!;
 void DrawSplit(Graphics g)
 {
     var fullWidth = Camera.Active.OrthoSize * Camera.Active.AspectRatio;

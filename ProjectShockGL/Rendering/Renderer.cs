@@ -407,15 +407,23 @@ public class Renderer : IDisposable
         bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
     {
         var cullFace = _gl.IsEnabled(EnableCap.CullFace);
+        
         try
         {
             _gl.Disable(EnableCap.CullFace);
+            
             DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters);
         }
         finally
         {
-            if (cullFace) _gl.Enable(EnableCap.CullFace);
-            else _gl.Disable(EnableCap.CullFace);
+            if (cullFace)
+            {
+                _gl.Enable(EnableCap.CullFace);
+            }
+            else
+            {
+                _gl.Disable(EnableCap.CullFace);
+            }
         }
     }
 
@@ -423,6 +431,7 @@ public class Renderer : IDisposable
         ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, bool backfaceCulling = true)
     {
         var cullFace = _gl.IsEnabled(EnableCap.CullFace);
+        
         try
         {
             if (backfaceCulling)
@@ -449,6 +458,65 @@ public class Renderer : IDisposable
         }
     }
 
+    internal void DrawInstances(InstancedMesh instances, Texture texture, Color color, bool lit, bool backfaceCulling)
+    {
+        if (_frameForceUnlit)
+        {
+            lit = false;
+        }
+        
+        var shader = Content.LoadShaderProgram(lit ? "InstancedLit" : "InstancedUnlit", lit ? "Lit" : "Unlit");
+        
+        var cull = _gl.IsEnabled(EnableCap.CullFace);
+        var depth = _gl.IsEnabled(EnableCap.DepthTest);
+        
+        try
+        {
+            if (backfaceCulling)
+            {
+                _gl.Enable(EnableCap.CullFace);
+            }
+            else
+            {
+                _gl.Disable(EnableCap.CullFace);
+            }
+            
+            _gl.Enable(EnableCap.DepthTest);
+            _gl.UseProgram(shader.Handle);
+            
+            shader.Apply(null);
+            SetCustomFrameUniforms(shader, null);
+            shader.Write("uColor", new Vector4(color.R, color.G, color.B, color.A));
+            
+            _gl.ActiveTexture(TextureUnit.Texture0);
+            _gl.BindTexture(TextureTarget.Texture2D, texture.Handle);
+            
+            instances.Draw();
+            
+            _drawCalls++;
+            _triangles += instances.TriangleCount;
+        }
+        finally
+        {
+            if (cull)
+            {
+                _gl.Enable(EnableCap.CullFace);
+            }
+            else
+            {
+                _gl.Disable(EnableCap.CullFace);
+            }
+
+            if (depth)
+            {
+                _gl.Enable(EnableCap.DepthTest);
+            }
+            else
+            {
+                _gl.Disable(EnableCap.DepthTest);
+            }
+        }
+    }
     private void DrawMeshInternal(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit,
         bool ignoreDepth = false, Vector4? uvRect = null, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
     {

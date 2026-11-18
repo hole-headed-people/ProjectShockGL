@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using ProjectShockGL;
 using ProjectShockGL.Rendering;
 using ProjectShockGL.Tools;
@@ -30,7 +30,11 @@ public static class SceneCamera
 
     public static void Focus(ProjectShockGL.Core.Object obj)
     {
-        var bounds = obj.GetWorldBounds();
+        Focus(obj.GetWorldBounds());
+    }
+
+    internal static void Focus((Vector3 min, Vector3 max) bounds)
+    {
         var center = (bounds.min + bounds.max) * 0.5f;
         var distance = MathF.Max(2, (bounds.max - bounds.min).Length() * 0.5f /
             MathF.Sin(Camera.Active.Fov * 0.5f));
@@ -106,9 +110,9 @@ public static class SceneCamera
             camera.Transform.Position += pan * Speed;
         }
         
-        if (Input.IsKeyDown(Key.F) && Selection.Object != null)
+        if (Input.IsKeyDown(Key.F) && Selection.Targets.LastOrDefault() is { IsEditorVisible: true })
         {
-            Focus(Selection.Object);
+            Focus(Selection.Targets.Last().GetWorldBounds());
         }
         
         var inputDirection = _isLook ? new Vector3(rightAxis, 0f, forwardAxis) : Vector3.Zero;

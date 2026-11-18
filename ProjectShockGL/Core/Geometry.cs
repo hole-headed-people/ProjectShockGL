@@ -1,10 +1,11 @@
-﻿using System.Numerics;
+using System.Numerics;
 using ProjectShockGL.Rendering;
 
 namespace ProjectShockGL.Core;
 
 public class Geometry : Object
 {
+    protected sealed override bool AlwaysStatic => true;
     private bool _hasVisual;
     
     private MeshComponent _meshComponent = null!;

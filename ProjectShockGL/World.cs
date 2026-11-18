@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using ProjectShockGL.Rendering;
 using Object = ProjectShockGL.Core.Object;
 
@@ -6,6 +6,11 @@ namespace ProjectShockGL;
 
 public class World
 {
+    private readonly StaticBatcher _staticBatches = new();
+    private readonly DetailRenderer _detailRenderer = new();
+    private readonly RenderQueue _worldCommands = new();
+    public bool StaticBatchingEnabled { get; set; } = true;
+
     private readonly List<Object> _objects;
     private readonly Queue<Object> _spawnedObjects;
     internal HashSet<Guid> RemovedSaveableObjects { get; } = [];
@@ -18,6 +23,7 @@ public class World
     
     private float _killY = -1000f;
 
+    public DetailCollection Details { get; } = new();
     public bool SaveLevelState { get; set; } = true;
 
     public float KillY
@@ -46,6 +52,15 @@ public class World
     {
         var routines = simulate ? GetAllObjects(true).SelectMany(obj => obj.CaptureCoroutines()).ToArray() : [];
         
+        if (simulate)
+        {
+            Details.Seal();
+            foreach (var obj in GetAllObjects(true))
+            {
+                obj.CompletePlacement();
+            }
+        }
+
         while (_spawnedObjects.Count > 0)
         {
             var obj = _spawnedObjects.Dequeue();
@@ -60,6 +75,7 @@ public class World
             
             if (simulate)
             {
+                obj.CompletePlacement();
                 obj.InitializeActivity();
                 obj.TryStart();
             }
@@ -125,15 +141,27 @@ public class World
 
     public void Render(RenderQueue queue, bool? debugOnly = null)
     {
-        foreach (var obj in _objects)
+        var batch = StaticBatchingEnabled && !Application.IsEditor && debugOnly != true;
+        if (!batch && debugOnly != true) _staticBatches.Clear();
+        var target = batch ? _worldCommands : queue;
+        try
         {
-            if (!obj.IsDestroyed && obj.IsActive)
+            foreach (var obj in _objects)
             {
-                obj.Render(queue, debugOnly);
+                if (!obj.IsDestroyed && obj.IsActive)
+                {
+                    obj.Render(target, debugOnly);
+                }
             }
+
+            if (batch) _staticBatches.Submit(_worldCommands.Commands, queue);
+            if (debugOnly != true) _detailRenderer.Submit(Details, queue);
+        }
+        finally
+        {
+            if (batch) _worldCommands.Clear();
         }
     }
-
     public void DebugRender(DebugDraw draw)
     {
         if (!Application.IsEditor && !Application.IsDebug)
@@ -312,6 +340,7 @@ public class World
         _objects.Clear();
         _spawnedObjects.Clear();
         RemovedSaveableObjects.Clear();
+        Details.Reset();
         
         _objectsVersion++;
         _clearVersion++;
@@ -319,6 +348,11 @@ public class World
         _cachedObjectsArray = null;
 
         List<Exception> errors = [];
+        _worldCommands.Clear();
+        try { _staticBatches.Clear(); }
+        catch (Exception error) { errors.Add(error); }
+        try { _detailRenderer.Clear(); }
+        catch (Exception error) { errors.Add(error); }
 
         foreach (var obj in objects)
         {
@@ -427,8 +461,11 @@ public class World
         }
 
         var objects = replacement.GetAllObjects(includePending: true);
+        replacement._staticBatches.Clear();
+        replacement._detailRenderer.Clear();
         
         Clear();
+        Details.TakeFrom(replacement.Details);
         
         replacement._objects.Clear();
         replacement._spawnedObjects.Clear();

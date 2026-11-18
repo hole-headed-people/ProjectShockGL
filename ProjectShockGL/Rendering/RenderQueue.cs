@@ -1,8 +1,9 @@
-﻿namespace ProjectShockGL.Rendering;
+namespace ProjectShockGL.Rendering;
 
 public class RenderQueue
 {
     private readonly List<RenderCommand> _commands = [];
+    internal IReadOnlyList<RenderCommand> Commands => _commands;
     
     public void Clear()
     {

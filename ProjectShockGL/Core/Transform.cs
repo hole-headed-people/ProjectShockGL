@@ -1,12 +1,55 @@
-﻿using System.Numerics;
+using System.Numerics;
 
 namespace ProjectShockGL.Core;
 
 public class Transform
 {
-    public Vector3 Position { get; set; } = Vector3.Zero;
-    public Quaternion Rotation { get; set; } = Quaternion.Identity;
-    public Vector3 Scale { get; set; } = Vector3.One;
+    private readonly Func<bool>? _canChange;
+    private readonly Action? _changed;
+    private Vector3 _position;
+    private Quaternion _rotation = Quaternion.Identity;
+    private Vector3 _scale = Vector3.One;
+
+    public Transform() {}
+
+    internal Transform(Func<bool> canChange, Action changed)
+    {
+        _canChange = canChange;
+        _changed = changed;
+    }
+
+    public Vector3 Position
+    {
+        get => _position;
+        set
+        {
+            if (_canChange?.Invoke() == false) return;
+            _position = value;
+            _changed?.Invoke();
+        }
+    }
+
+    public Quaternion Rotation
+    {
+        get => _rotation;
+        set
+        {
+            if (_canChange?.Invoke() == false) return;
+            _rotation = value;
+            _changed?.Invoke();
+        }
+    }
+
+    public Vector3 Scale
+    {
+        get => _scale;
+        set
+        {
+            if (_canChange?.Invoke() == false) return;
+            _scale = value;
+            _changed?.Invoke();
+        }
+    }
     
     public Vector3 Forward => Vector3.Transform(-Vector3.UnitZ, Rotation);
     public Vector3 Right => Vector3.Transform(Vector3.UnitX, Rotation);

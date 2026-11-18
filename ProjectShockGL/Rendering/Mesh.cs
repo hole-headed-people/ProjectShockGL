@@ -12,7 +12,16 @@ public class Mesh : IDisposable
     private uint _ebo;
 
     private readonly uint _indexCount;
+    private float[] _vertices = [];
+    private uint[] _indices = [];
+    internal ReadOnlyMemory<float> Vertices => _vertices;
+    internal ReadOnlyMemory<uint> Indices => _indices;
+    internal int Revision { get; private set; }
+    public bool IsDisposed => _vao == 0;
+    internal Mesh CreateCombined(float[] vertices, uint[] indices) => new(_gl, vertices, indices);
     internal long TriangleCount => _indexCount / 3;
+    internal InstancedMesh CreateInstances(ReadOnlySpan<Matrix4x4> transforms) =>
+        new(_gl, this, _vbo, _ebo, _indexCount, transforms);
 
     public Vector3 BoundsMin { get; private set; }
     public Vector3 BoundsMax { get; private set; }
@@ -65,6 +74,8 @@ public class Mesh : IDisposable
             gl.EnableVertexAttribArray(2);
 
             CalculateBounds(vertices);
+            _vertices = vertices.ToArray();
+            _indices = indices.ToArray();
         }
         catch
         {
@@ -101,6 +112,11 @@ public class Mesh : IDisposable
 
     public unsafe void UpdateVertices(float[] vertices)
     {
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        if (vertices.Length > _vertices.Length || vertices.Length % 8 != 0)
+        {
+            throw new ArgumentException("Updated vertices must fit the mesh and contain position, normal and UV.", nameof(vertices));
+        }
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
 
         fixed (float* ptr = vertices)
@@ -111,6 +127,9 @@ public class Mesh : IDisposable
                 (nuint)(vertices.Length * sizeof(float)),
                 ptr);
         }
+        vertices.CopyTo(_vertices, 0);
+        CalculateBounds(_vertices);
+        Revision++;
     }
 
     public void Dispose()
@@ -131,5 +150,8 @@ public class Mesh : IDisposable
         }
         
         _vbo = _ebo = _vao = 0;
+        _vertices = [];
+        _indices = [];
+        Revision++;
     }
 }

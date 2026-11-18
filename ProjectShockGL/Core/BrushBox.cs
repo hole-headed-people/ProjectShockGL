@@ -12,7 +12,7 @@ public class BrushBox : Object
         get => !IsStatic;
         set
         {
-            ConfigureStatic(!value);
+            if (!ConfigureStatic(!value)) return;
             
             if (!value)
             {
@@ -26,6 +26,7 @@ public class BrushBox : Object
         get => GetComponent<Rigidbody>() is { IsEnabled: true, IsDestroyed: false };
         set
         {
+            if (IsRuntimeStaticLocked) return;
             if (!value)
             {
                 RemoveComponent<Rigidbody>();
@@ -65,6 +66,7 @@ public class BrushBox : Object
         get => _size;
         set
         {
+            if (IsRuntimeStaticLocked) return;
             BrushBoxMesh.Validate(value, nameof(Size));
             
             _size = value;
@@ -160,8 +162,11 @@ public class BrushBox : Object
         }
         finally
         {
-            _mesh?.Dispose(); 
-            _mesh = null;
+            if (IsDestroyed)
+            {
+                _mesh?.Dispose();
+                _mesh = null;
+            }
         }
     }
 

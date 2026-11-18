@@ -29,6 +29,7 @@ public static class Content
     private static readonly Dictionary<(string Vertex, string Fragment), ShaderProgram> Programs = new();
     private static readonly Dictionary<string, Mesh> Meshes = new();
     private static readonly Dictionary<string, GeometryData> Geometries = new();
+    private static readonly Dictionary<string, DetailAsset> Details = new();
     private static readonly Dictionary<string, EntityData> Entities = new();
     private static readonly Dictionary<string, Level> Levels = new();
     private static readonly Dictionary<string, PostProcessProfile> PostProcessProfiles = new();
@@ -358,6 +359,45 @@ public static class Content
         }
     }
 
+    public static DetailAsset? LoadDetail(string name)
+    {
+        string? path = null;
+        
+        try
+        {
+            DetailAsset.ValidateReference(name, nameof(name));
+            
+            name = name.Replace('\\', '/');
+
+            if (Details.TryGetValue(name, out var cached))
+            {
+                return cached;
+            }
+            
+            path = System.IO.Path.GetFullPath(System.IO.Path.Combine(Path, "Details", name + ".json"));
+            
+            if (!File.Exists(path))
+            {
+                Log.PrintWarning($"Resource not found: {path}");
+                return null;
+            }
+
+            var data = JsonConvert.DeserializeObject<DetailAsset>(File.ReadAllText(path), JsonHelper.GetSettings())
+                ?? throw new InvalidDataException("Detail asset is empty or null.");
+            
+            data.Validate();
+            Details.Add(name, data);
+            
+            return data;
+        }
+        catch (Exception error)
+        {
+            var failure = new InvalidDataException($"Cannot load Detail '{path ?? name}': {error.Message}", error);
+            Log.PrintError($"LoadDetail failed for '{name}'.", failure);
+            
+            throw failure;
+        }
+    }
     public static GeometryData? LoadGeometry(string name)
     {
         try
@@ -496,6 +536,16 @@ public static class Content
         }
     }
     
+    public static string[] GetAllDetailNames()
+    {
+        var directory = System.IO.Path.Combine(Path, "Details");
+        if (!Directory.Exists(directory)) return [];
+        return Directory.EnumerateFiles(directory, "*.json", SearchOption.AllDirectories)
+            .Select(file => System.IO.Path.ChangeExtension(System.IO.Path.GetRelativePath(directory, file), null)!
+                .Replace('\\', '/'))
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
     public static string[] GetAllGeometryNames()
     {
         var dir = System.IO.Path.Combine(Path, "Geometry");
@@ -534,7 +584,7 @@ public static class Content
     {
         try
         {
-            var path = PrefabPath(name);
+            var path = GetPrefabPath(name);
 
             if (!File.Exists(path))
             {
@@ -574,7 +624,7 @@ public static class Content
         }
     }
 
-    public static string PrefabPath(string name)
+    public static string GetPrefabPath(string name)
     {
         if (string.IsNullOrWhiteSpace(name) || System.IO.Path.IsPathRooted(name))
         {
@@ -760,6 +810,7 @@ public static class Content
         Textures.Clear();
         Meshes.Clear();
         Geometries.Clear();
+        Details.Clear();
         Entities.Clear();
         Levels.Clear();
         _whiteTexture = null;

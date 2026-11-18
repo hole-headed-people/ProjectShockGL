@@ -61,6 +61,14 @@ public static class LevelManager
                 CreatePlacement(staged, placeable, placeable?.Guid);
             }
 
+            foreach (var detail in level.Details)
+            {
+                _ = Content.LoadDetail(detail.AssetPath)
+                    ?? throw new FileNotFoundException($"Detail asset '{detail.AssetPath}' was not found.");
+                staged.Details.Add(detail);
+            }
+            staged.Details.Seal();
+
             if (removedObjects != null)
             {
                 staged.RemovedSaveableObjects.UnionWith(removedObjects);
@@ -262,6 +270,7 @@ public static class LevelManager
         obj.Layer = placeable.Layer ?? obj.Layer;
         obj.CollidesWith = placeable.CollidesWith ?? obj.CollidesWith;
         obj.SetActive(placeable.IsActive);
+        obj.CompletePlacement();
         
         return obj;
     }

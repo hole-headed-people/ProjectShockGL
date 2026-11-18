@@ -364,8 +364,8 @@ Run("SaveHelper recreates prefab members, entity assets and spawned classes with
     var levelsDirectory = Path.Combine(testRoot, "Levels");
     var map = Path.Combine(levelsDirectory, name + ".map");
     var asset = Path.Combine(testRoot, "Entities", name + ".json");
-    var prefab = Content.PrefabPath(name);
-    var singlePrefab = Content.PrefabPath(name + "-Single");
+    var prefab = Content.GetPrefabPath(name);
+    var singlePrefab = Content.GetPrefabPath(name + "-Single");
     var slot = SaveManager.CreateSlot();
     var save = Path.Combine(saveDirectory, slot + ".save");
     var world = Game.Instance.World;
@@ -655,6 +655,493 @@ Run("Repeated scene clicks cycle by distance, tolerate small movement, wrap and 
         world.Clear();
     }
 });
+Run("Content loads cached Detail descriptions without GPU resources and rejects malformed assets", () =>
+{
+    var directory = Path.Combine(testRoot, "Details", "Tests");
+    Directory.CreateDirectory(directory);
+    File.WriteAllText(Path.Combine(directory, "Grass.json"),
+        "{\"Mesh\":\"Nature/Grass\",\"Texture\":\"Nature/Grass\",\"TextureFormat\":\"Png\",\"Color\":[0.2,0.4,0.6,1]}");
+    var asset = Content.LoadDetail("Tests/Grass")!;
+    Check(asset.Mesh == "Nature/Grass" && asset.TextureFormat == TextureFormat.Png &&
+          asset.Lit && asset.BackfaceCulling && asset.Color.G == .4f);
+    Check(ReferenceEquals(asset, Content.LoadDetail("Tests\\Grass")));
+    Check(Content.LoadDetail("Tests/Missing") == null);
+    Throws(() => Content.LoadDetail("../Grass"));
+    Throws(() => Content.LoadDetail(Path.Combine(testRoot, "Grass")));
+    var invalidPath = Path.Combine(directory, "Invalid.json");
+    foreach (var json in new[] { "null", "{", "{}", "{\"Mesh\":\"../Cube\"}",
+        "{\"Mesh\":\"Cube\",\"TextureFormat\":999}" })
+    {
+        File.WriteAllText(invalidPath, json);
+        try { Content.LoadDetail("Tests/Invalid"); throw new Exception("Invalid Detail accepted"); }
+        catch (InvalidDataException error) { Check(error.Message.Contains(invalidPath)); }
+    }
+    File.WriteAllText(invalidPath, "{\"Mesh\":\"Cube\"}");
+    Check(Content.LoadDetail("Tests/Invalid")!.Texture == "WhitePixel");
+});
+
+Run("Detail collection copies groups, tracks edits, validates identity and freezes only for runtime", () =>
+{
+    var world = new World();
+    var groups = new[] { "group-a" };
+    var placement = new DetailPlacement
+    {
+        AssetPath = "Tests/Grass", Position = new Vector3(1, 2, 3),
+        Scale = new Vector3(-1, 2, 3), EditorGroups = groups
+    };
+    var stored = world.Details.Add(placement);
+    groups[0] = "changed";
+    Check(world.Details.Count == 1 && world.GetAllObjects(true).Length == 0 &&
+          stored.EditorGroups.Single() == "group-a" && stored.Id == placement.Id);
+    Throws(() => ((IList<string>)stored.EditorGroups)[0] = "changed");
+    Throws(() => world.Details.Add(placement));
+    Throws(() => world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass", Scale = Vector3.Zero }));
+    Throws(() => world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass", Id = Guid.Empty }));
+    Throws(() => world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass", Rotation = default }));
+    Throws(() => world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass", Position = new Vector3(float.NaN) }));
+    var revision = world.Details.Revision;
+    world.Details.Update(new DetailPlacement { Id = stored.Id, AssetPath = stored.AssetPath, Position = Vector3.One });
+    Check(world.Details.Revision > revision && world.Details.Find(stored.Id)!.Position == Vector3.One);
+    Check(stored.Position == new Vector3(1, 2, 3));
+    world.Update(0);
+    Throws(() => world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass" }));
+    Throws(() => world.Details.Update(placement));
+    Throws(() => world.Details.Remove(stored.Id));
+    Throws(() => world.Details.Clear());
+    var editor = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+    var wasEditor = Application.IsEditor;
+    try
+    {
+        editor.SetValue(null, true);
+        Check(world.Details.Remove(stored.Id));
+        world.Details.Add(placement);
+        world.Details.Update(new DetailPlacement { Id = placement.Id, AssetPath = placement.AssetPath, Scale = new Vector3(2) });
+        Check(world.Details[0].Scale == new Vector3(2));
+    }
+    finally
+    {
+        editor.SetValue(null, wasEditor);
+        world.Clear();
+    }
+    Check(world.Details.Count == 0);
+    world.Details.Add(placement);
+    world.Clear();
+});
+
+RunScene("Details survive editor map capture, JSON roundtrip and dirty tracking without entering prefab captures", () =>
+{
+    var world = Game.Instance.World;
+    var placement = world.Details.Add(new DetailPlacement
+    {
+        AssetPath = "Tests/Grass", Position = new Vector3(2, 3, 4),
+        Rotation = Quaternion.CreateFromYawPitchRoll(.3f, .2f, .1f),
+        Scale = new Vector3(2, 3, 4), EditorGroups = new[] { "detail-group" }
+    });
+    SceneGroups.Load([new EditorGroupData { Id = "detail-group", Name = "Decorations" }]);
+    EditorLevelManager.Initialize();
+    var snapshot = EditorLevelManager.CaptureCurrentLevel();
+    Check(snapshot.Placeables.Length == 0 && snapshot.Details.Length == 1 &&
+          EditorLevelManager.CaptureLevel(Array.Empty<GameObject>()).Details.Length == 0);
+    world.Details.Update(new DetailPlacement
+    {
+        Id = placement.Id, AssetPath = placement.AssetPath, Position = Vector3.One, EditorGroups = placement.EditorGroups
+    });
+    EditorLevelManager.RefreshDirty();
+    Check(EditorLevelManager.IsDirty && snapshot.Details[0].Position == new Vector3(2, 3, 4));
+    var path = Path.Combine(testRoot, "detail-roundtrip.map");
+    EditorLevelManager.SaveCurrentLevel(path);
+    Check(!EditorLevelManager.IsDirty);
+    EditorLevelManager.OpenLevel(path);
+    var loaded = world.Details.Single();
+    Check(loaded.Id == placement.Id && loaded.AssetPath == "Tests/Grass" && loaded.Position == Vector3.One &&
+          loaded.EditorGroups.Single() == "detail-group" && world.GetAllObjects(true).Length == 0);
+    Check(!EditorLevelManager.IsDirty);
+    var data = EditorLevelManager.ReadLevel(path);
+    Check(data.Details.Single().Id == placement.Id);
+    var levels = Path.Combine(testRoot, "Levels");
+    Directory.CreateDirectory(levels);
+    File.Copy(path, Path.Combine(levels, "DetailsViaContent.map"), true);
+    Check(Content.LoadLevel("DetailsViaContent")!.Details.Single().Id == placement.Id);
+});
+
+Run("Details load before Loaded, reject invalid maps atomically and disappear on legacy load or unload", () =>
+{
+    var world = Game.Instance.World;
+    var placement = new DetailPlacement { AssetPath = "Tests/Grass", Position = new Vector3(4, 5, 6) };
+    var level = new Level { Details = [placement] };
+    Action<Level> loaded = _ =>
+    {
+        Check(world.Details.Count == 1 && world.Details[0].Id == placement.Id);
+        Throws(() => world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass" }));
+    };
+    LevelManager.Loaded += loaded;
+    try { LevelManager.Load(level); }
+    finally { LevelManager.Loaded -= loaded; }
+    Check(world.Details[0].Position == placement.Position && world.GetAllObjects(true).Length == 0);
+    var colliders = Physics.OverlapSphereAll(Vector3.Zero, 100, Layers.Everything).Length;
+    var unloading = 0;
+    Action<Level> onUnloading = _ => unloading++;
+    LevelManager.Unloading += onUnloading;
+    try
+    {
+        Throws(() => LevelManager.Load(new Level
+        {
+            Placeables = [new Placeable { Type = PlaceableType.Entity, Path = "Check" }],
+            Details = [placement, new DetailPlacement { AssetPath = "Tests/Missing" }]
+        }));
+        Check(ReferenceEquals(LevelManager.ActiveLevel, level) && unloading == 0 &&
+              world.Details.Count == 1 && world.Details[0].Id == placement.Id);
+        Check(Physics.OverlapSphereAll(Vector3.Zero, 100, Layers.Everything).Length == colliders);
+        Throws(() => LevelManager.Load(new Level { Details = [placement, placement] }));
+        Throws(() => LevelManager.Load(new Level { Details = null! }));
+        Throws(() => LevelManager.Load(new Level { Details = [null!] }));
+        Throws(() => LevelManager.Load(new Level { Details = [new DetailPlacement { AssetPath = "Tests/Grass", Scale = Vector3.Zero }] }));
+        Check(ReferenceEquals(LevelManager.ActiveLevel, level) && world.Details.Count == 1 && unloading == 0);
+    }
+    finally { LevelManager.Unloading -= onUnloading; }
+    LevelManager.Unload();
+    Check(world.Details.Count == 0);
+    LevelManager.Load(level);
+    var legacy = JsonConvert.DeserializeObject<Level>("{\"Placeables\":[]}", JsonHelper.GetSettings())!;
+    LevelManager.Load(legacy);
+    Check(world.Details.Count == 0 && legacy.Details.Length == 0);
+    LevelManager.Unload();
+});
+RunScene("Details participate in scene picking, repeated-click cycling, Ctrl selection and hidden groups", () =>
+{
+    Check(Content.GetAllDetailNames().Contains("Tests/Grass"));
+    var world = Game.Instance.World;
+    var first = world.Details.Add(new DetailPlacement
+    {
+        AssetPath = "Tests/Grass", Position = new Vector3(0, 0, -3), EditorGroups = new[] { "detail-pick-hidden" }
+    });
+    var far = world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass", Position = new Vector3(0, 0, -5) });
+    var near = world.Spawn<GameObject>(); near.Transform.Position = new Vector3(0, 0, -2);
+    var camera = ProjectShockGL.Rendering.Camera.Active;
+    var transform = TransformState.Capture(camera.Transform);
+    var aspect = camera.AspectRatio; var orthographic = camera.Orthographic;
+    try
+    {
+        camera.Transform.Position = Vector3.Zero; camera.Transform.Rotation = Quaternion.Identity;
+        camera.AspectRatio = 4f / 3; camera.Orthographic = false;
+        var size = new Vector2(800, 600);
+        void Click(bool ctrl = false) => ObjectPicker.PickAt(size / 2, size, ctrl);
+        Selection.Object = null;
+        Click(); Check(Selection.Object == near);
+        Click(); Check(Selection.Detail?.Id == first.Id && Selection.Objects.Length == 0);
+        Click(); Check(Selection.Detail?.Id == far.Id);
+        Click(); Check(Selection.Object == near);
+        Click(); Click(true);
+        Check(Selection.Objects.Single() == near && Selection.Details.Single().Id == first.Id);
+        Click(true); Check(Selection.Objects.Length == 0 && Selection.Detail?.Id == first.Id);
+        Selection.Object = null; Check(Selection.Targets.Length == 0);
+        World.HiddenEditorGroups.Add("detail-pick-hidden");
+        Click(); Click(); Check(Selection.Detail?.Id == far.Id);
+        Check(!EditorSelectionTarget.ForDetail(world, first.Id).IsEditorVisible);
+        ObjectPicker.PickAt(Vector2.Zero, size);
+        Check(Selection.Targets.Length == 0);
+        Selection.SelectDetail(far.Id);
+        SceneCamera.Focus(Selection.Targets.Single().GetWorldBounds());
+        Check(float.IsFinite(camera.Transform.Position.Z));
+    }
+    finally
+    {
+        World.HiddenEditorGroups.Remove("detail-pick-hidden");
+        transform.Apply(camera.Transform); camera.AspectRatio = aspect; camera.Orthographic = orthographic;
+    }
+});
+
+RunScene("Detail gizmos translate, rotate, scale, snap, cancel and retain transform history and map data", () =>
+{
+    var world = Game.Instance.World;
+    var detail = world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass", Position = new Vector3(.2f, .3f, -.1f) });
+    Selection.SelectDetail(detail.Id);
+    var target = Selection.Targets.Single();
+    var size = new Vector2(1280, 768); var eye = new Vector3(5, 4, 6); var forward = Vector3.Normalize(-eye);
+    var vp = Matrix4x4.CreateLookAt(eye, Vector3.Zero, Vector3.UnitY) *
+        Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 3, size.X / size.Y, .1f, 100);
+    var before = TransformState.Capture(target.Transform);
+    var axes = new[] { Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ };
+    var grid = SceneGrid.Step;
+    try
+    {
+        SceneGrid.Step = 1; ObjectManipulator.Local = false;
+        for (var i = 0; i < 3; i++)
+        {
+            UndoRedo.Clear(); ObjectManipulator.Mode = ManipulationMode.Move;
+            Check(GizmoMath.Project(before.Position + axes[i], vp, size, out var start));
+            Check(GizmoMath.Project(before.Position + axes[i] * 1.6f, vp, size, out var end));
+            ObjectManipulator.BeginTargetDrag(target, i, start, 2, forward, vp, size);
+            ObjectManipulator.ApplyDrag(end, vp, size, true);
+            Check(Vector3.Distance(world.Details.Find(detail.Id)!.Position, before.Position + axes[i]) < .002f);
+            ObjectManipulator.Commit();
+            UndoRedo.Undo(); Check(TransformState.Capture(target.Transform) == before && !UndoRedo.CanUndo);
+            UndoRedo.Redo(); UndoRedo.Undo();
+
+            ObjectManipulator.Mode = ManipulationMode.Rotate;
+            var u = Vector3.Normalize(Vector3.Cross(axes[i], MathF.Abs(axes[i].Y) < .9f ? Vector3.UnitY : Vector3.UnitX));
+            var v = Vector3.Cross(axes[i], u);
+            GizmoMath.Project(before.Position + u, vp, size, out start);
+            GizmoMath.Project(before.Position + v, vp, size, out end);
+            ObjectManipulator.BeginTargetDrag(target, i, start, 1, forward, vp, size);
+            ObjectManipulator.ApplyDrag(end, vp, size, false);
+            Check(MathF.Abs(Quaternion.Dot(world.Details.Find(detail.Id)!.Rotation,
+                Quaternion.CreateFromAxisAngle(axes[i], MathF.PI / 2))) > .9999f);
+            ObjectManipulator.Cancel(); Check(TransformState.Capture(target.Transform) == before);
+        }
+        target.Apply(before with { Scale = new Vector3(-2, 3, 4) });
+        var mirrored = TransformState.Capture(target.Transform);
+        ObjectManipulator.Mode = ManipulationMode.Scale; UndoRedo.Clear();
+        ObjectManipulator.BeginTargetDrag(target, 3, Vector2.Zero, 2, forward, vp, size);
+        ObjectManipulator.ApplyDrag(new Vector2(100, 0), vp, size, false);
+        Check(Vector3.Distance(world.Details.Find(detail.Id)!.Scale, mirrored.Scale * MathF.E) < .002f);
+        ObjectManipulator.Cancel(); Check(TransformState.Capture(target.Transform) == mirrored);
+        ObjectManipulator.BeginTargetDrag(target, 3, Vector2.Zero, 2, forward, vp, size);
+        ObjectManipulator.ApplyDrag(new Vector2(100, 0), vp, size, false);
+        ObjectManipulator.Commit();
+        UndoRedo.Undo(); Check(TransformState.Capture(target.Transform) == mirrored);
+        UndoRedo.Redo();
+        var scaled = TransformState.Capture(target.Transform);
+        var path = Path.Combine(testRoot, "detail-gizmo.map");
+        EditorLevelManager.SaveCurrentLevel(path);
+        EditorLevelManager.OpenLevel(path);
+        var loaded = world.Details.Find(detail.Id)!;
+        Check(loaded.Position == scaled.Position && Vector3.Distance(loaded.Scale, scaled.Scale) < .001f);
+        Check(loaded.AssetPath == detail.AssetPath);
+    }
+    finally
+    {
+        ObjectManipulator.Cancel(); ObjectManipulator.Mode = ManipulationMode.Move; SceneGrid.Step = grid;
+    }
+});
+
+RunScene("Mixed Object and Detail selection shares a pivot and one transform undo step", () =>
+{
+    var world = Game.Instance.World;
+    var detail = world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass", Position = new Vector3(-2, 0, 0) });
+    var obj = world.Spawn<GameObject>(); obj.Transform.Position = new Vector3(2, 0, 0);
+    Selection.Object = obj; Selection.ToggleDetail(detail.Id);
+    Check(Selection.Targets.Length == 2 && ObjectManipulator.Pivot == Vector3.Zero);
+    Check(!Editor.CanDuplicateSelection);
+    UndoRedo.Clear(); ObjectManipulator.Local = false; ObjectManipulator.Mode = ManipulationMode.Move;
+    var size = new Vector2(1280, 768); var eye = new Vector3(5, 4, 6);
+    var vp = Matrix4x4.CreateLookAt(eye, Vector3.Zero, Vector3.UnitY) *
+        Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 3, size.X / size.Y, .1f, 100);
+    GizmoMath.Project(Vector3.UnitX, vp, size, out var start);
+    GizmoMath.Project(Vector3.UnitX * 2, vp, size, out var end);
+    ObjectManipulator.BeginTargetDrag(Selection.Targets.Last(), 0, start, 2, Vector3.Normalize(-eye), vp, size);
+    ObjectManipulator.ApplyDrag(end, vp, size, false);
+    ObjectManipulator.Commit();
+    Check(Vector3.Distance(world.Details.Find(detail.Id)!.Position, new Vector3(-1, 0, 0)) < .002f &&
+          Vector3.Distance(obj.Transform.Position, new Vector3(3, 0, 0)) < .002f);
+    UndoRedo.Undo();
+    Check(world.Details.Find(detail.Id)!.Position.X == -2 && obj.Transform.Position.X == 2 && !UndoRedo.CanUndo);
+    UndoRedo.Redo(); UndoRedo.Undo();
+});
+
+RunScene("Detail Inspector edits preserve identity and groups and failed asset creation preserves selection and history", () =>
+{
+    var world = Game.Instance.World;
+    var detail = world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass", EditorGroups = new[] { "preserve-group" } });
+    Selection.SelectDetail(detail.Id); var target = Selection.Targets.Single();
+    EditorLevelManager.Initialize(); UndoRedo.Clear();
+    var state = TransformState.Capture(target.Transform);
+    SceneDetails.SetTransform(target, state with { Position = new Vector3(3, 4, 5) }, "Detail/Position", false);
+    EditorLevelManager.RefreshDirty();
+    Check(EditorLevelManager.IsDirty && world.Details.Find(detail.Id)!.EditorGroups.Single() == "preserve-group");
+    UndoRedo.Undo(); EditorLevelManager.RefreshDirty();
+    Check(!EditorLevelManager.IsDirty && world.Details.Find(detail.Id)!.Position == Vector3.Zero);
+    Check(UndoRedo.CanRedo);
+    Throws(() => SceneDetails.Create("Tests/Missing"));
+    Check(Selection.Detail?.Id == detail.Id && world.Details.Count == 1 && UndoRedo.CanRedo);
+    Throws(() => SceneDetails.SetAsset(target, "Tests/Invalid"));
+    Check(world.Details.Find(detail.Id)!.AssetPath == detail.AssetPath && UndoRedo.CanRedo);
+    UndoRedo.Redo(); Check(world.Details.Find(detail.Id)!.Position == new Vector3(3, 4, 5));
+});
+RunScene("Detail duplication uses fresh IDs and restores the same copies and selection in one undo step", () =>
+{
+    var world = Game.Instance.World;
+    var first = world.Details.Add(new DetailPlacement
+    {
+        AssetPath = "Tests/Grass", Position = new Vector3(2, 3, 4), Scale = new Vector3(-2, 3, 4),
+        Rotation = Quaternion.CreateFromYawPitchRoll(.3f, .2f, .1f), EditorGroups = new[] { "room" }
+    });
+    var middle = world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass" });
+    var last = world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass", Position = new Vector3(8, 0, 0) });
+    Selection.SelectDetail(first.Id); Selection.ToggleDetail(last.Id); UndoRedo.Clear();
+    Check(Editor.CanDuplicateSelection && SceneSelection.Duplicate() == 2);
+    var ids = Selection.Details.Select(detail => detail.Id).ToArray();
+    Check(world.Details.Count == 5 && ids.All(id => id != first.Id && id != middle.Id && id != last.Id) &&
+          ids.Distinct().Count() == 2);
+    var copy = Selection.Details[0];
+    Check(copy.AssetPath == first.AssetPath && copy.Position == first.Position && copy.Scale == first.Scale &&
+          MathF.Abs(Quaternion.Dot(copy.Rotation, first.Rotation)) > .99999f &&
+          copy.EditorGroups.SequenceEqual(first.EditorGroups));
+    UndoRedo.Undo();
+    Check(world.Details.Select(detail => detail.Id).SequenceEqual(new[] { first.Id, middle.Id, last.Id }) &&
+          Selection.Details.Select(detail => detail.Id).SequenceEqual(new[] { first.Id, last.Id }) && !UndoRedo.CanUndo);
+    UndoRedo.Redo();
+    Check(Selection.Details.Select(detail => detail.Id).SequenceEqual(ids) && world.Details.Count == 5);
+    UndoRedo.Undo(); UndoRedo.Redo();
+    Check(Selection.Details.Select(detail => detail.Id).SequenceEqual(ids));
+});
+
+RunScene("Mixed duplication and deletion preserve object GUIDs, Detail IDs, order and older history", () =>
+{
+    var world = Game.Instance.World;
+    var obj = SceneObjects.Create(PlaceableType.Entity, "Check");
+    obj.SetActive(false);
+    var reference = EditorObjectReference.Get(obj);
+    var untouched = SceneObjects.Create(PlaceableType.BrushBox);
+    var a = world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass", Position = new Vector3(-2, 0, 0) });
+    var b = world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass" });
+    var c = world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass", Position = new Vector3(2, 0, 0) });
+    Selection.Object = obj; Selection.ToggleDetail(a.Id); Selection.ToggleDetail(c.Id);
+    UndoRedo.Clear();
+    Check(Editor.CanDuplicateSelection && SceneSelection.Duplicate() == 3);
+    var copiedObject = Selection.Objects.Single(); var copyGuid = copiedObject.Guid;
+    var copiedDetails = Selection.Details.Select(detail => detail.Id).ToArray();
+    Check(copyGuid != obj.Guid && copiedDetails.Length == 2 && world.Details.Count == 5);
+    UndoRedo.Undo();
+    Check(copiedObject.IsDestroyed && world.Details.Count == 3 && Selection.Targets.Length == 3 && !UndoRedo.CanUndo);
+    UndoRedo.Redo();
+    Check(Selection.Objects.Single().Guid == copyGuid && Selection.Details.Select(detail => detail.Id).SequenceEqual(copiedDetails));
+    UndoRedo.Undo(); UndoRedo.Clear();
+    reference = EditorObjectReference.Get(obj);
+    var target = Selection.Targets.First(item => item.IsDetail && item.Id == a.Id);
+    SceneDetails.SetTransform(target, TransformState.Capture(target.Transform) with { Position = new Vector3(5, 0, 0) }, "Detail/Position", false);
+    SceneGroups.Load([new EditorGroupData { Id = "room", Name = "Room" }]);
+    SceneGroups.AddSelected("room");
+    SceneSelection.Delete();
+    Check(obj.IsDestroyed && !untouched.IsDestroyed && world.Details.Single().Id == b.Id && Selection.Targets.Length == 0);
+    UndoRedo.Undo();
+    Check(reference.Current.Guid == obj.Guid && !reference.Current.IsActive &&
+          world.Details.Select(detail => detail.Id).SequenceEqual(new[] { a.Id, b.Id, c.Id }) &&
+          Selection.Targets.Length == 3 && world.Details.Find(a.Id)!.Position.X == 5);
+    UndoRedo.Undo();
+    Check(!reference.Current.EditorGroups.Contains("room") && !world.Details.Find(a.Id)!.EditorGroups.Contains("room"));
+    UndoRedo.Undo();
+    Check(world.Details.Find(a.Id)!.Position == a.Position && !UndoRedo.CanUndo);
+    UndoRedo.Redo(); UndoRedo.Redo(); UndoRedo.Redo();
+    Check(reference.Current.IsDestroyed && world.Details.Single().Id == b.Id && !untouched.IsDestroyed);
+});
+
+RunScene("Detail and Object groups share assignment, removal, visibility, deletion and map history", () =>
+{
+    var world = Game.Instance.World;
+    var obj = SceneObjects.Create(PlaceableType.BrushBox);
+    obj.EditorGroups.Add("other");
+    var detail = world.Details.Add(new DetailPlacement
+    {
+        AssetPath = "Tests/Grass", Position = new Vector3(3, 4, 5),
+        Rotation = Quaternion.CreateFromYawPitchRoll(.4f, .3f, .2f), EditorGroups = new[] { "other" }
+    });
+    SceneGroups.Load([
+        new EditorGroupData { Id = "room", Name = "Room" },
+        new EditorGroupData { Id = "other", Name = "Other" }
+    ]);
+    Selection.Object = obj; Selection.ToggleDetail(detail.Id);
+    EditorLevelManager.Initialize(); UndoRedo.Clear();
+    SceneGroups.AddSelected("room");
+    Check(obj.EditorGroups.Contains("room") && world.Details.Find(detail.Id)!.EditorGroups.Contains("room"));
+    UndoRedo.Undo(); EditorLevelManager.RefreshDirty();
+    Check(!EditorLevelManager.IsDirty && obj.EditorGroups.SequenceEqual(new[] { "other" }) &&
+          world.Details.Find(detail.Id)!.EditorGroups.SequenceEqual(new[] { "other" }) && !UndoRedo.CanUndo);
+    UndoRedo.Redo();
+    SceneGroups.SetVisible("room", false);
+    Check(!obj.IsEditorVisible && !EditorSelectionTarget.ForDetail(world, detail.Id).IsEditorVisible && obj.IsActive);
+    var editor = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+    try
+    {
+        editor.SetValue(null, false);
+        Check(obj.IsEditorVisible && EditorSelectionTarget.ForDetail(world, detail.Id).IsEditorVisible);
+    }
+    finally { editor.SetValue(null, true); }
+    UndoRedo.Undo(); Check(obj.IsEditorVisible && EditorSelectionTarget.ForDetail(world, detail.Id).IsEditorVisible);
+    UndoRedo.Redo();
+    SceneGroups.RemoveSelected("room");
+    Check(obj.IsEditorVisible && EditorSelectionTarget.ForDetail(world, detail.Id).IsEditorVisible &&
+          obj.EditorGroups.Contains("other") && world.Details.Find(detail.Id)!.EditorGroups.Contains("other"));
+    UndoRedo.Undo();
+    SceneGroups.Delete("room");
+    Check(SceneGroups.Capture().All(group => group.Id != "room") && obj.IsEditorVisible &&
+          !world.Details.Find(detail.Id)!.EditorGroups.Contains("room"));
+    UndoRedo.Undo();
+    Check(!obj.IsEditorVisible && !EditorSelectionTarget.ForDetail(world, detail.Id).IsEditorVisible &&
+          world.Details.Find(detail.Id)!.EditorGroups.Contains("other"));
+    var path = Path.Combine(testRoot, "detail-groups.map");
+    EditorLevelManager.SaveCurrentLevel(path); EditorLevelManager.OpenLevel(path);
+    Check(Game.Instance.World.Details.Find(detail.Id)!.EditorGroups.Contains("room") &&
+          SceneGroups.Capture().Single(group => group.Id == "room").Visible == false &&
+          !EditorSelectionTarget.ForDetail(world, detail.Id).IsEditorVisible);
+});
+
+RunScene("Failed mixed duplication leaves no Details, objects, colliders or history fragments", () =>
+{
+    var world = Game.Instance.World;
+    var obj = (RejectingEntity)SceneObjects.Create(PlaceableType.Entity, "Rejecting");
+    var detail = world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass" });
+    Selection.SelectDetail(detail.Id); Selection.Toggle(obj); UndoRedo.Clear();
+    RecordInspector(obj, "Value", () => obj.Value = 3);
+    UndoRedo.Undo();
+    var originals = world.GetAllObjects(true).Where(item => !item.IsDestroyed).ToArray();
+    var colliders = Physics.OverlapSphereAll(Vector3.Zero, 100, Layers.Everything).Length;
+    RejectingEntity.RejectWrites = true;
+    try { Throws(() => SceneSelection.Duplicate()); }
+    finally { RejectingEntity.RejectWrites = false; }
+    Check(world.Details.Single().Id == detail.Id && world.GetAllObjects(true).Where(item => !item.IsDestroyed).SequenceEqual(originals));
+    Check(Selection.Objects.Single() == obj && Selection.Details.Single().Id == detail.Id && !UndoRedo.CanUndo && UndoRedo.CanRedo);
+    Check(Physics.OverlapSphereAll(Vector3.Zero, 100, Layers.Everything).Length == colliders);
+    UndoRedo.Redo(); Check(obj.Value == 3);
+});
+
+RunScene("Mixed deletion survives failed object restoration and can retry without duplicating Details", () =>
+{
+    var world = Game.Instance.World;
+    var good = SceneObjects.Create(PlaceableType.BrushBox);
+    var rejecting = SceneObjects.Create(PlaceableType.Entity, "Rejecting");
+    var detail = world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass" });
+    Selection.Set([good, rejecting]); Selection.ToggleDetail(detail.Id); UndoRedo.Clear();
+    var refs = Selection.Objects.Select(EditorObjectReference.Get).ToArray();
+    SceneSelection.Delete();
+    RejectingEntity.RejectWrites = true;
+    try { Throws(UndoRedo.Undo); }
+    finally { RejectingEntity.RejectWrites = false; }
+    Check(world.GetAllObjects(true).All(item => item.IsDestroyed) && world.Details.Count == 0 && UndoRedo.CanUndo);
+    UndoRedo.Undo();
+    Check(Selection.Objects.SequenceEqual(refs.Select(reference => reference.Current)) &&
+          Selection.Details.Single().Id == detail.Id && world.Details.Count == 1);
+    UndoRedo.Redo(); Check(world.Details.Count == 0 && refs.All(reference => reference.Current.IsDestroyed));
+});
+RunScene("Mixed deletion stays undoable when an object Destroy callback throws", () =>
+{
+    var world = Game.Instance.World;
+    File.WriteAllText(Path.Combine(testRoot, "Entities", "MixedThrowDelete.json"),
+        "{\"Class\":\"ThrowingDeleteEntity, EditorChecks\",\"Parameters\":{}}");
+    var obj = SceneObjects.Create(PlaceableType.Entity, "MixedThrowDelete");
+    var detail = world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass" });
+    Selection.Object = obj; Selection.ToggleDetail(detail.Id); UndoRedo.Clear();
+    var reference = EditorObjectReference.Get(obj);
+    var previous = ThrowingDeleteEntity.RejectDestroy;
+    try
+    {
+        ThrowingDeleteEntity.RejectDestroy = true;
+        Throws(SceneSelection.Delete);
+        Check(obj.IsDestroyed && world.Details.Count == 0 && UndoRedo.CanUndo);
+        ThrowingDeleteEntity.RejectDestroy = false;
+        UndoRedo.Undo();
+        Check(!reference.Current.IsDestroyed && reference.Current.Guid == obj.Guid &&
+              world.Details.Single().Id == detail.Id && Selection.Targets.Length == 2);
+        UndoRedo.Redo();
+        Check(reference.Current.IsDestroyed && world.Details.Count == 0);
+    }
+    finally
+    {
+        ThrowingDeleteEntity.RejectDestroy = false;
+        world.Clear();
+        ThrowingDeleteEntity.RejectDestroy = previous;
+    }
+});
 Run("Saving includes pending objects, skips runtime objects and copies output values", () =>
 {
     Game.Instance.World.Clear();
@@ -691,7 +1178,7 @@ Run("BackfaceCulling survives map, Inspector snapshots, duplication and prefab p
     EditorLevelManager.SaveLevel(level, path);
     EditorLevelManager.OpenLevel(path);
     Check(Game.Instance.World.GetAllObjects(true).All(obj => !obj.GetComponent<MeshComponent>()!.BackfaceCulling));
-    var prefabPath = Content.PrefabPath("CullingCheck");
+    var prefabPath = Content.GetPrefabPath("CullingCheck");
     File.WriteAllText(prefabPath, JsonConvert.SerializeObject(level.Placeables[0], JsonHelper.GetSettings()));
     try
     {
@@ -1149,7 +1636,7 @@ Run("Missing named levels fail explicitly without changing active state", () =>
     Check(LevelManager.ActiveLevel == null && !LevelManager.IsLoading);
 });
 
-Run("Inactive placement survives save/load, defers Start and can be enabled through SetActive input", () =>
+Run("Inactive entities survive save/load and defer Start while static Geometry stays active", () =>
 {
     EditorLevelManager.NewLevel();
     var source = (CheckEntity)Entity.Create("Check")!;
@@ -1157,8 +1644,9 @@ Run("Inactive placement survives save/load, defers Start and can be enabled thro
     source.SetActive(false);
     var geometry = Geometry.Create("Box")!;
     geometry.SetActive(false);
+    geometry.Transform.Position = new Vector3(10, 0, 0);
     var snapshot = EditorLevelManager.CaptureCurrentLevel();
-    Check(snapshot.Placeables.Length == 2 && snapshot.Placeables.All(p => !p.IsActive));
+    Check(snapshot.Placeables.Length == 2 && !snapshot.Placeables[0].IsActive && snapshot.Placeables[1].IsActive);
     var path = Path.Combine(testRoot, "inactive.map");
     EditorLevelManager.SaveLevel(snapshot, path);
     EditorLevelManager.OpenLevel(path);
@@ -1194,6 +1682,41 @@ Run("Inactive placement duplicates as inactive and activity participates in dirt
     Check(!copy.IsActive);
 });
 
+Run("Runtime static map placements ignore legacy inactive flags and lock only after initial placement", () =>
+{
+    var world = new World();
+    try
+    {
+        var position = new Vector3(2, 3, 4);
+        var rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, .5f);
+        var scale = new Vector3(2);
+        var geometry = LevelManager.CreateObject(world, new Placeable
+        {
+            Type = PlaceableType.Geometry, Path = "Box", IsActive = false,
+            Position = position, Rotation = rotation, Scale = scale
+        });
+        Check(geometry.IsStatic && geometry.IsActive && geometry.Transform.Position == position);
+        geometry.Transform.Position = Vector3.Zero;
+        geometry.Transform.Rotation = Quaternion.Identity;
+        geometry.Transform.Scale = Vector3.One;
+        geometry.SetActive(false);
+        geometry.Destroy();
+        Check(!geometry.IsDestroyed && geometry.IsActive && geometry.Transform.Position == position &&
+              MathF.Abs(Quaternion.Dot(geometry.Transform.Rotation, rotation)) > .9999f &&
+              geometry.Transform.Scale == scale);
+        var brush = (BrushBox)LevelManager.CreateObject(world, new Placeable
+        {
+            Type = PlaceableType.BrushBox, IsActive = false, Position = position,
+            Brush = new BrushBoxData { Size = new Vector3(2), Movable = false }
+        });
+        brush.Movable = true;
+        brush.SimulatePhysics = true;
+        Check(brush.IsStatic && brush.IsActive && !brush.SimulatePhysics);
+        world.Clear();
+        Check(geometry.IsDestroyed && brush.IsDestroyed);
+    }
+    finally { world.Clear(); }
+});
 Run("Legacy maps without IsActive default to enabled placements", () =>
 {
     var legacy = JsonConvert.DeserializeObject<Level>(
@@ -1302,6 +1825,9 @@ Run("Dynamic BrushBoxes fall and stack on a solid floor; destroying it removes i
     {
         var floor = world.Spawn<BrushBox>();
         floor.Size = new Vector3(10f, 1f, 10f);
+        // A removable support must be nonstatic; a disabled body keeps it solid in Bepu.
+        floor.Movable = true;
+        floor.AddComponent<Rigidbody>().IsEnabled = false;
         floor.Transform.Position = new Vector3(0f, -0.5f, 0f);
 
         var trigger = world.Spawn<BrushBox>();
@@ -2264,7 +2790,7 @@ RunScene("Single-object prefabs save independent values and Outputs, and support
     source.Outputs.Add(new OutputData { Event = "OnUsed", TargetName = "gate", Input = "SetActive", Parameter = "true" });
     var name = "Logic/Lever-" + Guid.NewGuid().ToString("N");
     source.Values = [1, 2, 3];
-    var path = Content.PrefabPath(name);
+    var path = Content.GetPrefabPath(name);
     try
     {
         PrefabTools.Save(source, name);
@@ -2296,8 +2822,8 @@ RunScene("Single-object prefabs save independent values and Outputs, and support
         var previous = File.ReadAllText(path);
         Throws(() => PrefabTools.Save(source, name));
         Check(File.ReadAllText(path) == previous);
-        Throws(() => Content.PrefabPath("../outside"));
-        Throws(() => Content.PrefabPath(Path.GetFullPath("outside")));
+        Throws(() => Content.GetPrefabPath("../outside"));
+        Throws(() => Content.GetPrefabPath(Path.GetFullPath("outside")));
     }
     finally { File.Delete(path); }
 });
@@ -2388,7 +2914,7 @@ RunScene("Prefab sets insert relative to a pivot and undo as one independent set
     a.Values = [1, 2];
     a.Outputs.Add(new OutputData { Event = "OnUsed", TargetName = b.Name, Input = "SetActive", Parameter = "true" });
     var name = "Puzzles/Set-" + Guid.NewGuid().ToString("N");
-    var path = Content.PrefabPath(name);
+    var path = Content.GetPrefabPath(name);
     try
     {
         PrefabTools.Save(new GameObject[] { a, b }, name);
@@ -2410,7 +2936,7 @@ RunScene("Prefab sets insert relative to a pivot and undo as one independent set
         Check(((CheckEntity)references[0].Current).Values.Count == 2 && a.Values.Count == 2);
         Check(second.Select(o => o.Name).Intersect(references.Select(r => r.Current.Name)).Count() == 0);
         var oldName = "Old-" + Guid.NewGuid().ToString("N");
-        var oldPath = Content.PrefabPath(oldName);
+        var oldPath = Content.GetPrefabPath(oldName);
         try
         {
             File.WriteAllText(oldPath, JsonConvert.SerializeObject(EditorLevelManager.CaptureLevel([a]).Placeables[0], JsonHelper.GetSettings()));
@@ -2713,7 +3239,54 @@ if (args.Contains("--imgui"))
             UndoRedo.Redo();
             Check(obj.Name == "Door-01");
         });
-        RunScene("Real Palette creation and Inspector deletion participate in the same history", () =>
+        RunScene("Real Groups controls assign and remove mixed members and toggle only editor visibility", () =>
+        {
+            var world = Game.Instance.World;
+            var obj = SceneObjects.Create(PlaceableType.BrushBox);
+            var detail = world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass" });
+            SceneGroups.Load([new EditorGroupData { Id = "ui-room", Name = "Room" }]);
+            Selection.Object = obj; Selection.ToggleDetail(detail.Id); UndoRedo.Clear();
+            void DrawGroups()
+            {
+                ImGuiNET.ImGui.Begin("Detail Groups test");
+                SceneGroups.Draw(world.GetAllObjects(true));
+                ImGuiNET.ImGui.End();
+            }
+            Frame(DrawGroups);
+            Frame(DrawGroups, 55, 82, true); Frame(DrawGroups, 55, 82, false);
+            Frame(DrawGroups, 40, 105, true); Frame(DrawGroups, 40, 105, false);
+            Check(obj.EditorGroups.Contains("ui-room") && world.Details[0].EditorGroups.Contains("ui-room"));
+            UndoRedo.Undo(); Check(!obj.EditorGroups.Contains("ui-room") && world.Details[0].EditorGroups.Count == 0);
+            UndoRedo.Redo();
+            Frame(DrawGroups, 14, 82, true); Frame(DrawGroups, 14, 82, false);
+            Check(!obj.IsEditorVisible && !EditorSelectionTarget.ForDetail(world, detail.Id).IsEditorVisible && obj.IsActive);
+            UndoRedo.Undo();
+            Frame(DrawGroups, 40, 128, true); Frame(DrawGroups, 40, 128, false);
+            Check(!obj.EditorGroups.Contains("ui-room") && world.Details[0].EditorGroups.Count == 0);
+            UndoRedo.Undo();
+            Check(obj.EditorGroups.Contains("ui-room") && world.Details[0].EditorGroups.Contains("ui-room"));
+        });        RunScene("Real Detail Inspector drags transform fields and restores them through shared Undo/Redo", () =>
+        {
+            var world = Game.Instance.World;
+            var detail = world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass" });
+            Selection.SelectDetail(detail.Id);
+            UndoRedo.Clear();
+            Frame(Inspector.Draw);
+            for (var y = 38; y <= 66 && world.Details[0].Position == Vector3.Zero; y += 2)
+            {
+                Frame(Inspector.Draw, 30, y, true);
+                Frame(Inspector.Draw, 70, y, true);
+                Frame(Inspector.Draw, 110, y, true);
+                Frame(Inspector.Draw, 110, y, false);
+            }
+            var edited = world.Details[0].Position;
+            Check(edited != Vector3.Zero && UndoRedo.CanUndo);
+            UndoRedo.Undo();
+            Check(world.Details[0].Position == Vector3.Zero && !UndoRedo.CanUndo);
+            UndoRedo.Redo();
+            Check(world.Details[0].Position == edited && Selection.Detail?.Id == detail.Id);
+            Check(world.GetAllObjects(true).Length == 0);
+        });        RunScene("Real Palette creation and Inspector deletion participate in the same history", () =>
         {
             var world = Game.Instance.World;
             Frame(Palette.Draw);

@@ -62,7 +62,7 @@ public static class PrefabTools
         
         var pivot = placements.Aggregate(Vector3.Zero, (sum, p) => sum + p.Position) / placements.Length;
         
-        var path = Content.PrefabPath(name);
+        var path = Content.GetPrefabPath(name);
         var serializer = JsonSerializer.Create(JsonHelper.GetSettings());
         var members = new JArray();
         

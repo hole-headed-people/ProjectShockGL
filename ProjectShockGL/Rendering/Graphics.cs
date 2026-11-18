@@ -20,6 +20,11 @@ public class Graphics
         Renderer = renderer;
     }
 
+    internal void DrawInstances(InstancedMesh instances, Texture texture, Color color, bool lit, bool backfaceCulling)
+    {
+        Renderer.DrawInstances(instances, texture, color, lit, backfaceCulling);
+    }
+
     public void BeginDraw(Camera camera)
     {
         _camera = camera;
@@ -169,22 +174,35 @@ public class Graphics
         Renderer.DrawMesh(mesh, texture, model, color, lit, ignoreDepth, shader, shaderParameters, backfaceCulling);
     }
 
-    public void DrawBillboard(Vector3 position, Vector2 size, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
+    public void DrawBillboard(Vector3 position, Vector2 size, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, BillboardMode mode = BillboardMode.ViewAligned)
     {
-        var right = _camera.Transform.Right * size.X;
-        var up = _camera.Transform.Up * size.Y;
-        var forward = _camera.Transform.Forward;
+        var model = CreateBillboardModel(_camera, position, size, mode);
+        Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters);
+    }
 
-        var model = new Matrix4x4(
+    internal static Matrix4x4 CreateBillboardModel(Camera camera, Vector3 position, Vector2 size, BillboardMode mode)
+    {
+        var right = camera.Transform.Right * size.X;
+        var up = camera.Transform.Up * size.Y;
+        var forward = camera.Transform.Forward;
+
+        if (mode == BillboardMode.YAxis)
+        {
+            var toCamera = camera.Transform.Position - position;
+            toCamera.Y = 0;
+            // Directly above/below, the horizontal direction is undefined. Use a stable world axis.
+            forward = toCamera.LengthSquared() > 1e-8f ? Vector3.Normalize(toCamera) : Vector3.UnitZ;
+            right = Vector3.Cross(Vector3.UnitY, forward) * size.X;
+            up = Vector3.UnitY * size.Y;
+        }
+
+        return new Matrix4x4(
             right.X,   right.Y,   right.Z,   0f,
             up.X,      up.Y,      up.Z,      0f,
             forward.X, forward.Y, forward.Z, 0f,
             position.X, position.Y, position.Z, 1f
         );
-
-        Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters);
     }
-
     public void EndDraw()
     {
         Renderer.EndFrame();

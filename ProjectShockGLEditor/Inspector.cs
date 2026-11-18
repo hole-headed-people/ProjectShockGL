@@ -29,16 +29,23 @@ public static class Inspector
 
         var obj = Selection.Object;
         
-        if (Selection.Objects.Length > 1)
+        if (Selection.Targets.Length > 1)
         {
-            ImGui.TextUnformatted($"Selected objects: {Selection.Objects.Length}");
+            ImGui.TextUnformatted($"Selected objects: {Selection.Targets.Length}");
             ImGui.TextWrapped("Multiple-object editing is not available. Use the scene gizmo to move, rotate or scale the selection.");
-            PrefabTools.DrawSave();
+            if (Selection.Details.Length == 0) PrefabTools.DrawSave();
             ImGui.End();
             
             return;
         }
         
+        if (Selection.Targets.LastOrDefault() is { IsDetail: true } detailTarget)
+        {
+            DetailInspector.Draw(detailTarget);
+            ImGui.End();
+            return;
+        }
+
         if (obj == null || obj.IsDestroyed)
         {
             ImGui.TextWrapped("Select an object in the scene or the Scene list.");
@@ -88,11 +95,13 @@ public static class Inspector
         
         var isActive = obj.IsActive;
         
+        ImGui.BeginDisabled(obj.IsStatic);
         if (ImGui.Checkbox("IsActive", ref isActive))
         {
             obj.SetActive(isActive);
             Changed("IsActive", true);
         }
+        ImGui.EndDisabled();
 
 
         if (obj is BrushBox brush)

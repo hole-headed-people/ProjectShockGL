@@ -983,6 +983,133 @@ void Render()
     Check(text.MeasureText().X > 0);
     canvas.Destroy();
     Check(!font.IsDisposed);
+    ProjectShockGL.Core.Game.Initialize();
+    var detailWorld = new World();
+    typeof(ProjectShockGL.Core.Game).GetProperty(nameof(ProjectShockGL.Core.Game.World))!
+        .SetValue(ProjectShockGL.Core.Game.Instance, detailWorld);
+    var detailEditorBefore = Application.IsEditor;
+    var detailCamera = ProjectShockGLEditor.TransformState.Capture(Camera.Active.Transform);
+    var detailAspect = Camera.Active.AspectRatio;
+    var detailOrtho = Camera.Active.Orthographic;
+    var detailContext = ImGuiNET.ImGui.CreateContext();
+    editorProperty.SetValue(null, true);
+    try
+    {
+        ProjectShockGLEditor.EditorLevelManager.NewLevel();
+        Camera.Active.Transform.Position = new Vector3(0, 0, 6);
+        Camera.Active.Transform.Rotation = Quaternion.Identity;
+        Camera.Active.AspectRatio = 1280f / 800;
+        Camera.Active.Orthographic = false;
+        var io = ImGuiNET.ImGui.GetIO();
+        io.DisplaySize = new Vector2(1280, 800);
+        io.DeltaTime = 1f / 60;
+        unsafe { io.Fonts.GetTexDataAsRGBA32(out byte* pixels, out int width, out int height); }
+        var paletteType = typeof(ProjectShockGLEditor.Palette);
+        paletteType.GetField("_tab", privateStatic)!.SetValue(null, "Details");
+        paletteType.GetField("_currentType", privateStatic)!.SetValue(null, "");
+        void DetailFrame(Vector2 mouse, bool down)
+        {
+            io.MousePos = mouse;
+            io.MouseDown[0] = down;
+            ImGuiNET.ImGui.NewFrame();
+            ImGuiNET.ImGui.SetNextWindowPos(Vector2.Zero);
+            ImGuiNET.ImGui.SetNextWindowSize(new Vector2(230, 800));
+            ProjectShockGLEditor.Palette.Draw();
+            ImGuiNET.ImGui.SetNextWindowPos(new Vector2(960, 0));
+            ImGuiNET.ImGui.SetNextWindowSize(new Vector2(320, 800));
+            ProjectShockGLEditor.Inspector.Draw();
+            ProjectShockGLEditor.ObjectManipulator.Draw(io.DisplaySize, new Vector2(230, 82), new Vector2(960, 772), true);
+            ImGuiNET.ImGui.Render();
+        }
+        DetailFrame(new Vector2(-1), false);
+        paletteType.GetField("_selected", privateStatic)!.SetValue(null, "ExampleCube");
+        for (var y = 680; y <= 795 && detailWorld.Details.Count == 0; y += 3)
+        {
+            DetailFrame(new Vector2(20, y), true);
+            DetailFrame(new Vector2(20, y), false);
+        }
+        Check(detailWorld.Details.Count == 1 && ProjectShockGLEditor.Selection.Detail != null &&
+              detailWorld.GetAllObjects(true).Length == 0);
+        var id = detailWorld.Details[0].Id;
+        ProjectShockGLEditor.UndoRedo.Undo(); Check(detailWorld.Details.Count == 0);
+        ProjectShockGLEditor.UndoRedo.Redo(); Check(detailWorld.Details[0].Id == id);
+        for (var y = 115; y <= 350 && detailWorld.Details.Count == 1; y += 3)
+        {
+            DetailFrame(new Vector2(1060, y), true);
+            DetailFrame(new Vector2(1060, y), false);
+        }
+        Check(detailWorld.Details.Count == 2 && ProjectShockGLEditor.Selection.Detail!.Id != id);
+        var copyId = ProjectShockGLEditor.Selection.Detail!.Id;
+        ProjectShockGLEditor.UndoRedo.Undo();
+        Check(detailWorld.Details.Count == 1 && ProjectShockGLEditor.Selection.Detail!.Id == id);
+        ProjectShockGLEditor.UndoRedo.Redo();
+        Check(ProjectShockGLEditor.Selection.Detail!.Id == copyId);
+        for (var y = 115; y <= 350 && detailWorld.Details.Count == 2; y += 3)
+        {
+            DetailFrame(new Vector2(1150, y), true);
+            DetailFrame(new Vector2(1150, y), false);
+        }
+        Check(detailWorld.Details.Count == 1 && detailWorld.Details[0].Id == id);
+        ProjectShockGLEditor.UndoRedo.Undo();
+        Check(detailWorld.Details.Count == 2 && ProjectShockGLEditor.Selection.Detail!.Id == copyId);
+        ProjectShockGLEditor.UndoRedo.Undo();
+        Check(detailWorld.Details.Count == 1 && ProjectShockGLEditor.Selection.Detail!.Id == id);
+        Camera.Active.Transform.Position = new Vector3(0, 0, 6);
+        Camera.Active.Transform.Rotation = Quaternion.Identity;
+        Console.WriteLine("PASS: Real Detail Inspector Duplicate/Delete buttons use atomic Undo/Redo with stable restored IDs");
+        ProjectShockGLEditor.UndoRedo.Clear();
+        ProjectShockGLEditor.ObjectManipulator.Mode = ProjectShockGLEditor.ManipulationMode.Move;
+        ProjectShockGLEditor.ObjectManipulator.Local = false;
+        ProjectShockGLEditor.ObjectManipulator.SnapEnabled = false;
+        var size = io.DisplaySize;
+        var vp = Camera.Active.GetViewMatrix() * Camera.Active.GetProjectionMatrix();
+        var length = 2 * 6 * MathF.Tan(Camera.Active.Fov * .5f) * 90 / size.Y;
+        ProjectShockGLEditor.GizmoMath.Project(Vector3.UnitX * length * .65f, vp, size, out var start);
+        ProjectShockGLEditor.GizmoMath.Project(Vector3.UnitX * (length * .65f + .5f), vp, size, out var end);
+        DetailFrame(start, false);
+        DetailFrame(start, true);
+        Check(ProjectShockGLEditor.ObjectManipulator.IsDragging);
+        DetailFrame(end, true);
+        DetailFrame(end, false);
+        Check(MathF.Abs(detailWorld.Details[0].Position.X - .5f) < .015f); // ImGui quantizes mouse positions to pixels.
+        ProjectShockGLEditor.UndoRedo.Undo();
+        Check(detailWorld.Details[0].Position == Vector3.Zero && !ProjectShockGLEditor.UndoRedo.CanUndo);
+        ProjectShockGLEditor.UndoRedo.Redo();
+        ProjectShockGLEditor.UndoRedo.Undo();
+        DetailFrame(start, false); DetailFrame(start, true); DetailFrame(end, true);
+        io.AddKeyEvent(ImGuiNET.ImGuiKey.Escape, true);
+        DetailFrame(end, true);
+        io.AddKeyEvent(ImGuiNET.ImGuiKey.Escape, false);
+        DetailFrame(end, false);
+        Check(!ProjectShockGLEditor.ObjectManipulator.IsDragging && detailWorld.Details[0].Position == Vector3.Zero);
+        Check(ImGuiNET.ImGui.GetDrawData().TotalVtxCount > 0);
+        detailWorld.Update(0, simulate: false);
+        gl.Viewport(0, 0, 640, 240);
+        graphics.BeginDraw(Camera.Active);
+        var detailQueue = new RenderQueue();
+        detailWorld.Render(detailQueue, false);
+        detailQueue.Flush(graphics);
+        graphics.EndDraw();
+        Check(graphics.Statistics.DrawCalls == 1 && gl.GetError() == GLEnum.NoError);
+        var map = Path.Combine(AppContext.BaseDirectory, "DetailEditorRoundtrip.map");
+        ProjectShockGLEditor.EditorLevelManager.SaveCurrentLevel(map);
+        ProjectShockGLEditor.EditorLevelManager.OpenLevel(map);
+        Check(detailWorld.Details.Single().Id == id);
+        File.Delete(map);
+        Console.WriteLine("PASS: Real Details Palette creates a GPU-backed placement, Inspector draws and mouse gizmo supports undo, redo and Escape");
+    }
+    finally
+    {
+        ProjectShockGLEditor.ObjectManipulator.Cancel();
+        ProjectShockGLEditor.Selection.Object = null;
+        ProjectShockGLEditor.UndoRedo.Clear();
+        LevelManager.Unload();
+        editorProperty.SetValue(null, detailEditorBefore);
+        detailCamera.Apply(Camera.Active.Transform);
+        Camera.Active.AspectRatio = detailAspect;
+        Camera.Active.Orthographic = detailOrtho;
+        ImGuiNET.ImGui.DestroyContext(detailContext);
+    }
     Content.UnloadAll();
     Check(font.IsDisposed && deformation.Handle == 0 && litDeformation.Handle == 0);
     Check(gl.GetError() == GLEnum.NoError);

@@ -1,0 +1,8 @@
+{
+  "Mesh": "Cube",
+  "Texture": "Default",
+  "TextureFormat": "Jpeg",
+  "Color": [1, 1, 1, 1],
+  "Lit": true,
+  "BackfaceCulling": true
+}

@@ -40,9 +40,8 @@ public static class Editor
     public static bool SceneHovered => InScene(Input.GetMousePosition());
     public static HashSet<string> HiddenEditorGroups { get; } = new(StringComparer.Ordinal);
     
-    public static bool CanDuplicateSelection => Selection.Objects.Length > 0 && Selection.Objects.All(o =>
-        o is ProjectShockGL.Core.Geometry or ProjectShockGL.Core.Entity or ProjectShockGL.Core.BrushBox);
-
+    public static bool CanDuplicateSelection => Selection.Targets.Length > 0 && Selection.Targets.All(target =>
+        target.IsDetail || target.Object is ProjectShockGL.Core.Geometry or ProjectShockGL.Core.Entity or ProjectShockGL.Core.BrushBox);
     public static void Initialize()
     {
         Application.LoadGl += OnLoad;
@@ -164,7 +163,7 @@ public static class Editor
         SceneGrid.Render(graphics);
         ProjectShockGL.Core.Game.Instance.World.DebugRenderSelected(new DebugDraw(graphics), Selection.Objects);
         
-        foreach (var selected in Selection.Objects.Where(o => o.IsEditorVisible))
+        foreach (var selected in Selection.Targets.Where(o => o.IsEditorVisible))
         {
             var bounds = selected.GetLocalBounds();
             graphics.DrawBoxWireframe(bounds.min, bounds.max, selected.Transform.GetModelMatrix(), Color.White);
@@ -364,14 +363,14 @@ public static class Editor
         
         Execute(() =>
         {
-            var copies = SceneObjects.Duplicate(Selection.Objects);
-            _status = $"Duplicated: {copies.Length} object(s)";
+            var count = Selection.Details.Length > 0 ? SceneSelection.Duplicate() : SceneObjects.Duplicate(Selection.Objects).Length;
+            _status = $"Duplicated: {count} item(s)";
         });
     }
 
     public static void DeleteSelection()
     {
-        var selected = Selection.Objects;
+        var selected = Selection.Targets;
         if (selected.Length == 0)
         {
             return;
@@ -379,8 +378,9 @@ public static class Editor
         
         Execute(() =>
         {
-            SceneObjects.Delete(selected);
-            _status = $"Deleted: {selected.Length} object(s)";
+            if (selected.Any(target => target.IsDetail)) SceneSelection.Delete();
+            else SceneObjects.Delete(Selection.Objects);
+            _status = $"Deleted: {selected.Length} item(s)";
         });
     }
 
@@ -421,7 +421,27 @@ public static class Editor
                 ImGui.PopID();
             }
 
-            if (objects.Length == 0)
+            var details = ProjectShockGL.Core.Game.Instance.World.Details;
+            if (details.Count > 0 && ImGui.TreeNode($"Details ({details.Count})"))
+            {
+                for (var i = 0; i < details.Count; i++)
+                {
+                    var detail = details[i];
+                    var target = EditorSelectionTarget.ForDetail(ProjectShockGL.Core.Game.Instance.World, detail.Id);
+                    ImGui.PushID(detail.Id.ToString());
+                    var label = Path.GetFileName(detail.AssetPath) + $" [{i + 1}]" + (target.IsEditorVisible ? "" : " (hidden)");
+                    if (ImGui.Selectable(label, Selection.Contains(target)))
+                    {
+                        if (ImGui.GetIO().KeyCtrl || Input.IsKey(Key.ControlLeft) || Input.IsKey(Key.ControlRight))
+                            Selection.ToggleTarget(target);
+                        else Selection.SetTarget(target);
+                    }
+                    ImGui.PopID();
+                }
+                ImGui.TreePop();
+            }
+
+            if (objects.Length == 0 && details.Count == 0)
             {
                 ImGui.TextWrapped("Create an object from the Palette below.");
             }
@@ -482,12 +502,12 @@ public static class Editor
                 Execute(() => { UndoRedo.Redo(); EditorLevelManager.RefreshDirty(); });
             }
 
-            if (ImGui.MenuItem("Duplicate object(s)", "Ctrl+D", false, CanDuplicateSelection && !ObjectManipulator.IsDragging))
+            if (ImGui.MenuItem("Duplicate selection", "Ctrl+D", false, CanDuplicateSelection && !ObjectManipulator.IsDragging))
             {
                 DuplicateSelection();
             }
 
-            if (ImGui.MenuItem("Delete object(s)", "Delete", false, Selection.Objects.Length > 0))
+            if (ImGui.MenuItem("Delete selection", "Delete", false, Selection.Targets.Length > 0))
             {
                 DeleteSelection();
             }

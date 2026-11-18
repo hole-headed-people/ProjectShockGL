@@ -35,3 +35,6 @@ Thumbs.db
 Desktop.ini
 
 # Keep source assets, maps, Settings.ini, Layers.ini and shared *.DotSettings in Git.
+
+# ImGui: local window layout
+imgui.ini

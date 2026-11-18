@@ -6,6 +6,7 @@ namespace ProjectShockGL.Core;
 public class BillboardComponent : RenderComponent
 {
     public Texture? Texture { get; set; }
+    public BillboardMode Mode { get; set; } = BillboardMode.ViewAligned;
     
     public override void Render(RenderQueue queue)
     {
@@ -15,6 +16,7 @@ public class BillboardComponent : RenderComponent
         
         var command = new BillboardCommand()
         {
+            Mode = Mode,
             Color = Color,
             Texture = Texture,
             Size = UseParentScale ? new Vector2(parentScale.X, parentScale.Y) * Scale : new Vector2(Scale),

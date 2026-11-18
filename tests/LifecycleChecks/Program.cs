@@ -140,6 +140,94 @@ Run("Clear during Update replaces the scene without updating old objects", () =>
     world.Clear();
 });
 
+Run("Static placement locks runtime transform, activity, mobility and direct destruction but allows cleanup", () =>
+{
+    var world = new World();
+    var obj = world.Spawn<GameObject>();
+    obj.SetActive(false);
+    obj.IsStatic = true;
+    Check(obj.IsActive);
+    obj.SetActive(false);
+    Check(obj.IsActive);
+    obj.Transform.Position = new System.Numerics.Vector3(2, 3, 4);
+    obj.Transform.Scale = new System.Numerics.Vector3(2);
+    var initialPosition = obj.Transform.Position;
+    var initialRotation = obj.Transform.Rotation;
+    var initialScale = obj.Transform.Scale;
+    world.Update(0);
+    obj.Transform.Position = System.Numerics.Vector3.Zero;
+    obj.Transform.Rotation = System.Numerics.Quaternion.CreateFromAxisAngle(System.Numerics.Vector3.UnitY, 1);
+    obj.Transform.Scale = System.Numerics.Vector3.One;
+    obj.SetActive(false);
+    obj.IsStatic = false;
+    obj.Destroy();
+    world.Destroy(obj);
+    Check(obj.Transform.Position == initialPosition && obj.Transform.Rotation == initialRotation &&
+          obj.Transform.Scale == initialScale && obj.IsActive && obj.IsStatic && !obj.IsDestroyed);
+    world.Clear();
+    Check(obj.IsDestroyed);
+
+    var brush = world.Spawn<BrushBox>();
+    brush.Size = new System.Numerics.Vector3(2, 3, 4);
+    world.Update(0);
+    brush.Movable = true;
+    brush.SimulatePhysics = true;
+    brush.Size = System.Numerics.Vector3.One;
+    Check(brush.IsStatic && !brush.Movable && !brush.SimulatePhysics &&
+          brush.Size == new System.Numerics.Vector3(2, 3, 4));
+    world.Clear();
+    Check(brush.IsDestroyed);
+});
+
+Run("Entities reject static mode and Geometry is always static and active", () =>
+{
+    GameObject entity = new Entity();
+    var rejected = false;
+    try { entity.IsStatic = true; }
+    catch (InvalidOperationException) { rejected = true; }
+    Check(rejected && !entity.IsStatic);
+    entity.SetActive(false);
+    Check(!entity.IsActive);
+
+    var geometry = new Geometry();
+    geometry.SetActive(false);
+    Check(geometry.IsStatic && geometry.IsActive);
+    rejected = false;
+    try { geometry.IsStatic = false; }
+    catch (InvalidOperationException) { rejected = true; }
+    Check(rejected && geometry.IsStatic);
+});
+
+Run("Editor retains static transform editing and deletion while activity remains enabled", () =>
+{
+    var editor = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+    var previous = Application.IsEditor;
+    var world = new World();
+    editor.SetValue(null, true);
+    try
+    {
+        var brush = world.Spawn<BrushBox>();
+        world.Update(0);
+        brush.Transform.Position = System.Numerics.Vector3.One;
+        brush.Transform.Scale = new System.Numerics.Vector3(2);
+        brush.SetActive(false);
+        Check(brush.Transform.Position == System.Numerics.Vector3.One &&
+              brush.Transform.Scale == new System.Numerics.Vector3(2) && brush.IsActive);
+        brush.Movable = true;
+        Check(!brush.IsStatic);
+        brush.SetActive(false);
+        Check(!brush.IsActive);
+        brush.Movable = false;
+        Check(brush.IsStatic && brush.IsActive);
+        world.Destroy(brush);
+        Check(brush.IsDestroyed);
+    }
+    finally
+    {
+        world.Clear();
+        editor.SetValue(null, previous);
+    }
+});
 Run("Static objects retain runtime protection but Clear releases them", () =>
 {
     var world = new World();
@@ -459,7 +547,7 @@ Run("KillY destroys entities only in simulation and allows overriding Kill and r
         ordinary.Transform.Position = new System.Numerics.Vector3(0, -11, 0);
         var doomed = world.Spawn<Entity>();
         doomed.Transform.Position = ordinary.Transform.Position;
-        doomed.IsStatic = true;
+        // Entity is always nonstatic; KillY still applies normally.
         var disabled = world.Spawn<Entity>();
         disabled.Transform.Position = ordinary.Transform.Position;
         disabled.SetActive(false);

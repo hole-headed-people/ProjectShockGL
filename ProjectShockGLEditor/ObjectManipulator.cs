@@ -15,7 +15,7 @@ public enum ManipulationMode
 
 public static class ObjectManipulator
 {
-    private static Object? _target;
+    private static EditorSelectionTarget? _target;
     
     private static TransformState _before;
     
@@ -34,7 +34,7 @@ public static class ObjectManipulator
     private static readonly Vector3[] Axes = [Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ];
     private static readonly uint[] Colors = [0xFF5555EF, 0xFF65CF65, 0xFFFFAA55];
 
-    private static (EditorObjectReference Reference, TransformState State)[] _members = [];
+    private static (EditorSelectionTarget Target, TransformState State)[] _members = [];
     private static readonly ProjectShockGL.Core.Transform GroupTransform = new();
     
     public static ManipulationMode Mode { get; set; } = ManipulationMode.Move;
@@ -45,9 +45,9 @@ public static class ObjectManipulator
     public static bool IsDragging => _target != null || BrushResizer.IsDragging;
     private static bool IsGroup => _members.Length > 1;
     
-    public static Vector3 Pivot => GetPivot(Selection.Objects.Where(o => o.IsEditorVisible).ToArray());
+    public static Vector3 Pivot => GetPivot(Selection.Targets.Where(o => o.IsEditorVisible).ToArray());
     
-    private static Vector3 GetPivot(Object[] objects)
+    private static Vector3 GetPivot(EditorSelectionTarget[] objects)
     {
         return objects.Length == 0
             ? Vector3.Zero
@@ -60,9 +60,9 @@ public static class ObjectManipulator
         
         foreach (var member in _members)
         {
-            if (!member.Reference.Current.IsDestroyed)
+            if (!member.Target.IsDestroyed)
             {
-                member.State.Apply(member.Reference.Current.Transform);
+                member.Target.Apply(member.State);
             }
         }
         
@@ -82,7 +82,7 @@ public static class ObjectManipulator
         
         var members = _members;
         var before = members.Select(m => m.State).ToArray();
-        var after = members.Select(m => TransformState.Capture(m.Reference.Current.Transform)).ToArray();
+        var after = members.Select(m => TransformState.Capture(m.Target.Transform)).ToArray();
         
         _target = null;
         _members = [];
@@ -97,9 +97,9 @@ public static class ObjectManipulator
         {
             for (var i = 0; i < members.Length; i++)
             {
-                if (!members[i].Reference.Current.IsDestroyed)
+                if (!members[i].Target.IsDestroyed)
                 {
-                    states[i].Apply(members[i].Reference.Current.Transform);
+                    members[i].Target.Apply(states[i]);
                 }
             }
         }, before, after));
@@ -109,16 +109,17 @@ public static class ObjectManipulator
     {
         if (Mode == ManipulationMode.Resize)
         {
+            if (Selection.Details.Length > 0) return false;
             return BrushResizer.Draw(screenSize, sceneMin, sceneMax, allowInput);
         }
         
         if (_target != null && (!Selection.Contains(_target) ||
-            _members.Any(m => m.Reference.Current.IsDestroyed || !m.Reference.Current.IsEditorVisible)))
+            _members.Any(m => m.Target.IsDestroyed || !m.Target.IsEditorVisible)))
         {
             Cancel();
         }
         
-        var target = Selection.Objects.LastOrDefault(o => o.IsEditorVisible);
+        var target = Selection.Targets.LastOrDefault(o => o.IsEditorVisible);
 
         if (target == null || target.IsDestroyed || !target.IsEditorVisible)
         {
@@ -254,7 +255,7 @@ public static class ObjectManipulator
         
         if (allowInput && hovered >= 0 && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
-            BeginDrag(target, hovered, mouse, length, camera.Transform.Forward, vp, screenSize);
+            BeginTargetDrag(target, hovered, mouse, length, camera.Transform.Forward, vp, screenSize);
             
             return true;
         }
@@ -262,24 +263,28 @@ public static class ObjectManipulator
         return allowInput && hovered >= 0;
     }
 
-    private static Vector3 GetAxis(Object target, int index)
+    private static Vector3 GetAxis(EditorSelectionTarget target, int index)
     {
-        return Local || (Mode == ManipulationMode.Scale && Selection.Objects.Count(o => o.IsEditorVisible) <= 1)
+        return Local || (Mode == ManipulationMode.Scale && Selection.Targets.Count(o => o.IsEditorVisible) <= 1)
             ? Vector3.Transform(Axes[index], target.Transform.Rotation)
             : Axes[index];
     }
 
     internal static void BeginDrag(Object target, int axisIndex, Vector2 mouse, float length,
+        Vector3 cameraForward, Matrix4x4 vp, Vector2 size) =>
+        BeginTargetDrag(EditorSelectionTarget.ForObject(target), axisIndex, mouse, length, cameraForward, vp, size);
+
+    internal static void BeginTargetDrag(EditorSelectionTarget target, int axisIndex, Vector2 mouse, float length,
         Vector3 cameraForward, Matrix4x4 vp, Vector2 size)
     {
-        var selected = Selection.Objects.Where(o => o.IsEditorVisible).ToArray();
+        var selected = Selection.Targets.Where(o => o.IsEditorVisible).ToArray();
 
-        if (!selected.Contains(target))
+        if (!selected.Any(item => item.Matches(target)))
         {
             selected = [target];
         }
         
-        _members = selected.Select(o => (EditorObjectReference.Get(o), TransformState.Capture(o.Transform))).ToArray();
+        _members = selected.Select(o => (o, TransformState.Capture(o.Transform))).ToArray();
         
         GroupTransform.Position = GetPivot(selected);
         GroupTransform.Rotation = Local ? target.Transform.Rotation : Quaternion.Identity;
@@ -341,6 +346,7 @@ public static class ObjectManipulator
 
         if (!IsGroup)
         {
+            _target.FlushTransform();
             return;
         }
         
@@ -349,7 +355,7 @@ public static class ObjectManipulator
         
         foreach (var member in _members)
         {
-            if (member.Reference.Current.IsDestroyed)
+            if (member.Target.IsDestroyed)
             {
                 continue;
             }
@@ -360,13 +366,24 @@ public static class ObjectManipulator
             relative *= factor;
             relative = Vector3.Transform(relative, _before.Rotation);
             
-            var transform = member.Reference.Current.Transform;
+            var transform = member.Target.Transform;
             
             transform.Position = GroupTransform.Position + Vector3.Transform(relative, deltaRotation);
             transform.Rotation = Mode == ManipulationMode.Rotate ? Quaternion.Normalize(deltaRotation * state.Rotation) : state.Rotation;
             transform.Scale = Mode == ManipulationMode.Scale ? Vector3.Max(new Vector3(.01f), state.Scale * factor) : state.Scale;
+            if (Mode == ManipulationMode.Scale && member.Target.IsDetail)
+            {
+                var scaled = state.Scale * factor;
+                transform.Scale = new Vector3(MathF.CopySign(MathF.Max(.01f, MathF.Abs(scaled.X)), scaled.X),
+                    MathF.CopySign(MathF.Max(.01f, MathF.Abs(scaled.Y)), scaled.Y),
+                    MathF.CopySign(MathF.Max(.01f, MathF.Abs(scaled.Z)), scaled.Z));
+            }
+            member.Target.FlushTransform();
         }
     }
+
+    private static float ScaleValue(float value) => _target is { IsDetail: true }
+        ? MathF.CopySign(MathF.Max(.01f, MathF.Abs(value)), value) : MathF.Max(.01f, value);
 
     private static void ApplyDragInternal(Vector2 mouse, Matrix4x4 vp, Vector2 size, bool snap)
     {
@@ -382,7 +399,7 @@ public static class ObjectManipulator
                 factor = MathF.Max(0.01f, GizmoMath.Snap(factor, ScaleStep));
             }
             
-            transform.Scale = Vector3.Max(new Vector3(0.01f), _before.Scale * factor);
+            transform.Scale = new Vector3(ScaleValue(_before.Scale.X * factor), ScaleValue(_before.Scale.Y * factor), ScaleValue(_before.Scale.Z * factor));
             
             return;
         }
@@ -435,17 +452,17 @@ public static class ObjectManipulator
 
             if (_dragAxis == 0)
             {
-                scale.X = MathF.Max(0.01f, _before.Scale.X * factor);
+                scale.X = ScaleValue(_before.Scale.X * factor);
             }
 
             if (_dragAxis == 1)
             {
-                scale.Y = MathF.Max(0.01f, _before.Scale.Y * factor);
+                scale.Y = ScaleValue(_before.Scale.Y * factor);
             }
 
             if (_dragAxis == 2)
             {
-                scale.Z = MathF.Max(0.01f, _before.Scale.Z * factor);
+                scale.Z = ScaleValue(_before.Scale.Z * factor);
             }
             
             transform.Scale = scale;

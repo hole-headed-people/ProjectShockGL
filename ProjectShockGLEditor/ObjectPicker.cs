@@ -9,8 +9,8 @@ public static class ObjectPicker
     private static Vector2 _cyclePosition;
     private static Vector2 _cycleScreenSize;
     private static Matrix4x4 _cycleViewProjection;
-    private static Guid[] _cycleCandidates = [];
-    private static Guid? _lastPicked;
+    private static (Guid Id, bool Detail)[] _cycleCandidates = [];
+    private static (Guid Id, bool Detail)? _lastPicked;
     private static int _cycleIndex;
 
     public static void PickAt(Vector2 mousePos, Vector2 screenSize, bool additive = false)
@@ -32,7 +32,7 @@ public static class ObjectPicker
             ResetCycle();
             if (hits.Length > 0)
             {
-                Selection.Toggle(hits[0]);
+                Selection.ToggleTarget(hits[0]);
             }
 
             return;
@@ -45,10 +45,10 @@ public static class ObjectPicker
             return;
         }
 
-        var candidates = hits.Select(obj => obj.Guid).ToArray();
-        var selected = Selection.Objects;
+        var candidates = hits.Select(obj => obj.Key).ToArray();
+        var selected = Selection.Targets;
         var continueCycle = _lastPicked.HasValue &&
-                            selected.Length == 1 && selected[0].Guid == _lastPicked &&
+                            selected.Length == 1 && selected[0].Key == _lastPicked &&
                             Vector2.DistanceSquared(mousePos, _cyclePosition) <= CycleTolerance * CycleTolerance &&
                             screenSize == _cycleScreenSize && viewProjection == _cycleViewProjection &&
                             candidates.SequenceEqual(_cycleCandidates);
@@ -67,8 +67,8 @@ public static class ObjectPicker
         }
 
         var picked = hits[_cycleIndex];
-        Selection.Object = picked;
-        _lastPicked = picked.Guid;
+        Selection.SetTarget(picked);
+        _lastPicked = picked.Key;
     }
 
     private static void ResetCycle()
@@ -78,10 +78,10 @@ public static class ObjectPicker
         _cycleIndex = 0;
     }
 
-    private static ProjectShockGL.Core.Object[] PickAll(Vector3 rayOrigin, Vector3 rayDir,
+    private static EditorSelectionTarget[] PickAll(Vector3 rayOrigin, Vector3 rayDir,
         float maxDist, IEnumerable<ProjectShockGL.Core.Object> objects)
     {
-        var hits = new List<(ProjectShockGL.Core.Object Object, float Distance)>();
+        var hits = new List<(EditorSelectionTarget Object, float Distance)>();
 
         foreach (var obj in objects)
         {
@@ -93,7 +93,19 @@ public static class ObjectPicker
             var (min, max) = obj.GetWorldBounds();
             if (RayAabb(rayOrigin, rayDir, maxDist, min, max, out var distance))
             {
-                hits.Add((obj, distance));
+                hits.Add((EditorSelectionTarget.ForObject(obj), distance));
+            }
+        }
+
+        var world = ProjectShockGL.Core.Game.Instance.World;
+        foreach (var detail in world.Details)
+        {
+            var target = EditorSelectionTarget.ForDetail(world, detail.Id);
+            if (!target.IsEditorVisible) continue;
+            var (min, max) = target.GetWorldBounds();
+            if (RayAabb(rayOrigin, rayDir, maxDist, min, max, out var distance))
+            {
+                hits.Add((target, distance));
             }
         }
 

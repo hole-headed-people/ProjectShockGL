@@ -19,6 +19,7 @@ public static class Palette
     {
         "Geometry" => Content.GetAllGeometryNames(),
         "Entity" => Content.GetAllEntityNames(),
+        "Details" => Content.GetAllDetailNames(),
         _ => Content.GetAllPrefabNames()
     };
     public static void Draw()
@@ -49,10 +50,16 @@ public static class Palette
             _currentType = "";
         }
 
-        ImGui.SameLine();
         if (ImGui.Button("Prefab"))
         {
             _tab = "Prefab";
+            _currentType = "";
+            _selected = "";
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Details"))
+        {
+            _tab = "Details";
             _currentType = "";
             _selected = "";
         }
@@ -105,6 +112,12 @@ public static class Palette
             Editor.Execute(() =>
             {
                 var name = _selected;
+                if (_tab == "Details")
+                {
+                    var detail = SceneDetails.Create(name);
+                    Editor.Report($"Created Detail: {detail.AssetPath}");
+                    return;
+                }
                 if (_tab == "Prefab")
                 {
                     var objects = SceneObjects.CreatePrefabSet(name, Vector3.Zero);

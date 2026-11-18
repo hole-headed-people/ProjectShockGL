@@ -9,14 +9,16 @@ public class Texture : IDisposable
 
     public uint Handle { get; private set; }
 
+    internal bool IsOpaque { get; }
     public int Width { get; }
     public int Height { get; }
 
-    private Texture(GL gl, uint handle, int width, int height)
+    private Texture(GL gl, uint handle, int width, int height, bool isOpaque)
     {
         _gl = gl;
 
         Handle = handle;
+        IsOpaque = isOpaque;
         Width = width;
         Height = height;
     }
@@ -50,7 +52,7 @@ public class Texture : IDisposable
             gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.Repeat);
             gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.Repeat);
 
-            return new Texture(gl, handle, image.Width, image.Height);
+            return new Texture(gl, handle, image.Width, image.Height, IsFullyOpaque(image.Data));
         }
         catch
         {
@@ -85,7 +87,7 @@ public class Texture : IDisposable
             gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
             gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
 
-            return new Texture(gl, handle, 1, 1);
+            return new Texture(gl, handle, 1, 1, a == 255);
         }
         catch
         {
@@ -130,7 +132,7 @@ public class Texture : IDisposable
             gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
             gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
 
-            return new Texture(gl, handle, width, height);
+            return new Texture(gl, handle, width, height, IsFullyOpaque(pixels));
         }
         catch
         {
@@ -139,4 +141,12 @@ public class Texture : IDisposable
             throw;
         }
     }
-}
+    private static bool IsFullyOpaque(ReadOnlySpan<byte> pixels)
+    {
+        for (var i = 3; i < pixels.Length; i += 4)
+        {
+            if (pixels[i] != 255) return false;
+        }
+
+        return true;
+    }}
