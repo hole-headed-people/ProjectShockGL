@@ -10,7 +10,7 @@ public class Canvas
     private bool _isInitialized;
     
     public IReadOnlyList<Widget> Children { get; }
-    
+
     public Vector2 Size { get; private set; }
     
     public bool Visible { get; set; } = true;
@@ -144,12 +144,24 @@ public class Canvas
         OnDestroy();
     }
 
-    internal void Attach(Widget widget) => _children.Add(widget);
-    internal void Detach(Widget widget) => _children.Remove(widget);
+    internal void Attach(Widget widget)
+    {
+        _children.Add(widget);
+    }
+
+    internal void Detach(Widget widget)
+    {
+        _children.Remove(widget);
+    }
 
     protected virtual void OnCreate() { }
     protected virtual void OnUpdate(float deltaSeconds) { }
     protected virtual void OnDraw(Graphics graphics) { }
     protected virtual void OnDestroy() { }
+    
+    public T? Find<T>(string name) where T : Widget
+    {
+        return WidgetSearch.Find<T>(Children, name);
+    }
 }
 

@@ -5,6 +5,7 @@ namespace ProjectShockGL.Core;
 
 public class MeshComponent : RenderComponent
 {
+    public bool BackfaceCulling { get; set; } = true;
     public Mesh? Mesh {get; set;}
     public Texture? Texture {get; set;}
     public Quaternion LocalRotation { get; set; } = Quaternion.Identity;
@@ -28,6 +29,7 @@ public class MeshComponent : RenderComponent
             Texture = Texture,
             Shader = Shader,
             ShaderParameters = Shader == null ? null : ShaderParameters.Snapshot(),
+            BackfaceCulling = BackfaceCulling,
             Lit = Lit,
             IgnoreDepth = IgnoreDepth,
             RenderOrder = RenderOrder

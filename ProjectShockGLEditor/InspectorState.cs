@@ -17,6 +17,7 @@ public static class InspectorState
         public int CollidesWith { get; set; }
         public bool? SimulatePhysics { get; set; }
         public float? RigidbodyMass { get; set; }
+        public bool? BackfaceCulling { get; set; }
         public TransformState Transform { get; set; }
         public BrushBoxData? Brush { get; set; }
         public Dictionary<string, JToken> Properties { get; set; } = new();
@@ -31,6 +32,7 @@ public static class InspectorState
         {
             Name = obj.Name, IsActive = obj.IsActive, Transform = TransformState.Capture(obj.Transform),
             Layer = obj.Layer, CollidesWith = obj.CollidesWith,
+            BackfaceCulling = obj.GetComponent<MeshComponent>() is { IsDestroyed: false } mesh ? mesh.BackfaceCulling : null,
             SimulatePhysics = (obj as Entity)?.Rigidbody?.IsEnabled,
             RigidbodyMass = obj.GetComponent<Rigidbody>() is { IsDestroyed: false } body ? body.Mass : null,
             Brush = obj is BrushBox brush ? new BrushBoxData
@@ -112,6 +114,11 @@ public static class InspectorState
         if (state.RigidbodyMass is { } mass && obj.GetComponent<Rigidbody>() is { IsDestroyed: false } body)
         {
             body.Mass = mass;
+        }
+
+        if (state.BackfaceCulling is { } backfaceCulling && obj.GetComponent<MeshComponent>() is { IsDestroyed: false } mesh)
+        {
+            mesh.BackfaceCulling = backfaceCulling;
         }
 
         obj.Layer = state.Layer;

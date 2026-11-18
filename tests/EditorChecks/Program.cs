@@ -593,6 +593,68 @@ Run("Scale handles use local axes; uniform scale and cancel preserve the origina
     ObjectManipulator.Mode = ManipulationMode.Move;
 });
 
+Run("Repeated scene clicks cycle by distance, tolerate small movement, wrap and preserve Ctrl selection", () =>
+{
+    var world = Game.Instance.World;
+    world.Clear();
+    Selection.Object = null;
+    var camera = ProjectShockGL.Rendering.Camera.Active;
+    var originalTransform = TransformState.Capture(camera.Transform);
+    var originalAspect = camera.AspectRatio;
+    var originalOrthographic = camera.Orthographic;
+    try
+    {
+        camera.Transform.Position = Vector3.Zero;
+        camera.Transform.Rotation = Quaternion.Identity;
+        camera.AspectRatio = 800f / 600f;
+        camera.Orthographic = false;
+        var far = world.Spawn<GameObject>();
+        far.Transform.Position = new Vector3(0, 0, -7);
+        var near = world.Spawn<GameObject>();
+        near.Transform.Position = new Vector3(0, 0, -3);
+        var middle = world.Spawn<GameObject>();
+        middle.Transform.Position = new Vector3(0, 0, -5);
+        var size = new Vector2(800, 600);
+        var center = size * .5f;
+
+        void Click(Vector2 offset, bool ctrl = false) => ObjectPicker.PickAt(center + offset, size, ctrl);
+        Click(Vector2.Zero); Check(Selection.Object == near);
+        Click(new Vector2(2, 1)); Check(Selection.Object == middle);
+        Click(new Vector2(-2, 1)); Check(Selection.Object == far);
+        Click(Vector2.Zero); Check(Selection.Object == near);
+        Click(Vector2.Zero); Check(Selection.Object == middle);
+        Click(new Vector2(6, 0)); Check(Selection.Object == near);
+        Click(new Vector2(6, 0)); Check(Selection.Object == middle);
+
+        Click(new Vector2(6, 0), true);
+        Check(Selection.Contains(near) && Selection.Contains(middle) && Selection.Objects.Length == 2);
+        Click(new Vector2(6, 0), true);
+        Check(!Selection.Contains(near) && Selection.Object == middle);
+        Click(new Vector2(6, 0)); Check(Selection.Object == near);
+
+        camera.Transform.Position = new Vector3(.01f, 0, 0);
+        Click(new Vector2(6, 0)); Check(Selection.Object == near);
+        Selection.Object = far;
+        Click(new Vector2(6, 0)); Check(Selection.Object == near);
+
+        middle.SetActive(false);
+        Click(new Vector2(6, 0)); Check(Selection.Object == near);
+        Click(new Vector2(6, 0)); Check(Selection.Object == far);
+        far.Destroy();
+        Click(new Vector2(6, 0)); Check(Selection.Object == near);
+        ObjectPicker.PickAt(Vector2.Zero, size);
+        Check(Selection.Object == null);
+        Click(Vector2.Zero); Check(Selection.Object == near);
+    }
+    finally
+    {
+        originalTransform.Apply(camera.Transform);
+        camera.AspectRatio = originalAspect;
+        camera.Orthographic = originalOrthographic;
+        Selection.Object = null;
+        world.Clear();
+    }
+});
 Run("Saving includes pending objects, skips runtime objects and copies output values", () =>
 {
     Game.Instance.World.Clear();
@@ -608,6 +670,36 @@ Run("Saving includes pending objects, skips runtime objects and copies output va
     Check((int)level.Placeables[0].Properties["Number"] == 42);
 });
 
+Run("BackfaceCulling survives map, Inspector snapshots, duplication and prefab placement", () =>
+{
+    Game.Instance.World.Clear();
+    var geometry = Geometry.Create("Box")!;
+    var mesh = geometry.GetComponent<MeshComponent>()!;
+    Check(mesh.BackfaceCulling);
+    var before = InspectorState.Capture(geometry);
+    mesh.BackfaceCulling = false;
+    var after = InspectorState.Capture(geometry);
+    UndoRedo.RecordEdit(geometry, "BackfaceCulling", before, after, state => InspectorState.Apply(geometry, state), false);
+    UndoRedo.Undo();
+    Check(mesh.BackfaceCulling);
+    UndoRedo.Redo();
+    Check(!mesh.BackfaceCulling);
+    var duplicate = EditorLevelManager.DuplicateObject(geometry);
+    Check(!duplicate.GetComponent<MeshComponent>()!.BackfaceCulling);
+    var level = EditorLevelManager.CaptureCurrentLevel();
+    var path = Path.Combine(testRoot, "culling.map");
+    EditorLevelManager.SaveLevel(level, path);
+    EditorLevelManager.OpenLevel(path);
+    Check(Game.Instance.World.GetAllObjects(true).All(obj => !obj.GetComponent<MeshComponent>()!.BackfaceCulling));
+    var prefabPath = Content.PrefabPath("CullingCheck");
+    File.WriteAllText(prefabPath, JsonConvert.SerializeObject(level.Placeables[0], JsonHelper.GetSettings()));
+    try
+    {
+        var instance = Prefab.Instantiate("CullingCheck", Game.Instance.World);
+        Check(!instance.GetComponent<MeshComponent>()!.BackfaceCulling);
+    }
+    finally { File.Delete(prefabPath); }
+});
 Run("Map roundtrip restores transforms, editable properties, outputs and geometry names", () =>
 {
     var level = new Level { Placeables = [

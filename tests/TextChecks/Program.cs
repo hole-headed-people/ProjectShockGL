@@ -244,7 +244,7 @@ void Render()
     Camera.Active.Orthographic = false;
     Console.WriteLine("PASS: Custom vertex deformation changes pixels, isolates parameters, snapshots queued draws and supports Lit/Unlit");
     var demoWorld = new World();
-    var demo = (ProjectOxygenGL.Placeables.DeformationExample)ProjectShockGL.Core.Entity.Create("DeformationExample", demoWorld)!;
+    var demo = (ProjectOxygenGL.Placeables.DeformationExample)ProjectShockGL.Core.Entity.Create("Placeables/DeformationExample", demoWorld)!;
     demo.Amplitude = 0.45f;
     demo.Speed = 1.25f;
     demo.Frequency = 4;
@@ -524,6 +524,78 @@ void Render()
     var font = Content.LoadFont("NotoSans-Regular", 24)!;
     Check(ReferenceEquals(font, Content.LoadFont("NotoSans-Regular", 24)));
     Check(Content.LoadFont("missing-font") == null);
+    var notePanel = canvas.Add<Widget>();
+    notePanel.Name = "Note";
+    var button = notePanel.Add<ProjectShockGL.UI.Button>();
+    button.Name = "Close";
+    button.Text.Content = "Закрыть";
+    button.Text.Font = font;
+    button.HoverColor = Color.Red;
+    var noteScroll = notePanel.Add<TextScrollView>();
+    noteScroll.Name = "Scroll";
+    noteScroll.Body.Name = "Body";
+    noteScroll.Body.Font = font;
+    noteScroll.Body.Content = "Записка / Note";
+    var picture = notePanel.Add<ProjectShockGL.UI.Image>();
+    picture.Name = "Picture";
+    picture.Texture = Content.LoadTexture("Default");
+    picture.Rect.Position = new Vector2(17, 29);
+    picture.FillCanvas = true;
+    var calls = 0;
+    button.AddAction(() => calls++);
+    const string uiName = "__UIRoundtripCheck";
+    try
+    {
+        Content.SaveUI(uiName, notePanel);
+        var asset = Content.LoadUI(uiName);
+        Content.SaveUI(uiName, asset);
+        asset = Content.LoadUI(uiName);
+        var copy = asset.Instantiate(canvas);
+        var second = asset.Instantiate(canvas);
+        Check(copy.Name == "Note" && copy.Children.Count == 3);
+        Check(copy.Find<ProjectShockGL.UI.Button>("Close")!.Children.Count == 2);
+        Check(copy.Find<Text>("Body")!.Content == "Записка / Note");
+        Check(ReferenceEquals(copy.Find<Text>("Body")!.Font, font));
+        Check(copy.Find<TextScrollView>("Scroll")!.Children.Count == 1);
+        var restoredPicture = copy.Find<ProjectShockGL.UI.Image>("Picture")!;
+        Check(restoredPicture.FillCanvas && restoredPicture.Rect.Size == canvas.Size);
+        Check(restoredPicture.Rect.AbsolutePosition == Vector2.Zero);
+        restoredPicture.FillCanvas = false;
+        Check(restoredPicture.Rect.Position == new Vector2(17, 29));
+        restoredPicture.FillCanvas = true;
+        Check(ReferenceEquals(copy.Find<ProjectShockGL.UI.Image>("Picture")!.Texture, picture.Texture));
+        copy.Find<Text>("Body")!.Content = "Changed";
+        Check(second.Find<Text>("Body")!.Content == "Записка / Note");
+        Check(notePanel.Find<Text>("Body")!.Content == "Записка / Note");
+        Check(canvas.Find<Widget>("Note") == notePanel && calls == 0);
+        copy.Rect.Position = new Vector2(100);
+        copy.Rect.Anchor = new Vector2(0.5f);
+        copy.Rect.Pivot = Vector2.One;
+        copy.Rect.Size = Vector2.One;
+        Check(copy.Rect.Position == Vector2.Zero && copy.Rect.Anchor == Vector2.Zero && copy.Rect.Pivot == Vector2.Zero);
+        Check(copy.Rect.AbsolutePosition == Vector2.Zero && copy.Rect.Size == canvas.Size);
+        var oldCanvasSize = canvas.Size;
+        canvas.Resize(new Vector2(1280, 720));
+        Check(copy.Rect.Size == canvas.Size && second.Rect.Size == canvas.Size);
+        Check(restoredPicture.Rect.Size == canvas.Size && restoredPicture.Rect.Position == Vector2.Zero);
+        canvas.Resize(oldCanvasSize);
+        var attached = asset.Instantiate(canvas, copy);
+        Check(attached.Parent == copy);
+        attached.Destroy();
+        Check(copy.Find<Widget>("Note") == null);
+        var before = canvas.Children.Count;
+        asset.Root.Children.Add(new WidgetData { Type = "Unknown" });
+        Throws<InvalidDataException>(() => asset.Instantiate(canvas));
+        Check(canvas.Children.Count == before);
+        copy.Destroy();
+        second.Destroy();
+        Console.WriteLine("PASS: UI JSON roundtrip preserves composition, resources, scoped names and independent instances; failed loading cleans up");
+    }
+    finally
+    {
+        notePanel.Destroy();
+        File.Delete(Path.Combine(Content.Path, "UI", uiName + ".json"));
+    }
     var text = canvas.Add<Text>();
     text.Font = font;
     text.Content = "Русский текст: Ёжик, ёлка.\nEnglish text: AV To 0123456789";
@@ -543,6 +615,337 @@ void Render()
     aligned.Rect.Size = new Vector2(340, 100);
     aligned.HorizontalAlignment = HorizontalAlignment.Center;
     aligned.VerticalAlignment = VerticalAlignment.Center;
+    var scroll = canvas.Add<TextScrollView>();
+    scroll.Rect.Position = new Vector2(200, 140);
+    scroll.Rect.Size = new Vector2(65, 38);
+    scroll.Body.Font = font;
+    scroll.Body.Content = "First second third fourth fifth sixth";
+    var pointer = new Pointer(canvas);
+    pointer.Update(new Vector2(210, 150), canvas.Size, [], scrollY: -1);
+    Check(scroll.ScrollY > 0 && scroll.Body.Rect.Size.Y > scroll.Rect.Size.Y);
+    Check(scroll.Body.Rect.AbsolutePosition.Y == 140 - scroll.ScrollY);
+    var offset = scroll.ScrollY;
+    pointer.Update(new Vector2(199, 150), canvas.Size, [], scrollY: -1);
+    Check(scroll.ScrollY == offset);
+    var panel = scroll.Add<ProjectShockGL.UI.Image>();
+    panel.Rect.Position = new Vector2(-5, -5);
+    panel.Rect.Size = new Vector2(75, 48);
+    panel.Color = Color.Red;
+    ProjectShockGLEditor.UIEditor.Initialize(gl);
+    ProjectShockGLEditor.UIEditor.Open = true;
+    var uiType = typeof(ProjectShockGLEditor.UIEditor);
+    var privateStatic = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+    var uiAsset = new UIAsset
+    {
+        Root = new WidgetData
+        {
+            Name = "Panel", Size = new Vector2(800, 600),
+            Children = [new WidgetData { Type = "Image", Name = "Background", Size = new Vector2(800, 600) }]
+        }
+    };
+    uiType.GetField("_asset", privateStatic)!.SetValue(null, uiAsset);
+    gl.GetInteger(GetPName.DrawFramebufferBinding, out int framebufferBefore);
+    ProjectShockGLEditor.UIEditor.Render(graphics);
+    gl.GetInteger(GetPName.DrawFramebufferBinding, out int framebufferAfter);
+    Check(framebufferBefore == framebufferAfter);
+    var previewTexture = (uint)uiType.GetField("_texture", privateStatic)!.GetValue(null)!;
+    Check(previewTexture != 0 && gl.IsTexture(previewTexture));
+    Check(gl.GetError() == GLEnum.NoError);
+    var context = ImGuiNET.ImGui.CreateContext();
+    try
+    {
+        var io = ImGuiNET.ImGui.GetIO();
+        io.DisplaySize = new Vector2(1280, 800);
+        io.DeltaTime = 1f / 60;
+        unsafe { io.Fonts.GetTexDataAsRGBA32(out byte* pixels, out int width, out int height); }
+        ImGuiNET.ImGui.NewFrame();
+        ProjectShockGLEditor.UIEditor.Draw();
+        ImGuiNET.ImGui.Render();
+        ImGuiNET.ImGui.NewFrame();
+        ImGuiNET.ImGui.SetNextWindowPos(new Vector2(0, 0));
+        ProjectShockGLEditor.UIEditor.Draw();
+        ImGuiNET.ImGui.Render();
+        Check(ImGuiNET.ImGui.GetDrawData().TotalVtxCount > 0);
+        var child = uiAsset.Root.Children[0];
+        child.Position = new Vector2(-100, -100);
+        child.Size = new Vector2(120, 60);
+        child.Anchor = new Vector2(0.5f);
+        child.Pivot = new Vector2(0.5f);
+        uiType.GetField("_rebuild", privateStatic)!.SetValue(null, true);
+        ProjectShockGLEditor.UIEditor.Render(graphics);
+        void UIFrame(Vector2 mouse, bool down)
+        {
+            io.MousePos = mouse;
+            io.MouseDown[0] = down;
+            ImGuiNET.ImGui.NewFrame();
+            ProjectShockGLEditor.UIEditor.Draw();
+            ImGuiNET.ImGui.Render();
+        }
+        var origin = (Vector2)uiType.GetField("_previewOrigin", privateStatic)!.GetValue(null)!;
+        var display = (Vector2)uiType.GetField("_previewDisplay", privateStatic)!.GetValue(null)!;
+        var start = origin + new Vector2(300, 200) / new Vector2(800, 600) * display;
+        UIFrame(start, false);
+        UIFrame(start, true);
+        Check(ReferenceEquals(uiType.GetField("_selected", privateStatic)!.GetValue(null), child));
+        var moved = start + new Vector2(40, 30);
+        UIFrame(moved, true);
+        var expectedPosition = new Vector2(-100, -100) + new Vector2(40, 30) / display * new Vector2(800, 600);
+        Check(Vector2.Distance(child.Position, expectedPosition) < 0.01f);
+        UIFrame(moved, false);
+        Check(ProjectShockGLEditor.UIEditor.IsDirty);
+        Check(child.Anchor == new Vector2(0.5f) && child.Pivot == new Vector2(0.5f));
+        uiType.GetField("_rebuild", privateStatic)!.SetValue(null, true);
+        ProjectShockGLEditor.UIEditor.Render(graphics);
+        var beforeCancel = child.Position;
+        UIFrame(moved, false);
+        UIFrame(moved, true);
+        UIFrame(moved + new Vector2(15, 10), true);
+        Check(child.Position != beforeCancel);
+        io.AddKeyEvent(ImGuiNET.ImGuiKey.Escape, true);
+        UIFrame(moved + new Vector2(15, 10), true);
+        Check(child.Position == beforeCancel);
+        io.AddKeyEvent(ImGuiNET.ImGuiKey.Escape, false);
+        UIFrame(moved, false);
+        Console.WriteLine("PASS: Real UI preview selection, scaled dragging and Escape cancellation preserve anchors and pivot");
+        ProjectShockGLEditor.UIEditor.Undo();
+        UIAsset CurrentUI() => (UIAsset)uiType.GetField("_asset", privateStatic)!.GetValue(null)!;
+        Check(CurrentUI().Root.Children[0].Position == new Vector2(-100, -100));
+        ProjectShockGLEditor.UIEditor.Redo();
+        Check(Vector2.Distance(CurrentUI().Root.Children[0].Position, expectedPosition) < 0.01f);
+        void EditUI(Action action, uint id)
+        {
+            var before = uiType.GetMethod("Capture", privateStatic)!.Invoke(null, null);
+            action();
+            uiType.GetField("_editItem", privateStatic)!.SetValue(null, id);
+            ImGuiNET.ImGui.NewFrame();
+            uiType.GetMethod("RecordFrame", privateStatic)!.Invoke(null, [before]);
+            ImGuiNET.ImGui.Render();
+        }
+        EditUI(() => CurrentUI().Root.Children.Add(new WidgetData { Name = "Created", Type = "Button" }), 1);
+        ProjectShockGLEditor.UIEditor.Undo();
+        Check(CurrentUI().Root.Children.Count == 1);
+        ProjectShockGLEditor.UIEditor.Redo();
+        Check(CurrentUI().Root.Children.Count == 2);
+        EditUI(() => CurrentUI().Root.Children[1].Name = "Renamed", 2);
+        ProjectShockGLEditor.UIEditor.Undo();
+        Check(CurrentUI().Root.Children[1].Name == "Created");
+        ProjectShockGLEditor.UIEditor.Redo();
+        Check(CurrentUI().Root.Children[1].Name == "Renamed");
+        EditUI(() => CurrentUI().Root.Children.RemoveAt(1), 3);
+        ProjectShockGLEditor.UIEditor.Undo();
+        Check(CurrentUI().Root.Children[1].Name == "Renamed");
+        ProjectShockGLEditor.UIEditor.Redo();
+        Check(CurrentUI().Root.Children.Count == 1);
+        ProjectShockGLEditor.UIEditor.Undo();
+        EditUI(() => CurrentUI().Root.Name = "Branch", 4);
+        ProjectShockGLEditor.UIEditor.Redo();
+        Check(CurrentUI().Root.Children.Count == 2 && CurrentUI().Root.Name == "Branch");
+        Console.WriteLine("PASS: UI history restores moves, properties, creation and deletion, ignores cancelled moves and branches independently");
+        foreach (var direction in new[] { new Vector2(1, 1), new Vector2(-1, -1), new Vector2(1, 0), new Vector2(0, -1) })
+        {
+            var resized = CurrentUI().Root.Children[0];
+            uiType.GetField("_selected", privateStatic)!.SetValue(null, resized);
+            uiType.GetMethod("ResetHistory", privateStatic)!.Invoke(null, null);
+            uiType.GetField("_rebuild", privateStatic)!.SetValue(null, true);
+            ProjectShockGLEditor.UIEditor.Render(graphics);
+            UIFrame(new Vector2(-100), false);
+            origin = (Vector2)uiType.GetField("_previewOrigin", privateStatic)!.GetValue(null)!;
+            display = (Vector2)uiType.GetField("_previewDisplay", privateStatic)!.GetValue(null)!;
+            var startSize = resized.Size;
+            var startPosition = resized.Position;
+            var canvasSize = new Vector2(800, 600);
+            var worldMin = canvasSize * resized.Anchor + startPosition - startSize * resized.Pivot;
+            var handle = origin + (worldMin + startSize * (direction + Vector2.One) * 0.5f) / canvasSize * display;
+            UIFrame(handle, false);
+            UIFrame(handle, true);
+            var delta = direction * 20;
+            UIFrame(handle + delta / canvasSize * display, true);
+            UIFrame(handle + delta / canvasSize * display, false);
+            var expectedSize = startSize + Vector2.Abs(direction) * 20;
+            Check(Vector2.Distance(resized.Size, expectedSize) < 2f * Math.Max(canvasSize.X / display.X, canvasSize.Y / display.Y));
+            var finalSize = resized.Size;
+            var newMin = canvasSize * resized.Anchor + resized.Position - resized.Size * resized.Pivot;
+            if (direction.X > 0) Near(newMin.X, worldMin.X);
+            if (direction.X < 0) Near(newMin.X + resized.Size.X, worldMin.X + startSize.X);
+            if (direction.Y > 0) Near(newMin.Y, worldMin.Y);
+            if (direction.Y < 0) Near(newMin.Y + resized.Size.Y, worldMin.Y + startSize.Y);
+            ProjectShockGLEditor.UIEditor.Undo();
+            Check(CurrentUI().Root.Children[0].Size == startSize);
+            Check(CurrentUI().Root.Children[0].Position == startPosition);
+            ProjectShockGLEditor.UIEditor.Redo();
+            Check(CurrentUI().Root.Children[0].Size == finalSize);
+        }
+        var cancelWidget = CurrentUI().Root.Children[0];
+        uiType.GetField("_selected", privateStatic)!.SetValue(null, cancelWidget);
+        uiType.GetField("_rebuild", privateStatic)!.SetValue(null, true);
+        ProjectShockGLEditor.UIEditor.Render(graphics);
+        var cancelSize = cancelWidget.Size;
+        var cancelPosition = cancelWidget.Position;
+        var corner = origin + (new Vector2(800, 600) * cancelWidget.Anchor + cancelWidget.Position
+            + cancelWidget.Size * (Vector2.One - cancelWidget.Pivot)) / new Vector2(800, 600) * display;
+        UIFrame(corner, false);
+        UIFrame(corner, true);
+        UIFrame(corner + new Vector2(20), true);
+        Check(cancelWidget.Size != cancelSize);
+        io.AddKeyEvent(ImGuiNET.ImGuiKey.Escape, true);
+        UIFrame(corner + new Vector2(20), true);
+        io.AddKeyEvent(ImGuiNET.ImGuiKey.Escape, false);
+        UIFrame(corner, false);
+        Check(cancelWidget.Size == cancelSize && cancelWidget.Position == cancelPosition);
+        Console.WriteLine("PASS: UI resize handles preserve opposite edges with pivot, undo size and position together and cancel with Escape");
+        uiType.GetField("_selected", privateStatic)!.SetValue(null, CurrentUI().Root);
+        uiType.GetField("_rebuild", privateStatic)!.SetValue(null, true);
+        ProjectShockGLEditor.UIEditor.Render(graphics);
+        UIFrame(new Vector2(-100), false);
+        var rootPoint = origin + new Vector2(10);
+        UIFrame(rootPoint, false);
+        UIFrame(rootPoint, true);
+        UIFrame(rootPoint + new Vector2(20), true);
+        UIFrame(rootPoint + new Vector2(20), false);
+        Check(CurrentUI().Root.Position == Vector2.Zero);
+        Check(CurrentUI().Root.Anchor == Vector2.Zero && CurrentUI().Root.Pivot == Vector2.Zero);
+        Check(CurrentUI().Root.Size == new Vector2(800, 600));
+        Check(uiType.GetField("_dragged", privateStatic)!.GetValue(null) == null);
+        Console.WriteLine("PASS: UI asset root follows Canvas resize and remains fixed during preview mouse dragging");
+        uiType.GetField("_selected", privateStatic)!.SetValue(null, CurrentUI().Root.Children[0]);
+        var originalCount = CurrentUI().Root.Children.Count;
+        var originalWidget = CurrentUI().Root.Children[0];
+        io.AddKeyEvent(ImGuiNET.ImGuiKey.ModCtrl, true);
+        io.AddKeyEvent(ImGuiNET.ImGuiKey.D, true);
+        UIFrame(rootPoint, false);
+        Check(CurrentUI().Root.Children.Count == originalCount + 1);
+        var duplicated = CurrentUI().Root.Children[1];
+        Check(duplicated.Name != originalWidget.Name && duplicated.Size == originalWidget.Size);
+        Check(!ReferenceEquals(duplicated.Properties, originalWidget.Properties));
+        io.AddKeyEvent(ImGuiNET.ImGuiKey.D, false);
+        UIFrame(rootPoint, false);
+        io.AddKeyEvent(ImGuiNET.ImGuiKey.Z, true);
+        UIFrame(rootPoint, false);
+        Check(CurrentUI().Root.Children.Count == originalCount);
+        io.AddKeyEvent(ImGuiNET.ImGuiKey.Z, false);
+        UIFrame(rootPoint, false);
+        io.AddKeyEvent(ImGuiNET.ImGuiKey.Y, true);
+        UIFrame(rootPoint, false);
+        Check(CurrentUI().Root.Children.Count == originalCount + 1);
+        Check(CurrentUI().Root.Children[1].Name == duplicated.Name);
+        io.AddKeyEvent(ImGuiNET.ImGuiKey.Y, false);
+        io.AddKeyEvent(ImGuiNET.ImGuiKey.ModCtrl, false);
+        UIFrame(rootPoint, false);
+        Console.WriteLine("PASS: Real Ctrl+D duplicates UI widgets independently and Ctrl+Z/Ctrl+Y undo and redo the action");
+        var inputType = typeof(Input);
+        var inputInitialized = inputType.GetField("_isInitialized", privateStatic)!;
+        var wasInputInitialized = inputInitialized.GetValue(null);
+        var keys = (HashSet<Silk.NET.Input.Key>)inputType.GetProperty("CurrentKeys", privateStatic)!.GetValue(null)!;
+        var previousKeys = (HashSet<Silk.NET.Input.Key>)inputType.GetProperty("PreviousKeys", privateStatic)!.GetValue(null)!;
+        var originalKeys = keys.ToArray();
+        var originalPreviousKeys = previousKeys.ToArray();
+        try
+        {
+            inputInitialized.SetValue(null, true);
+            void EngineKey(Silk.NET.Input.Key key)
+            {
+                keys.Clear();
+                previousKeys.Clear();
+                keys.Add(Silk.NET.Input.Key.ControlLeft);
+                keys.Add(key);
+                uiType.GetMethod("PollShortcuts", privateStatic)!.Invoke(null, null);
+                Input.Update();
+                UIFrame(rootPoint, false);
+            }
+            var countBeforeEngineKey = CurrentUI().Root.Children.Count;
+            uiType.GetField("_selected", privateStatic)!.SetValue(null, CurrentUI().Root.Children[0]);
+            EngineKey(Silk.NET.Input.Key.D);
+            Check(CurrentUI().Root.Children.Count == countBeforeEngineKey + 1);
+            EngineKey(Silk.NET.Input.Key.Z);
+            Check(CurrentUI().Root.Children.Count == countBeforeEngineKey);
+            EngineKey(Silk.NET.Input.Key.Y);
+            Check(CurrentUI().Root.Children.Count == countBeforeEngineKey + 1);
+        }
+        finally
+        {
+            keys.Clear();
+            keys.UnionWith(originalKeys);
+            previousKeys.Clear();
+            previousKeys.UnionWith(originalPreviousKeys);
+            inputInitialized.SetValue(null, wasInputInitialized);
+        }
+        Console.WriteLine("PASS: UI shortcuts travel through engine Input before Input.Update clears key transitions");
+        var leftPanel = new WidgetData { Name = "Left", Position = new Vector2(80, 70), Size = new Vector2(200) };
+        var rightPanel = new WidgetData { Name = "Right", Position = new Vector2(300, 50), Size = new Vector2(250, 180) };
+        var nestedWidget = new WidgetData
+        {
+            Name = "Nested", Position = new Vector2(10, 20), Size = new Vector2(50, 40),
+            Anchor = new Vector2(0.5f), Pivot = new Vector2(0.5f)
+        };
+        leftPanel.Children.Add(nestedWidget);
+        var treeAsset = new UIAsset { Root = new WidgetData { Name = "Root", Children = [leftPanel, rightPanel] } };
+        uiType.GetField("_asset", privateStatic)!.SetValue(null, treeAsset);
+        uiType.GetField("_selected", privateStatic)!.SetValue(null, nestedWidget);
+        uiType.GetMethod("ResetHistory", privateStatic)!.Invoke(null, null);
+        bool MoveNode(WidgetData source, WidgetData target, int placement) =>
+            (bool)uiType.GetMethod("MoveWidget", privateStatic)!.Invoke(null, [source, target, placement])!;
+        Vector2 NodePosition(string name)
+        {
+            var temporaryCanvas = new Canvas();
+            temporaryCanvas.Resize(new Vector2(800, 600));
+            try
+            {
+                var tree = CurrentUI().Instantiate(temporaryCanvas);
+                temporaryCanvas.Update(0);
+                return tree.Find<Widget>(name)!.Rect.AbsolutePosition;
+            }
+            finally { temporaryCanvas.Destroy(); }
+        }
+        var nestedPosition = NodePosition("Nested");
+        Check(MoveNode(nestedWidget, rightPanel, 0));
+        Check(leftPanel.Children.Count == 0 && rightPanel.Children.Single() == nestedWidget);
+        Check(Vector2.Distance(NodePosition("Nested"), nestedPosition) < 0.001f);
+        Check(!MoveNode(rightPanel, nestedWidget, 0));
+        Check(!MoveNode(treeAsset.Root, rightPanel, 0));
+        Check(!MoveNode(nestedWidget, nestedWidget, 0));
+        ProjectShockGLEditor.UIEditor.Undo();
+        Check(CurrentUI().Root.Children[0].Children.Single().Name == "Nested");
+        Check(Vector2.Distance(NodePosition("Nested"), nestedPosition) < 0.001f);
+        ProjectShockGLEditor.UIEditor.Redo();
+        Check(CurrentUI().Root.Children[1].Children.Single().Name == "Nested");
+        var firstSibling = CurrentUI().Root.Children[0];
+        var secondSibling = CurrentUI().Root.Children[1];
+        var firstPosition = firstSibling.Position;
+        Check(MoveNode(firstSibling, secondSibling, 1));
+        Check(CurrentUI().Root.Children[1] == firstSibling && firstSibling.Position == firstPosition);
+        Check(!MoveNode(firstSibling, secondSibling, 1));
+        ProjectShockGLEditor.UIEditor.Undo();
+        Check(CurrentUI().Root.Children[0].Name == "Left");
+        ProjectShockGLEditor.UIEditor.Redo();
+        Check(CurrentUI().Root.Children[0].Name == "Right");
+        Console.WriteLine("PASS: UI hierarchy moves preserve screen position, reorder siblings, reject cycles and restore through Undo/Redo");
+
+        Check(ProjectShockGLEditor.UIEditor.IsDirty);
+        Check(!ProjectShockGLEditor.UIEditor.AllowClose());
+        var discardClose = (Action)uiType.GetField("_pending", privateStatic)!.GetValue(null)!;
+        uiType.GetField("_pending", privateStatic)!.SetValue(null, null);
+        var quitField = typeof(Application).GetField("_quitRequested", privateStatic)!;
+        var oldQuit = quitField.GetValue(null);
+        try
+        {
+            discardClose();
+            UIFrame(rootPoint, false);
+            UIFrame(rootPoint, false);
+            Check(ProjectShockGLEditor.UIEditor.AllowClose());
+            Check(!ProjectShockGLEditor.UIEditor.IsDirty);
+            Check(uiType.GetField("_pending", privateStatic)!.GetValue(null) == null);
+            Check((bool)quitField.GetValue(null)!);
+        }
+        finally { quitField.SetValue(null, oldQuit); }
+        Console.WriteLine("PASS: Discard on editor exit stays acknowledged across later frames and requests application shutdown");
+    }
+    finally
+    {
+        ImGuiNET.ImGui.DestroyContext(context);
+        ProjectShockGLEditor.UIEditor.Open = false;
+        ProjectShockGLEditor.UIEditor.Dispose();
+    }
+    Console.WriteLine("PASS: UI Editor renders its preview into a texture, restores the framebuffer and draws real ImGui panels");
     graphics.BeginDraw(Camera.Active);
     graphics.BeginUI(canvas.Size);
     canvas.Draw(graphics);
@@ -562,6 +965,11 @@ void Render()
             if (x >= 200 && x < 260 && y >= 100 && y < 130)
                 Check(rgba[index] == 0 && rgba[index + 1] == 0 && rgba[index + 2] == 0);
         }
+    Check(rgba[((239 - 140) * 640 + 200) * 4] > 200);
+    Check(rgba[((239 - 139) * 640 + 200) * 4] == 0);
+    Check(rgba[((239 - 140) * 640 + 199) * 4] == 0);
+    Check(rgba[((239 - 178) * 640 + 200) * 4] == 0);
+    Check(rgba[((239 - 140) * 640 + 265) * 4] == 0);
     Check(lit > 1000);
     var imagePath = Path.Combine(root, ".build/Text/text-preview.ppm");
     using (var stream = File.Create(imagePath))

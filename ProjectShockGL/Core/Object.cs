@@ -65,7 +65,7 @@ public class Object
     public bool IsDestroyed { get; private set; }
 
     public virtual void Create(){}
-
+    
     public virtual void OnCaptureState(IObjectStateWriter state){}
     public virtual void OnRestoreState(IObjectStateReader state){}
 

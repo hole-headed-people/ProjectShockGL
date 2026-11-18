@@ -9,5 +9,6 @@
   <ItemGroup>
     <ProjectReference Include="../../ProjectShockGL/ProjectShockGL.csproj" />
     <ProjectReference Include="../../ProjectOxygenGL/ProjectOxygenGL.csproj" />
+    <ProjectReference Include="../../ProjectShockGLEditor/ProjectShockGLEditor.csproj" />
   </ItemGroup>
 </Project>

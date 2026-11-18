@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Numerics;
 using ProjectShockGL.Rendering;
 using Silk.NET.OpenGL;
@@ -44,7 +44,7 @@ public static class ObjLoader
                 case "vt":
                     uvs.Add(new Vector2(
                         float.Parse(parts[1], CultureInfo.InvariantCulture),
-                        float.Parse(parts[2], CultureInfo.InvariantCulture)
+                        1f - float.Parse(parts[2], CultureInfo.InvariantCulture)
                     ));
                     break;
 

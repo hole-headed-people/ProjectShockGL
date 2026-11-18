@@ -369,17 +369,38 @@ public static class Inspector
                 ImGui.TextUnformatted("Yellow: outer | Cyan: inner | White: direction");
             }
             
+        }
+
+        if (obj is not Entity && obj is not BrushBox)
+        {
+            ImGui.Separator();
+            ImGui.TextUnformatted("Properties");
+        }
+        if (obj.GetComponent<MeshComponent>() is { IsDestroyed: false } mesh)
+        {
+            var backfaceCulling = mesh.BackfaceCulling;
+            if (ImGui.Checkbox("BackfaceCulling", ref backfaceCulling))
+            {
+                mesh.BackfaceCulling = backfaceCulling;
+                Changed("BackfaceCulling", true);
+            }
+        }
+
+        DrawCollisionLayers(obj);
+
+        if (obj is Entity outputEntity)
+        {
             //Outputs
 
             ImGui.Separator();
             ImGui.Text("Outputs");
-            var eventNames = GetOutputEventNames(entity.GetType());
+            var eventNames = GetOutputEventNames(outputEntity.GetType());
             var world = ProjectShockGL.Core.Game.Instance.World;
-            var targetNames = entity.Outputs.Count > 0 ? GetOutputTargetNames(world) : [];
+            var targetNames = outputEntity.Outputs.Count > 0 ? GetOutputTargetNames(world) : [];
 
-            for (var i = 0; i < entity.Outputs.Count; i++)
+            for (var i = 0; i < outputEntity.Outputs.Count; i++)
             {
-                var output = entity.Outputs[i];
+                var output = outputEntity.Outputs[i];
 
                 ImGui.PushID(i);
 
@@ -492,7 +513,7 @@ public static class Inspector
                 Finish($"Output/{i}/Parameter");
                 if (ImGui.Button("Remove"))
                 {
-                    entity.Outputs.RemoveAt(i);
+                    outputEntity.Outputs.RemoveAt(i);
                     Changed("Outputs", true);
                     i--;
                 }
@@ -503,12 +524,10 @@ public static class Inspector
 
             if (ImGui.Button("Add Output"))
             {
-                entity.Outputs.Add(new OutputData());
+                outputEntity.Outputs.Add(new OutputData());
                 Changed("Outputs", true);
             }
         }
-
-        DrawCollisionLayers(obj);
 
         PrefabTools.DrawSave();
 

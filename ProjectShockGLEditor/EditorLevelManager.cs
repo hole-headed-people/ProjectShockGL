@@ -70,6 +70,7 @@ public static class EditorLevelManager
                 CollidesWith = obj.CollidesWith,
                 SimulatePhysics = (obj as Entity)?.Rigidbody?.IsEnabled,
                 RigidbodyMass = obj.GetComponent<Rigidbody>() is { IsDestroyed: false } body ? body.Mass : null,
+                BackfaceCulling = obj.GetComponent<MeshComponent>() is { IsDestroyed: false } mesh ? mesh.BackfaceCulling : null,
                 EditorGroups = obj.EditorGroups.ToArray(),
                 
                 Type = obj switch
@@ -174,6 +175,7 @@ public static class EditorLevelManager
             CollidesWith = snapshot.CollidesWith,
             SimulatePhysics = snapshot.SimulatePhysics,
             RigidbodyMass = snapshot.RigidbodyMass,
+            BackfaceCulling = snapshot.BackfaceCulling,
             EditorGroups = snapshot.EditorGroups,
             Brush = snapshot.Brush,
             Position = snapshot.Position, Rotation = snapshot.Rotation, Scale = snapshot.Scale,

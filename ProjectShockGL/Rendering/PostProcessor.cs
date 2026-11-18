@@ -18,29 +18,57 @@ internal sealed class PostProcessor : IDisposable
     private int _destination;
     private int _readFramebuffer;
     
+    internal int DrawCalls { get; private set; }
     private bool _capturing;
+    
     private ShaderProgram _shader = null!;
+    
     private readonly ShaderParameters _parameters = new();
 
-    public PostProcessor(GL gl) => _gl = gl;
+    private readonly float _resolutionScale;
+    private readonly GLEnum _filter;
+    private readonly int[] _viewport = new int[4];
+    private bool _applyEffects;
+
+    public PostProcessor(GL gl)
+    {
+        _gl = gl;
+        
+        var scale = Settings.GetFloat("Rendering", "ResolutionScale", 1f);
+        _resolutionScale = float.IsFinite(scale) ? Math.Clamp(scale, 0.1f, 1f) : 1f;
+        
+        var filter = Settings.GetString("Rendering", "ResolutionFilter", "Linear");
+        _filter = filter.Equals("Nearest", StringComparison.OrdinalIgnoreCase) ? GLEnum.Nearest : GLEnum.Linear;
+    }
 
     public void Begin(int width, int height)
     {
+        DrawCalls = 0;
         if (_capturing)
         {
             throw new InvalidOperationException("A world pass is already active.");
         }
 
-        if (!PostProcessSettings.Enabled || width <= 0 || height <= 0)
+        if ((!PostProcessSettings.Enabled && _resolutionScale == 1f) || width <= 0 || height <= 0)
         {
             return;
         }
 
-        _shader = PostProcessSettings.Shader ?? Content.LoadShaderProgram("PostProcess");
+        _applyEffects = PostProcessSettings.Enabled;
         
-        ObjectDisposedException.ThrowIf(_shader.Handle == 0, _shader);
+        if (_applyEffects)
+        {
+            _shader = PostProcessSettings.Shader ?? Content.LoadShaderProgram("PostProcess");
         
-        _parameters.CopyFrom(PostProcessSettings.Parameters);
+            ObjectDisposedException.ThrowIf(_shader.Handle == 0, _shader);
+            
+            _parameters.CopyFrom(PostProcessSettings.Parameters);
+        }
+
+        _gl.GetInteger(GetPName.Viewport, _viewport.AsSpan());
+        
+        width = Math.Max(1, (int)MathF.Round(width * _resolutionScale));
+        height = Math.Max(1, (int)MathF.Round(height * _resolutionScale));
         
         _destination = _gl.GetInteger(GetPName.DrawFramebufferBinding);
         _readFramebuffer = _gl.GetInteger(GetPName.ReadFramebufferBinding);
@@ -81,8 +109,8 @@ internal sealed class PostProcessor : IDisposable
                     0, PixelFormat.Rgba, PixelType.UnsignedByte, null);
             }
             
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Linear);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Linear);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)_filter);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)_filter);
             _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
             _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
             _gl.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0,
@@ -165,9 +193,20 @@ internal sealed class PostProcessor : IDisposable
             
             _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _framebuffer);
             _gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, (uint)_destination);
-            _gl.BlitFramebuffer(0, 0, _width, _height, 0, 0, _width, _height,
+            _gl.BlitFramebuffer(0, 0, _width, _height, _viewport[0], _viewport[1],
+                _viewport[0] + _viewport[2], _viewport[1] + _viewport[3],
                 ClearBufferMask.DepthBufferBit, BlitFramebufferFilter.Nearest);
             
+            _gl.Viewport(_viewport[0], _viewport[1], (uint)_viewport[2], (uint)_viewport[3]);
+
+            if (!_applyEffects)
+            {
+                _gl.BlitFramebuffer(0, 0, _width, _height, _viewport[0], _viewport[1],
+                    _viewport[0] + _viewport[2], _viewport[1] + _viewport[3],
+                    ClearBufferMask.ColorBufferBit, (BlitFramebufferFilter)_filter);
+                return;
+            }
+
             _gl.Disable(EnableCap.DepthTest);
             _gl.Disable(EnableCap.CullFace);
             _gl.Disable(EnableCap.Blend);
@@ -184,10 +223,12 @@ internal sealed class PostProcessor : IDisposable
             _gl.BindTexture(TextureTarget.Texture2D, _color);
             _gl.BindVertexArray(_vao);
             _gl.DrawArrays(PrimitiveType.Triangles, 0, 3);
+            DrawCalls++;
         }
         finally
         {
             RestoreFramebuffer();
+            _gl.Viewport(_viewport[0], _viewport[1], (uint)_viewport[2], (uint)_viewport[3]);
             
             _gl.BindVertexArray((uint)vao);
             _gl.BindTexture(TextureTarget.Texture2D, (uint)texture);
@@ -245,7 +286,8 @@ internal sealed class PostProcessor : IDisposable
     {
         if (_capturing)
         {
-            RestoreFramebuffer(); 
+            RestoreFramebuffer();
+            _gl.Viewport(_viewport[0], _viewport[1], (uint)_viewport[2], (uint)_viewport[3]);
             _capturing = false;
         }
         

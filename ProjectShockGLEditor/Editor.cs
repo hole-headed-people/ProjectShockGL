@@ -62,6 +62,7 @@ public static class Editor
         _window = window;
         _windowSize = new Vector2(window.Size.X, window.Size.Y);
         _imGui = new ImGuiController(gl, window, input);
+        UIEditor.Initialize(gl);
     }
 
     private static bool InScene(Vector2 point)
@@ -71,9 +72,10 @@ public static class Editor
 
     private static void OnUpdate(float deltaTime)
     {
+        UIEditor.PollShortcuts();
         var io = ImGui.GetIO();
         
-        if (!io.WantCaptureKeyboard && !ObjectManipulator.IsDragging)
+        if (!UIEditor.HasFocus && !io.WantCaptureKeyboard && !ObjectManipulator.IsDragging)
         {
             var control = Input.IsKey(Key.ControlLeft) || Input.IsKey(Key.ControlRight);
             
@@ -158,6 +160,7 @@ public static class Editor
 
     private static void OnRender(Graphics graphics)
     {
+        UIEditor.Render(graphics);
         SceneGrid.Render(graphics);
         ProjectShockGL.Core.Game.Instance.World.DebugRenderSelected(new DebugDraw(graphics), Selection.Objects);
         
@@ -205,6 +208,7 @@ public static class Editor
         
         Inspector.Draw();
         EnvironmentWindow.Draw(ref _showEnvironment);
+        UIEditor.Draw();
         
         DrawStatus();
         DrawPopups();
@@ -232,11 +236,13 @@ public static class Editor
     private static void OnUnload()
     {
         ObjectManipulator.Cancel();
+        UIEditor.Dispose();
         _imGui.Dispose();
     }
 
     private static bool OnWindowClosing()
     {
+        if (!UIEditor.AllowClose()) return false;
         if (_allowClose)
         {
             return true;
@@ -277,7 +283,7 @@ public static class Editor
             _requestErrorPopup = true;
             _status = "Operation failed";
             
-            Console.WriteLine(ex);
+            Log.PrintError("Editor action failed.", ex);
         }
     }
 
@@ -486,6 +492,8 @@ public static class Editor
                 DeleteSelection();
             }
             
+            if (ImGui.MenuItem("UI Editor", "", UIEditor.Open)) UIEditor.Open = !UIEditor.Open;
+
             if (ImGui.MenuItem("Environment", "", _showEnvironment))
             {
                 _showEnvironment = !_showEnvironment;
@@ -497,6 +505,8 @@ public static class Editor
         {
             if (ImGui.MenuItem("Post processing", "", PostProcessSettings.Enabled))
                 PostProcessSettings.Enabled = !PostProcessSettings.Enabled;
+
+
 
             var grid = SceneGrid.Show;
 
@@ -631,6 +641,7 @@ public static class Editor
 
     private static void DrawSceneHints()
     {
+        if (UIEditor.Open) return;
         var draw = ImGui.GetForegroundDrawList();
         var position = SceneMin + new Vector2(10, 10);
         

@@ -1,4 +1,4 @@
-﻿#version 330 core
+#version 330 core
 #define MAX_POINT_LIGHTS 16
 
 in vec2 vTexCoord;
@@ -31,6 +31,8 @@ uniform float uPointLightRadii[MAX_POINT_LIGHTS];
 uniform vec3 uPointLightDirections[MAX_POINT_LIGHTS];
 uniform vec2 uPointLightConeCosines[MAX_POINT_LIGHTS];
 
+/* LIT_EMISSION */
+
 void main()
 {
     vec4 texColor = texture(uTexture, vTexCoord);
@@ -40,6 +42,7 @@ void main()
     vec3 baseColor = texColor.rgb * uColor.rgb;
 
     vec3 N = normalize(vNormal);
+    if (!gl_FrontFacing) N = -N;
     
     vec3 ambient = uAmbientColor * baseColor;
     vec3 finalColor = ambient;
@@ -76,6 +79,12 @@ void main()
     }
 
     if (uForceUnlit) finalColor = baseColor;
+
+#ifdef LIT_HAS_EMISSION
+    vec3 toCamera = uCameraPos - vWorldPos;
+    vec3 viewDirection = toCamera / max(length(toCamera), 0.00001);
+    finalColor += GetEmission(N, viewDirection);
+#endif
 
     if (uFogEnabled)
     {

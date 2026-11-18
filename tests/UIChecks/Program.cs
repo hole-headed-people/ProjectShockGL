@@ -4,6 +4,80 @@ using ProjectShockGL.Rendering;
 using ProjectShockGL.UI;
 using Silk.NET.Input;
 
+Run("Button colors, left release, cancellation and callback mutation", () =>
+{
+    var canvas = new Canvas();
+    canvas.Resize(new Vector2(800, 600));
+    var button = canvas.Add<ProjectShockGL.UI.Button>();
+    var image = button.Children.OfType<Image>().Single();
+    var pointer = new Pointer(canvas);
+    void Mouse(Vector2 position, params MouseButton[] buttons) =>
+        pointer.Update(position, canvas.Size, buttons);
+    void ColorIs(Color expected) => Check(image.Color.Equals(expected));
+
+    var inside = new Vector2(20);
+    var outside = new Vector2(200);
+    var clicks = 0;
+    button.AddAction(() => clicks++);
+    Mouse(inside);
+    ColorIs(button.HoverColor);
+    button.HoverColor = Color.Red;
+    ColorIs(Color.Red);
+    Mouse(inside, MouseButton.Right);
+    ColorIs(Color.Red);
+    Mouse(inside);
+    Check(clicks == 0);
+    Mouse(inside, MouseButton.Left);
+    ColorIs(button.PressedColor);
+    Check(clicks == 0);
+    Mouse(outside, MouseButton.Left);
+    ColorIs(button.NormalColor);
+    Mouse(outside);
+    Check(clicks == 0);
+    Mouse(inside, MouseButton.Left);
+    Mouse(inside);
+    Check(clicks == 1);
+    ColorIs(button.HoverColor);
+
+    Mouse(inside, MouseButton.Left);
+    button.IsEnabled = false;
+    ColorIs(button.DisabledColor);
+    Mouse(inside);
+    ColorIs(button.DisabledColor);
+    Check(clicks == 1);
+    button.IsEnabled = true;
+    Mouse(inside);
+    button.HitTestVisible = false;
+    Mouse(inside);
+    ColorIs(button.DisabledColor);
+    button.HitTestVisible = true;
+    Mouse(inside);
+    Mouse(inside, MouseButton.Left);
+    pointer.Reset();
+    Mouse(inside);
+    Check(clicks == 1);
+    Check(button.Text.HorizontalAlignment == HorizontalAlignment.Center &&
+          button.Text.VerticalAlignment == VerticalAlignment.Center);
+
+    button.RemoveAllActions();
+    button.AddAction(() => button.RemoveAllActions());
+    button.AddAction(() => clicks++);
+    Mouse(inside, MouseButton.Left);
+    Mouse(inside);
+    Check(clicks == 2);
+    button.AddAction(button.Destroy);
+    button.AddAction(() => clicks++);
+    Mouse(inside, MouseButton.Left);
+    Mouse(inside);
+    Check(button.IsDestroyed && clicks == 2);
+
+    var uncreated = new ProjectShockGL.UI.Button();
+    uncreated.NormalColor = Color.Blue;
+    uncreated.IsEnabled = false;
+    uncreated.Visible = false;
+    uncreated.HitTestVisible = false;
+    canvas.Destroy();
+});
 Run("Settings creates one custom canvas, initialized once with its size", () =>
 {
     Configure("ConfiguredCanvas, UIChecks");

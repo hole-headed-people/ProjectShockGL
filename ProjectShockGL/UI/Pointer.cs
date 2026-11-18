@@ -55,11 +55,11 @@ public sealed class Pointer
         }
         
         Update(Input.GetMousePosition(), size, _polledButtons,
-            Input.HasMouse && Application.IsFocused && Input.GetCursorMode() == CursorMode.Normal);
+            Input.HasMouse && Application.IsFocused && Input.GetCursorMode() == CursorMode.Normal, Input.MouseScrollY);
     }
     
     public void Update(Vector2 mousePosition, Vector2 inputSize,
-        IReadOnlyCollection<MouseButton> pressedButtons, bool available = true)
+        IReadOnlyCollection<MouseButton> pressedButtons, bool available = true, float scrollY = 0f)
     {
         ArgumentNullException.ThrowIfNull(pressedButtons);
 
@@ -167,6 +167,18 @@ public sealed class Pointer
             }
             
             CancelInvalidCaptures();
+
+            if (float.IsFinite(scrollY) && scrollY != 0f)
+            {
+                for (var target = HitTest(); target != null; target = target.Parent)
+                {
+                    if (target.Scroll(scrollY))
+                    {
+                        UpdateHover();
+                        break;
+                    }
+                }
+            }
         }
         finally
         {
@@ -254,6 +266,11 @@ public sealed class Pointer
                 continue;
             }
             
+            if (widget.ClipsChildren && !widget.Rect.Contains(Position))
+            {
+                continue;
+            }
+
             var child = HitTestChildren(widget.Children);
 
             if (child != null)

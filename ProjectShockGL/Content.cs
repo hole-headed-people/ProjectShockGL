@@ -64,7 +64,7 @@ public static class Content
             }
         }
         
-        Console.WriteLine(Path);
+        Log.Print($"Content directory: {Path}");
     }
     
     private static string GetTextureFormat(TextureFormat format)
@@ -79,82 +79,109 @@ public static class Content
     
     public static Texture? LoadTexture(string name, TextureFormat format = TextureFormat.Jpeg)
     {
-        var key = $"{name}_{format}";
-        
-        if (Textures.TryGetValue(key, out var texture))
+        try
         {
-            return texture;
+            var key = $"{name}_{format}";
+        
+            if (Textures.TryGetValue(key, out var texture))
+            {
+                return texture;
+            }
+
+            var path = System.IO.Path.Combine(Path, "Textures", name + GetTextureFormat(format));
+
+            if (!File.Exists(path))
+            {
+                Log.PrintWarning($"Resource not found: {path}");
+                return null;
+            }
+        
+            var loadedTexture = Texture.Load(_gl, path);
+        
+            Textures.Add(key, loadedTexture);
+        
+            return loadedTexture;
         }
-
-        var path = System.IO.Path.Combine(Path, "Textures", name + GetTextureFormat(format));
-
-        if (!File.Exists(path))
+        catch (Exception error)
         {
-            return null;
+            Log.PrintError($"LoadTexture failed for '{name}'.", error);
+            throw;
         }
-        
-        var loadedTexture = Texture.Load(_gl, path);
-        
-        Textures.Add(key, loadedTexture);
-        
-        return loadedTexture;
     }
     
     public static TextureAtlas? LoadTextureAtlas(string name)
     {
-        if (!_isInitialized)
+        try
         {
-            throw new InvalidOperationException("Initialize Content before loading texture atlases.");
-        }
+            if (!_isInitialized)
+            {
+                throw new InvalidOperationException("Initialize Content before loading texture atlases.");
+            }
 
-        if (TextureAtlases.TryGetValue(name, out var cached) && cached.Texture.Handle != 0)
-        {
-            return cached;
-        }
+            if (TextureAtlases.TryGetValue(name, out var cached) && cached.Texture.Handle != 0)
+            {
+                return cached;
+            }
 
-        var path = System.IO.Path.Combine(Path, "Atlases", name);
-        var descriptor = path + ".json";
+            var path = System.IO.Path.Combine(Path, "Atlases", name);
+            var descriptor = path + ".json";
 
-        if (!File.Exists(descriptor))
-        {
-            return null;
-        }
+            if (!File.Exists(descriptor))
+            {
+                Log.PrintWarning($"Resource not found: {descriptor}");
+                return null;
+            }
 
-        var atlas = TextureAtlas.Load(_gl, descriptor, path + ".png");
+            var atlas = TextureAtlas.Load(_gl, descriptor, path + ".png");
         
-        TextureAtlases[name] = atlas;
+            TextureAtlases[name] = atlas;
         
-        return atlas;
+            return atlas;
+        }
+        catch (Exception error)
+        {
+            Log.PrintError($"LoadTextureAtlas failed for '{name}'.", error);
+            throw;
+        }
     }
 
     public static Font? LoadFont(string name, int pixelHeight = 24)
     {
-        if (!_isInitialized)
+        try
         {
-            throw new InvalidOperationException("Initialize Content before loading fonts.");
-        }
+            if (!_isInitialized)
+            {
+                throw new InvalidOperationException("Initialize Content before loading fonts.");
+            }
 
-        if (pixelHeight is < 4 or > 128)
-        {
-            throw new ArgumentOutOfRangeException(nameof(pixelHeight));
-        }
+            if (pixelHeight is < 4 or > 128)
+            {
+                throw new ArgumentOutOfRangeException(nameof(pixelHeight));
+            }
 
-        if (Fonts.TryGetValue((name, pixelHeight), out var cached) && !cached.IsDisposed)
-        {
-            return cached;
-        }
+            if (Fonts.TryGetValue((name, pixelHeight), out var cached) && !cached.IsDisposed)
+            {
+                return cached;
+            }
         
-        var path = System.IO.Path.Combine(Path, "Fonts", name + ".ttf");
+            var path = System.IO.Path.Combine(Path, "Fonts", name + ".ttf");
 
-        if (!File.Exists(path))
-        {
-            return null;
+            if (!File.Exists(path))
+            {
+                Log.PrintWarning($"Resource not found: {path}");
+                return null;
+            }
+        
+            var font = Font.Load(_gl, path, pixelHeight);
+            Fonts[(name, pixelHeight)] = font;
+        
+            return font;
         }
-        
-        var font = Font.Load(_gl, path, pixelHeight);
-        Fonts[(name, pixelHeight)] = font;
-        
-        return font;
+        catch (Exception error)
+        {
+            Log.PrintError($"LoadFont failed for '{name}'.", error);
+            throw;
+        }
     }
 
     private static string GetShaderFormat(ShaderType type)
@@ -169,32 +196,59 @@ public static class Content
 
     public static Shader? LoadShader(string name, ShaderType type)
     {
-        var key = $"{name}_{type}";
-        
-        if (Shaders.TryGetValue(key, out var shader))
+        try
         {
-            return shader;
-        }
+            var key = $"{name}_{type}";
         
-        var path = System.IO.Path.Combine(Path, "Shaders", name + GetShaderFormat(type));
+            if (Shaders.TryGetValue(key, out var shader))
+            {
+                return shader;
+            }
         
-        if (!File.Exists(path))
-        {
-            return null;
-        }
+            var path = System.IO.Path.Combine(Path, "Shaders", name + GetShaderFormat(type));
         
-        var content = File.ReadAllText(path);
+            if (!File.Exists(path))
+            {
+                Log.PrintWarning($"Resource not found: {path}");
+                return null;
+            }
+        
+            var content = File.ReadAllText(path);
 
-        if (string.IsNullOrEmpty(content))
-        {
-            return null;
+            if (string.IsNullOrEmpty(content))
+            {
+                return null;
+            }
+        
+            const string litDirective = "// @lit";
+            
+            if (type == ShaderType.FragmentShader && content.StartsWith(litDirective, StringComparison.Ordinal)
+                && (content.Length == litDirective.Length || content[litDirective.Length] is '\r' or '\n'))
+            {
+                const string emissionMarker = "/* LIT_EMISSION */";
+                var template = File.ReadAllText(System.IO.Path.Combine(Path, "Shaders", "Lit.frag"));
+                
+                if (!template.Contains(emissionMarker, StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException("Lit.frag does not support emission effects. Update the Lit template.");
+                }
+
+                content = template.Replace(emissionMarker,
+                    "#define LIT_HAS_EMISSION\n" + content[litDirective.Length..] + "\n",
+                    StringComparison.Ordinal);
+            }
+
+            var loadedShader = new Shader(_gl, type, content);
+        
+            Shaders.Add(key, loadedShader);
+        
+            return loadedShader;
         }
-        
-        var loadedShader = new Shader(_gl, type, content);
-        
-        Shaders.Add(key, loadedShader);
-        
-        return loadedShader;
+        catch (Exception error)
+        {
+            Log.PrintError($"LoadShader failed for '{name}'.", error);
+            throw;
+        }
     }
     
     public static ShaderProgram LoadShaderProgram(string vertexName, string? fragmentName = null)
@@ -217,138 +271,175 @@ public static class Content
         var program = new ShaderProgram(_gl, vertex, fragment);
         
         Programs[key] = program;
+        
         return program;
     }
 
     public static PostProcessProfile? LoadPostProcessProfile(string name)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-
-        if (PostProcessProfiles.TryGetValue(name, out var cached))
-        {
-            return cached;
-        }
-        
-        var path = System.IO.Path.Combine(Path, "PostProcessProfiles", name + ".json");
-
-        if (!File.Exists(path))
-        {
-            return null;
-        }
-        
         try
         {
-            var json = JObject.Parse(File.ReadAllText(path), new JsonLoadSettings
-            {
-                DuplicatePropertyNameHandling = DuplicatePropertyNameHandling.Error
-            });
-            
-            var profile = json.ToObject<PostProcessProfile>(JsonSerializer.Create(new JsonSerializerSettings
-            {
-                MissingMemberHandling = MissingMemberHandling.Error,
-                DateParseHandling = DateParseHandling.None
-            })) ?? throw new InvalidDataException("The profile is empty.");
+            ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-            if (string.IsNullOrWhiteSpace(profile.VertexShader) || string.IsNullOrWhiteSpace(profile.FragmentShader) ||
-                profile.Parameters == null)
+            if (PostProcessProfiles.TryGetValue(name, out var cached))
             {
-                throw new InvalidDataException("The profile needs shader names and a Parameters dictionary.");
+                return cached;
             }
+        
+            var path = System.IO.Path.Combine(Path, "PostProcessProfiles", name + ".json");
+
+            if (!File.Exists(path))
+            {
+                Log.PrintWarning($"Resource not found: {path}");
+                return null;
+            }
+        
+            try
+            {
+                var json = JObject.Parse(File.ReadAllText(path), new JsonLoadSettings
+                {
+                    DuplicatePropertyNameHandling = DuplicatePropertyNameHandling.Error
+                });
             
-            PostProcessProfiles.Add(name, profile);
+                var profile = json.ToObject<PostProcessProfile>(JsonSerializer.Create(new JsonSerializerSettings
+                {
+                    MissingMemberHandling = MissingMemberHandling.Error,
+                    DateParseHandling = DateParseHandling.None
+                })) ?? throw new InvalidDataException("The profile is empty.");
+
+                if (string.IsNullOrWhiteSpace(profile.VertexShader) || string.IsNullOrWhiteSpace(profile.FragmentShader) ||
+                    profile.Parameters == null)
+                {
+                    throw new InvalidDataException("The profile needs shader names and a Parameters dictionary.");
+                }
             
-            return profile;
+                PostProcessProfiles.Add(name, profile);
+            
+                return profile;
+            }
+            catch (Exception error) when (error is JsonException or InvalidDataException)
+            {
+                throw new InvalidDataException($"Cannot load postprocess profile '{path}': {error.Message}", error);
+            }
         }
-        catch (Exception error) when (error is JsonException or InvalidDataException)
+        catch (Exception error)
         {
-            throw new InvalidDataException($"Cannot load postprocess profile '{path}': {error.Message}", error);
+            Log.PrintError($"LoadPostProcessProfile failed for '{name}'.", error);
+            throw;
         }
     }
 
     public static Mesh? LoadMesh(string name)
     {
-        if (Meshes.TryGetValue(name, out var mesh))
+        try
         {
-            return mesh;
+            if (Meshes.TryGetValue(name, out var mesh))
+            {
+                return mesh;
+            }
+
+            var path = System.IO.Path.Combine(Path, "Meshes", name + ".obj");
+
+            if (!File.Exists(path))
+            {
+                Log.PrintWarning($"Resource not found: {path}");
+                return null;
+            }
+
+            var loadedMesh = ObjLoader.Load(_gl, path);
+            Meshes.Add(name, loadedMesh);
+
+            return loadedMesh;
         }
-
-        var path = System.IO.Path.Combine(Path, "Meshes", name + ".obj");
-
-        if (!File.Exists(path))
+        catch (Exception error)
         {
-            return null;
+            Log.PrintError($"LoadMesh failed for '{name}'.", error);
+            throw;
         }
-
-        var loadedMesh = ObjLoader.Load(_gl, path);
-        Meshes.Add(name, loadedMesh);
-
-        return loadedMesh;
     }
 
     public static GeometryData? LoadGeometry(string name)
     {
-        if (Geometries.TryGetValue(name, out var geometry))
+        try
         {
-            return geometry;
-        }
+            if (Geometries.TryGetValue(name, out var geometry))
+            {
+                return geometry;
+            }
         
-        var path = System.IO.Path.Combine(Path, "Geometry", name + ".json");
+            var path = System.IO.Path.Combine(Path, "Geometry", name + ".json");
 
-        if (!File.Exists(path))
-        {
-            return null;
+            if (!File.Exists(path))
+            {
+                Log.PrintWarning($"Resource not found: {path}");
+                return null;
+            }
+        
+            var json = File.ReadAllText(path);
+        
+            if (string.IsNullOrEmpty(json))
+            {
+                return null;
+            }
+        
+            var data = JsonConvert.DeserializeObject<GeometryData>(json, JsonHelper.GetSettings());
+        
+            if (data == null)
+            {
+                return null;
+            }
+        
+            Geometries.Add(name, data);
+        
+            return data;
         }
-        
-        var json = File.ReadAllText(path);
-        
-        if (string.IsNullOrEmpty(json))
+        catch (Exception error)
         {
-            return null;
+            Log.PrintError($"LoadGeometry failed for '{name}'.", error);
+            throw;
         }
-        
-        var data = JsonConvert.DeserializeObject<GeometryData>(json, JsonHelper.GetSettings());
-        
-        if (data == null)
-        {
-            return null;
-        }
-        
-        Geometries.Add(name, data);
-        
-        return data;
     }
 
     public static EntityData? LoadEntity(string name)
     {
-        if (Entities.TryGetValue(name, out var entity))
+        try
         {
-            return entity;
-        }
+            if (Entities.TryGetValue(name, out var entity))
+            {
+                return entity;
+            }
         
-        var path = System.IO.Path.Combine(Path, "Entities", name + ".json");
+            var path = System.IO.Path.Combine(Path, "Entities", name + ".json");
 
-        if (!File.Exists(path))
-        {
-            return null;
-        }
+            if (!File.Exists(path))
+            {
+                Log.PrintWarning($"Resource not found: {path}");
+                return null;
+            }
         
-        var json = File.ReadAllText(path);
+            var json = File.ReadAllText(path);
         
-        if (string.IsNullOrEmpty(json))
-        {
-            return null;
-        }
+            if (string.IsNullOrEmpty(json))
+            {
+                return null;
+            }
 
-        var data = JsonConvert.DeserializeObject<EntityData>(json, JsonHelper.GetSettings());
+            var data = JsonConvert.DeserializeObject<EntityData>(json, JsonHelper.GetSettings());
         
-        if (data == null)
-        {
-            return null;
+            if (data == null)
+            {
+                return null;
+            }
+        
+            Entities.Add(name, data);
+        
+            return data;
         }
-        
-        Entities.Add(name, data);
-        
-        return data;
+        catch (Exception error)
+        {
+            Log.PrintError($"LoadEntity failed for '{name}'.", error);
+            throw;
+        }
     }
         
     public static Texture GetWhitePixel()
@@ -365,35 +456,44 @@ public static class Content
     
     public static Level? LoadLevel(string name)
     {
-        if (Levels.TryGetValue(name, out var level))
+        try
         {
-            return level;
-        }
+            if (Levels.TryGetValue(name, out var level))
+            {
+                return level;
+            }
         
-        var path = System.IO.Path.Combine(Path, "Levels", name + ".map");
+            var path = System.IO.Path.Combine(Path, "Levels", name + ".map");
 
-        if (!File.Exists(path))
-        {
-            return null;
-        }
+            if (!File.Exists(path))
+            {
+                Log.PrintWarning($"Resource not found: {path}");
+                return null;
+            }
         
-        var json = File.ReadAllText(path);
+            var json = File.ReadAllText(path);
 
-        if (string.IsNullOrEmpty(json))
-        {
-            return null;
-        }
+            if (string.IsNullOrEmpty(json))
+            {
+                return null;
+            }
         
-        var data = JsonConvert.DeserializeObject<Level>(json, JsonHelper.GetSettings());
+            var data = JsonConvert.DeserializeObject<Level>(json, JsonHelper.GetSettings());
 
-        if (data == null)
-        {
-            return null;
+            if (data == null)
+            {
+                return null;
+            }
+        
+            Levels.Add(name, data);
+        
+            return data;
         }
-        
-        Levels.Add(name, data);
-        
-        return data;
+        catch (Exception error)
+        {
+            Log.PrintError($"LoadLevel failed for '{name}'.", error);
+            throw;
+        }
     }
     
     public static string[] GetAllGeometryNames()
@@ -414,45 +514,64 @@ public static class Content
     public static Placeable? LoadPrefab(string name)
     {
         var data = LoadPrefabData(name);
-        if (data == null) return null;
-        if (data.Placeables.Length != 1) throw new InvalidDataException("Use LoadPrefabData for a multi-object prefab.");
+        
+        if (data == null)
+        {
+            return null;
+        }
+
+        if (data.Placeables.Length != 1)
+        {
+            throw new InvalidDataException("Use LoadPrefabData for a multi-object prefab.");
+        }
+        
         var source = data.Placeables[0];
+        
         return Prefab.WithTransform(source, source.Position + data.Pivot, source.Rotation);
     }
 
     public static PrefabData? LoadPrefabData(string name)
     {
-        var path = PrefabPath(name);
+        try
+        {
+            var path = PrefabPath(name);
 
-        if (!File.Exists(path))
-        {
-            return null;
-        }
+            if (!File.Exists(path))
+            {
+                Log.PrintWarning($"Resource not found: {path}");
+                return null;
+            }
         
-        var settings = JsonHelper.GetSettings();
-        var json = JObject.Parse(File.ReadAllText(path));
+            var settings = JsonHelper.GetSettings();
+            var json = JObject.Parse(File.ReadAllText(path));
         
-        PrefabData data;
+            PrefabData data;
 
-        if (json.Property("Placeables", StringComparison.OrdinalIgnoreCase) != null)
-        {
-            data = json.ToObject<PrefabData>(JsonSerializer.Create(settings))!;
-        }
-        else
-        {
-            var source = json.ToObject<Placeable>(JsonSerializer.Create(settings))!;
+            if (json.Property("Placeables", StringComparison.OrdinalIgnoreCase) != null)
+            {
+                data = json.ToObject<PrefabData>(JsonSerializer.Create(settings))!;
+            }
+            else
+            {
+                var source = json.ToObject<Placeable>(JsonSerializer.Create(settings))!;
             
-            data = new PrefabData { Pivot = source.Position,
-                Placeables = [Prefab.WithTransform(source, System.Numerics.Vector3.Zero, source.Rotation)] };
-        }
+                data = new PrefabData { Pivot = source.Position,
+                    Placeables = [Prefab.WithTransform(source, System.Numerics.Vector3.Zero, source.Rotation)] };
+            }
 
-        if (data.Placeables == null || data.Placeables.Length == 0 || data.Placeables.Any(p => p == null) ||
-            !float.IsFinite(data.Pivot.X) || !float.IsFinite(data.Pivot.Y) || !float.IsFinite(data.Pivot.Z))
-        {
-            throw new InvalidDataException($"Prefab '{name}' has invalid placements or pivot.");
-        }
+            if (data.Placeables == null || data.Placeables.Length == 0 || data.Placeables.Any(p => p == null) ||
+                !float.IsFinite(data.Pivot.X) || !float.IsFinite(data.Pivot.Y) || !float.IsFinite(data.Pivot.Z))
+            {
+                throw new InvalidDataException($"Prefab '{name}' has invalid placements or pivot.");
+            }
         
-        return data;
+            return data;
+        }
+        catch (Exception error)
+        {
+            Log.PrintError($"LoadPrefabData failed for '{name}'.", error);
+            throw;
+        }
     }
 
     public static string PrefabPath(string name)
@@ -497,6 +616,127 @@ public static class Content
             .ToArray();
     }
     
+    public static UI.UIAsset LoadUI(string name)
+    {
+        var path = GetUIPath(name);
+        
+        try
+        {
+            var asset = JsonConvert.DeserializeObject<UI.UIAsset>(File.ReadAllText(path), JsonHelper.GetSettings())
+                ?? throw new InvalidDataException($"UI asset '{name}' is empty.");
+            
+            if (asset.Version != 1 || asset.Root == null)
+            {
+                throw new InvalidDataException($"UI asset '{name}' has an invalid root or version.");
+            }
+            
+            return asset;
+        }
+        catch (Exception error)
+        {
+            Log.PrintError($"Cannot load UI '{path}'.", error);
+            throw;
+        }
+    }
+
+    public static void SaveUI(string name, UI.Widget root)
+    {
+        SaveUI(name, UI.UIAsset.Capture(root));
+    }
+
+    public static void SaveUI(string name, UI.UIAsset data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        
+        var validation = new UI.Canvas();
+        validation.Resize(new System.Numerics.Vector2(800, 600));
+
+        try
+        {
+            data.Instantiate(validation);
+        }
+        finally
+        {
+            validation.Destroy();
+        }
+        
+        var path = GetUIPath(name);
+        var json = JsonConvert.SerializeObject(data, Formatting.Indented, JsonHelper.GetSettings());
+        
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+        
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        
+        try
+        {
+            File.WriteAllText(temporary, json);
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary))
+            {
+                File.Delete(temporary);
+            }
+        }
+    }
+
+    private static string GetUIPath(string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        
+        var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(Path, "UI"));
+        var file = System.IO.Path.GetFullPath(System.IO.Path.Combine(root, name + ".json"));
+
+        if (!file.StartsWith(root + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("UI assets must remain inside Content/UI.", nameof(name));
+        }
+        
+        return file;
+    }
+
+    internal static (string Name, TextureFormat Format) GetUITextureReference(Texture texture)
+    {
+        foreach (var entry in Textures)
+        {
+            if (ReferenceEquals(entry.Value, texture))
+            {
+                var separator = entry.Key.LastIndexOf('_');
+                return (entry.Key[..separator], Enum.Parse<TextureFormat>(entry.Key[(separator + 1)..]));
+            }
+        }
+        
+        throw new InvalidDataException("UI textures must be loaded through Content before capture.");
+    }
+
+    internal static (string Name, int Size) GetUIFontReference(Font font)
+    {
+        foreach (var entry in Fonts)
+        {
+            if (ReferenceEquals(entry.Value, font))
+            {
+                return entry.Key;
+            }
+        }
+        
+        throw new InvalidDataException("UI fonts must be loaded through Content before capture.");
+    }
+
+    internal static (string Atlas, string Region) GetUIRegionReference(TextureRegion region)
+    {
+        foreach (var entry in TextureAtlases)
+        {
+            var name = entry.Value.FindRegion(region);
+            
+            if (name != null)
+            {
+                return (entry.Key, name);
+            }
+        }
+        
+        throw new InvalidDataException("UI atlas regions must be loaded through Content before capture.");
+    }
     public static void UnloadAll()
     {
         PostProcessSettings.Reset();

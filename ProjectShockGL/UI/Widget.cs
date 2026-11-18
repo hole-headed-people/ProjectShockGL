@@ -6,12 +6,37 @@ namespace ProjectShockGL.UI;
 
 public class Widget
 {
+    private bool _isEnabled = true;
+    
+    private bool _isHitTestVisible = true;
     private bool _isVisible = true;
     
     private Canvas? _canvas;
     private readonly List<Widget> _children = [];
     
     public Canvas Canvas => _canvas ?? throw new InvalidOperationException("Add the widget to a canvas first.");
+    private bool _fillCanvas;
+    private bool _isScreenRoot;
+
+    public bool FillCanvas
+    {
+        get => _fillCanvas || _isScreenRoot;
+        set
+        {
+            _fillCanvas = value;
+            Rect.ScreenSize = FillCanvas ? () => Canvas.Size : null;
+        }
+    }
+
+    internal void SetAsScreenRoot()
+    {
+        _isScreenRoot = true;
+        FillCanvas = true;
+    }
+
+    public string Name { get; set; } = string.Empty;
+    public T? Find<T>(string name) where T : Widget => WidgetSearch.Find<T>(Children, name);
+
     public Widget? Parent { get; private set; }
     public IReadOnlyList<Widget> Children { get; }
     public RectTransform Rect { get; }
@@ -31,9 +56,38 @@ public class Widget
             OnVisibleChanged(_isVisible);
         }
     }
-    
-    public bool IsEnabled { get; set; } = true;
-    public bool HitTestVisible { get; set; } = true;
+
+    public bool IsEnabled
+    {
+        get => _isEnabled;
+        set
+        {
+            if (_isEnabled == value)
+            {
+                return;
+            }
+            
+            _isEnabled = value;
+            
+            OnEnabledChanged(_isEnabled);
+        }
+    }
+
+    public bool HitTestVisible
+    {
+        get => _isHitTestVisible;
+        set
+        {
+            if (_isHitTestVisible == value)
+            {
+                return;
+            }
+            
+            _isHitTestVisible = value;
+            
+            OnHitTestVisibleChanged(_isHitTestVisible);
+        }
+    }
     public bool IsMouseOver { get; internal set; }
     public bool IsDestroyed { get; private set; }
     
@@ -150,6 +204,13 @@ public class Widget
         }
     }
 
+    internal virtual bool ClipsChildren => false;
+    
+    internal virtual bool Scroll(float delta)
+    {
+        return false;
+    }
+
     internal void Draw(Graphics graphics, HashSet<Widget> visited)
     {
         if (IsDestroyed || !Visible || !visited.Add(this))
@@ -158,18 +219,31 @@ public class Widget
         }
         
         OnDraw(graphics);
-        
-        foreach (var child in _children.ToArray())
-        {
-            if (IsDestroyed || !Visible)
-            {
-                break;
-            }
 
-            if (child.Parent == this)
+        var previousClip = ClipsChildren ? graphics?.UIClip : null;
+        if (ClipsChildren)
+        {
+            graphics?.ClipUI(Rect.AbsolutePosition, Rect.Size);
+        }
+
+        try
+        {
+            foreach (var child in _children.ToArray())
             {
-                child.Draw(graphics, visited);
+                if (IsDestroyed || !Visible)
+                {
+                    break;
+                }
+
+                if (child.Parent == this)
+                {
+                    child.Draw(graphics!, visited);
+                }
             }
+        }
+        finally
+        {
+            if (ClipsChildren && graphics != null) graphics.UIClip = previousClip;
         }
     }
 
@@ -217,7 +291,9 @@ public class Widget
     protected virtual void OnCreate() { }
     protected virtual void OnUpdate(float deltaSeconds) { }
     protected virtual void OnDraw(Graphics graphics) { }
+    protected virtual void OnEnabledChanged(bool isEnabled){}
     protected virtual void OnVisibleChanged(bool isVisible) { }
+    protected virtual void OnHitTestVisibleChanged(bool isVisible) { }
     protected virtual void OnDestroy() { }
 
     internal void MouseEnter() => OnMouseEnter();

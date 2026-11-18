@@ -92,6 +92,11 @@ public static class LevelManager
             IsLoading = false;
             Loaded?.Invoke(level);
         }
+        catch (Exception error)
+        {
+            Log.PrintError($"Cannot load level '{name ?? "(in memory)"}'.", error);
+            throw;
+        }
         finally
         {
             try
@@ -246,6 +251,11 @@ public static class LevelManager
             body.Mass = mass;
         }
 
+        if (placeable.BackfaceCulling is { } backfaceCulling && obj.GetComponent<MeshComponent>() is { IsDestroyed: false } mesh)
+        {
+            mesh.BackfaceCulling = backfaceCulling;
+        }
+
         obj.Transform.Position = placeable.Position;
         obj.Transform.Rotation = Quaternion.Normalize(placeable.Rotation);
         obj.Transform.Scale = placeable.Scale;
@@ -331,7 +341,13 @@ public static class LevelManager
     {
         EnsureIdle();
         
-        var level = Content.LoadLevel(name) ?? throw new FileNotFoundException($"Cannot load level '{name}'.");
+        var level = Content.LoadLevel(name);
+        if (level == null)
+        {
+            var error = new FileNotFoundException($"Cannot load level '{name}'.");
+            Log.PrintError(error.Message);
+            throw error;
+        }
         Load(level, name, removedObjects, restore);
     }
 }

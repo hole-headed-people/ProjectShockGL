@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using IniParser;
 using IniParser.Model;
 
@@ -11,13 +11,27 @@ public static class Settings
 
     private static string _path = null!;
     
+    internal static bool IsEditor { get; private set; }
+
     public static void Initialize(bool isEditor = false)
     {
         _parser = new FileIniDataParser();
         _path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, (isEditor ? "EditorSettings" : "GameSettings") + ".ini");
 
-        _data = File.Exists(_path) ? _parser.ReadFile(_path) : new IniData();
-        _data.Configuration.AllowCreateSectionsOnFly = true;
+        try
+        {
+            _data = File.Exists(_path) ? _parser.ReadFile(_path) : new IniData();
+            _data.Configuration.AllowCreateSectionsOnFly = true;
+        }
+        catch (Exception error)
+        {
+            Log.Initialize("ProjectShockGL", isEditor);
+            Log.PrintError($"Cannot read settings '{_path}'.", error);
+            throw;
+        }
+
+        IsEditor = isEditor;
+        Log.Initialize(GetString("Game", "Name", "ProjectShockGL"), isEditor);
     }
 
     private static string Read(string section, string key, string defaultValue)

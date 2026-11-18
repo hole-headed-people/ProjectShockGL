@@ -1,4 +1,4 @@
-﻿using ProjectShockGL.Localization;
+using ProjectShockGL.Localization;
 using ProjectShockGL.Rendering;
 using ProjectShockGL.UI;
 
@@ -17,6 +17,16 @@ public class Game
     
     public static void Initialize()
     {
+        try { InitializeGame(); }
+        catch (Exception error)
+        {
+            Log.PrintError("Cannot initialize the game.", error);
+            throw;
+        }
+    }
+
+    private static void InitializeGame()
+    {
         if (_isInitialized)
         {
             return;
@@ -33,6 +43,7 @@ public class Game
         
         if (type == null)
         {
+            Log.PrintError($"Game class '{name}' was not found.");
             return;
         }
 

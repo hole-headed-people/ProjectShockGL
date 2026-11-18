@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using Silk.NET.OpenGL;
 
 namespace ProjectShockGL.Rendering;
@@ -12,6 +12,7 @@ public class Mesh : IDisposable
     private uint _ebo;
 
     private readonly uint _indexCount;
+    internal long TriangleCount => _indexCount / 3;
 
     public Vector3 BoundsMin { get; private set; }
     public Vector3 BoundsMax { get; private set; }

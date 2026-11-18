@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 
 namespace ProjectShockGL.Core;
 
@@ -26,6 +26,8 @@ public class Placeable
     public bool? SimulatePhysics { get; init; }
     [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
     public float? RigidbodyMass { get; init; }
+    [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+    public bool? BackfaceCulling { get; init; }
     public string[] EditorGroups { get; init; } = [];
     public BrushBoxData? Brush { get; init; }
     public Vector3 Position { get; init; }

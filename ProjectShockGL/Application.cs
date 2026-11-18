@@ -33,7 +33,9 @@ public static class Application
     private static Renderer _renderer = null!;
     private static Graphics _graphics = null!;
     
-    private static double _titleTimer;
+    private static readonly DebugStatisticsOverlay DebugStatistics = new();
+    public static double UpdateTimeMs { get; private set; }
+    public static double RenderTimeMs { get; private set; }
     private static string _title = "";
     
     private static int _frameCount;
@@ -52,10 +54,20 @@ public static class Application
     
     public static void Run()
     {
+        try { RunWindow(); }
+        catch (Exception error)
+        {
+            Log.PrintError("Application stopped with an error.", error);
+            throw;
+        }
+    }
+
+    private static void RunWindow()
+    {
         _title = Settings.GetString("Game", "Name", "ProjectShockGL");
         var options = CreateWindowOptions();
         
-        IsEditor = Settings.GetBool("Application", "IsEditor", false);
+        IsEditor = Settings.IsEditor;
         IsDebug = Settings.GetBool("Application", "IsDebug", false);
         
         _window = Window.Create(options);
@@ -76,6 +88,7 @@ public static class Application
         var mode = Settings.GetString("Window", "Mode", "Windowed").Trim();
         var options = WindowOptions.Default with
         {
+            VSync = Settings.GetBool("Window", "VSync", true),
             Title = _title, 
             WindowState = WindowState.Normal
         };
@@ -163,7 +176,7 @@ public static class Application
         }
         catch (Exception exception)
         {
-            Console.WriteLine($"Cannot set window icon '{icon}': {exception.Message}");
+            Log.PrintWarning($"Cannot set window icon '{icon}': {exception.Message}");
         }
     }
 
@@ -182,10 +195,12 @@ public static class Application
             }
         }
 
+        var updateStart = System.Diagnostics.Stopwatch.GetTimestamp();
         AdvanceTime(deltaTime);
         Update?.Invoke((float)deltaTime);
         
         Input.Update();
+        UpdateTimeMs = System.Diagnostics.Stopwatch.GetElapsedTime(updateStart).TotalMilliseconds;
     }
 
     private static void AdvanceTime(double deltaTime)
@@ -227,6 +242,7 @@ public static class Application
             _fpsTimer = 0;
         }
         
+        var renderStart = System.Diagnostics.Stopwatch.GetTimestamp();
         Camera.SynchronizeComponents();
         _graphics.BeginDraw(Camera.Active);
 
@@ -242,16 +258,14 @@ public static class Application
 
         AfterRender?.Invoke((float)deltaTime);
         
+        RenderTimeMs = System.Diagnostics.Stopwatch.GetElapsedTime(renderStart).TotalMilliseconds;
+        if (IsDebug && !IsEditor)
+        {
+            DebugStatistics.Draw(_graphics, WindowSize);
+        }
+
         _graphics.EndDraw();
         
-        _titleTimer += deltaTime;
-
-        if (_titleTimer >= 0.5)
-        {
-            _titleTimer = 0;
-
-            UpdateTitle();
-        }
     }
 
     private static void OnResize(Vector2D<int> size)
@@ -295,13 +309,6 @@ public static class Application
         return Closing == null || Closing.GetInvocationList().Cast<Func<bool>?>().All(handler => handler != null && handler());
     }
     
-    private static void UpdateTitle()
-    {
-        _window.Title = $"{_title} | " +
-                        $"FPS: {Fps:F0} | " +
-                        $"Frame: {FrameTimeMs:F2}ms";
-    }
-
     public static void Quit()
     {
         _quitRequested = true;

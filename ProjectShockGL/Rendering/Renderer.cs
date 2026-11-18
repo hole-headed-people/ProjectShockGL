@@ -13,8 +13,7 @@ public class Renderer : IDisposable
 
     private uint _unlitProgram;
     private uint _litProgram;
-
-    // Uniform-локации unlit
+    
     private readonly int _unlitProjection;
     private readonly int _unlitView;
     private readonly int _unlitModel;
@@ -27,8 +26,7 @@ public class Renderer : IDisposable
     private readonly int _unlitFogNear;
     private readonly int _unlitFogFar;
     private readonly int _unlitFogEnabled;
-
-    // Uniform-локации lit
+    
     private readonly int _litProjection;
     private readonly int _litView;
     private readonly int _litModel;
@@ -75,6 +73,16 @@ public class Renderer : IDisposable
     private bool _frameEnvironmentEnabled;
     
     private PostProcessor? _postProcessor;
+    private int _drawCalls;
+    private long _triangles;
+    private int _worldDrawCalls;
+    private int _worldStart;
+    private int _postProcessDrawCalls;
+    private int _worldWidth;
+    private int _worldHeight;
+
+    public RenderStatistics Statistics => new(_drawCalls, _worldDrawCalls, _postProcessDrawCalls,
+        _triangles, _worldWidth, _worldHeight);
 
     public Renderer(GL gl, int screenWidth, int screenHeight, RenderPreviewSettings? preview = null)
     {
@@ -158,6 +166,10 @@ public class Renderer : IDisposable
 
     public void BeginFrame(Camera camera)
     {
+        _drawCalls = _worldDrawCalls = _postProcessDrawCalls = _worldStart = 0;
+        _triangles = 0;
+        _worldWidth = _screenWidth;
+        _worldHeight = _screenHeight;
         _frameCamera = camera;
         _frameTime = (float)_clock.Elapsed.TotalSeconds;
         
@@ -295,18 +307,26 @@ public class Renderer : IDisposable
 
     public void BeginWorld()
     {
-        if (!PostProcessSettings.Enabled)
-        {
-            return;
-        }
-        
         _postProcessor ??= new PostProcessor(_gl);
         _postProcessor.Begin(_screenWidth, _screenHeight);
+        
+        _worldStart = _drawCalls;
+        
+        Span<int> viewport = stackalloc int[4];
+        
+        _gl.GetInteger(GetPName.Viewport, viewport);
+        
+        _worldWidth = viewport[2];
+        _worldHeight = viewport[3];
     }
 
     public void EndWorld()
     {
+        _worldDrawCalls = _drawCalls - _worldStart;
         _postProcessor?.End(_frameTime);
+        _postProcessDrawCalls = _postProcessor?.DrawCalls ?? 0;
+        _drawCalls += _postProcessDrawCalls;
+        _triangles += _postProcessDrawCalls;
     }
 
     public void EndFrame()
@@ -400,9 +420,33 @@ public class Renderer : IDisposable
     }
 
     public void DrawMesh(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit = false, bool ignoreDepth = false,
-        ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
+        ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, bool backfaceCulling = true)
     {
-        DrawMeshInternal(mesh, texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters);
+        var cullFace = _gl.IsEnabled(EnableCap.CullFace);
+        try
+        {
+            if (backfaceCulling)
+            {
+                _gl.Enable(EnableCap.CullFace);
+            }
+            else
+            {
+                _gl.Disable(EnableCap.CullFace);
+            }
+
+            DrawMeshInternal(mesh, texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters);
+        }
+        finally
+        {
+            if (cullFace)
+            {
+                _gl.Enable(EnableCap.CullFace);
+            }
+            else
+            {
+                _gl.Disable(EnableCap.CullFace);
+            }
+        }
     }
 
     private void DrawMeshInternal(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit,
@@ -460,6 +504,8 @@ public class Renderer : IDisposable
         }
 
         mesh.Draw();
+        _drawCalls++;
+        _triangles += mesh.TriangleCount;
 
         if (!_isUI)
         {

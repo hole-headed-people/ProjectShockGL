@@ -141,7 +141,7 @@ public class BrushBox : Object
             }
             catch (Exception error) when (Application.IsEditor)
             {
-                Console.Error.WriteLine($"BrushBox '{Name}', texture '{TextureName}': {error.Message}");
+                Log.PrintWarning($"BrushBox '{Name}', texture '{TextureName}': {error.Message}");
                 renderer.Texture = Content.GetWhitePixel();
                 
                 _failedTexture = textureKey;

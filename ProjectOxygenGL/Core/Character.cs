@@ -31,14 +31,21 @@ public class Character : DamageableEntity
         _controller = null;
     }
 
-    public void Heal(float amount)
+    public bool Heal(float amount)
     {
         if (IsDestroyed || IsDead() || !float.IsFinite(amount) || amount <= 0f)
         {
-            return;
+            return false;
+        }
+
+        if (CurrentHealth >= MaxHealth)
+        {
+            return false;
         }
         
         SetCurrentHealth(CurrentHealth + MathF.Min(amount, MaxHealth - CurrentHealth));
+        
+        return true;
     }
 
     public Controller? GetController()

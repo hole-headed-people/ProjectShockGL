@@ -8,11 +8,23 @@ public sealed class RectTransform
     
     private Vector2 _size = new(100f, 100f);
 
-    public Vector2 Position { get; set; }
+    internal (Vector2 Position, Vector2 Size, Vector2 Anchor, Vector2 Pivot) AuthoredRect =>
+        (_position, _size, _anchor, _pivot);
+
+    internal Func<Vector2>? ScreenSize { get; set; }
+    private Vector2 _position;
+    private Vector2 _anchor;
+    private Vector2 _pivot;
+
+    public Vector2 Position
+    {
+        get => ScreenSize == null ? _position : Vector2.Zero;
+        set => _position = value;
+    }
 
     public Vector2 Size
     {
-        get => _size;
+        get => ScreenSize?.Invoke() ?? _size;
         set
         {
             if (!float.IsFinite(value.X) || !float.IsFinite(value.Y) || value.X < 0 || value.Y < 0)
@@ -21,12 +33,21 @@ public sealed class RectTransform
         }
     }
     
-    public Vector2 Anchor { get; set; }
-    public Vector2 Pivot { get; set; }
+    public Vector2 Anchor
+    {
+        get => ScreenSize == null ? _anchor : Vector2.Zero;
+        set => _anchor = value;
+    }
+    public Vector2 Pivot
+    {
+        get => ScreenSize == null ? _pivot : Vector2.Zero;
+        set => _pivot = value;
+    }
     public Vector2 AbsolutePosition
     {
         get
         {
+            if (ScreenSize != null) return Vector2.Zero;
             var parent = _parentBounds();
             return parent.Position + parent.Size * Anchor + Position - Size * Pivot;
         }

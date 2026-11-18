@@ -12,6 +12,7 @@ public class MeshCommand : RenderCommand
     public Color Color { get; set; }
     public ShaderProgram? Shader { get; set; }
     public ShaderParameters? ShaderParameters { get; set; }
+    public bool BackfaceCulling { get; set; } = true;
     public bool Lit { get; set; }
     public bool IgnoreDepth { get; set; }
 
@@ -19,7 +20,7 @@ public class MeshCommand : RenderCommand
     {
         if (Mesh != null && Texture != null)
         {
-            graphics.DrawMesh(Mesh, Position, Rotation, Scale, Texture, Color, Lit, IgnoreDepth, Shader, ShaderParameters);
+            graphics.DrawMesh(Mesh, Position, Rotation, Scale, Texture, Color, Lit, IgnoreDepth, Shader, ShaderParameters, BackfaceCulling);
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using Silk.NET.Input;
 
 namespace ProjectShockGL;
@@ -17,6 +17,7 @@ public static class Input
     private static HashSet<MouseButton> PreviousMouseButtons { get; } = [];
     
     public static Vector2 MouseDeltaPosition { get; private set; }
+    internal static float MouseScrollY { get; private set; }
     public static bool HasMouse => _isInitialized && _context.Mice.Count > 0;
 
     public static void Initialize(IInputContext context)
@@ -85,6 +86,7 @@ public static class Input
         mouse.MouseDown += MouseOnMouseDown;
         mouse.MouseUp += MouseOnMouseUp;
         mouse.MouseMove += MouseOnMouseMove;
+        mouse.Scroll += MouseOnScroll;
     }
 
     private static void OnMouseDisconnected(IMouse mouse)
@@ -92,6 +94,7 @@ public static class Input
         mouse.MouseDown -= MouseOnMouseDown;
         mouse.MouseUp -= MouseOnMouseUp;
         mouse.MouseMove -= MouseOnMouseMove;
+        mouse.Scroll -= MouseOnScroll;
     }
     
     private static void KeyboardOnKeyDown(IKeyboard keyboard, Key key, int scancode)
@@ -120,6 +123,11 @@ public static class Input
         _mouseLastPosition = position;
     }
 
+    private static void MouseOnScroll(IMouse mouse, ScrollWheel wheel)
+    {
+        MouseScrollY += wheel.Y;
+    }
+
     public static void Update()
     {
         PreviousKeys.Clear();
@@ -129,6 +137,7 @@ public static class Input
         PreviousMouseButtons.UnionWith(CurrentMouseButtons);
         
         MouseDeltaPosition = Vector2.Zero;
+        MouseScrollY = 0f;
     }
     
     public static bool IsKeyDown(Key key)
@@ -196,7 +205,19 @@ public static class Input
     {
         if (_isInitialized && _context.Mice.Count > 0)
         {
-            _context.Mice[0].Cursor.CursorMode = mode;
+            var mouse = _context.Mice[0];
+            var previousMode = mouse.Cursor.CursorMode;
+            
+            mouse.Cursor.CursorMode = mode;
+
+            if (mode == CursorMode.Normal && previousMode != CursorMode.Normal)
+            {
+                var center = Application.WindowSize * 0.5f;
+                _mouseLastPosition = center;
+                
+                mouse.Position = center;
+                MouseDeltaPosition = Vector2.Zero;
+            }
         }
     }
     

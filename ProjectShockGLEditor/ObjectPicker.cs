@@ -1,39 +1,87 @@
-﻿using System.Numerics;
+using System.Numerics;
 using ProjectShockGL.Rendering;
 
 namespace ProjectShockGLEditor;
 
 public static class ObjectPicker
 {
+    private const float CycleTolerance = 5f;
+    private static Vector2 _cyclePosition;
+    private static Vector2 _cycleScreenSize;
+    private static Matrix4x4 _cycleViewProjection;
+    private static Guid[] _cycleCandidates = [];
+    private static Guid? _lastPicked;
+    private static int _cycleIndex;
+
     public static void PickAt(Vector2 mousePos, Vector2 screenSize, bool additive = false)
     {
         var camera = Camera.Active;
+        var viewProjection = camera.GetViewMatrix() * camera.GetProjectionMatrix();
 
-        if (!GizmoMath.ScreenRay(mousePos, screenSize, camera.GetViewMatrix() * camera.GetProjectionMatrix(),
-                out var origin, out var direction))
+        if (!GizmoMath.ScreenRay(mousePos, screenSize, viewProjection, out var origin, out var direction))
         {
+            ResetCycle();
             return;
         }
-        
-        var picked = Pick(origin, direction, camera.Far,
+
+        var hits = PickAll(origin, direction, camera.Far,
             ProjectShockGL.Core.Game.Instance.World.GetAllObjects(includePending: true));
 
-        if (additive && picked != null)
+        if (additive)
         {
-            Selection.Toggle(picked);
+            ResetCycle();
+            if (hits.Length > 0)
+            {
+                Selection.Toggle(hits[0]);
+            }
+
+            return;
         }
-        else if (!additive)
+
+        if (hits.Length == 0)
         {
-            Selection.Object = picked;
+            ResetCycle();
+            Selection.Object = null;
+            return;
         }
+
+        var candidates = hits.Select(obj => obj.Guid).ToArray();
+        var selected = Selection.Objects;
+        var continueCycle = _lastPicked.HasValue &&
+                            selected.Length == 1 && selected[0].Guid == _lastPicked &&
+                            Vector2.DistanceSquared(mousePos, _cyclePosition) <= CycleTolerance * CycleTolerance &&
+                            screenSize == _cycleScreenSize && viewProjection == _cycleViewProjection &&
+                            candidates.SequenceEqual(_cycleCandidates);
+
+        if (continueCycle)
+        {
+            _cycleIndex = (_cycleIndex + 1) % hits.Length;
+        }
+        else
+        {
+            _cycleIndex = 0;
+            _cyclePosition = mousePos;
+            _cycleScreenSize = screenSize;
+            _cycleViewProjection = viewProjection;
+            _cycleCandidates = candidates;
+        }
+
+        var picked = hits[_cycleIndex];
+        Selection.Object = picked;
+        _lastPicked = picked.Guid;
     }
-    
-    private static ProjectShockGL.Core.Object? Pick(Vector3 rayOrigin, Vector3 rayDir, 
+
+    private static void ResetCycle()
+    {
+        _cycleCandidates = [];
+        _lastPicked = null;
+        _cycleIndex = 0;
+    }
+
+    private static ProjectShockGL.Core.Object[] PickAll(Vector3 rayOrigin, Vector3 rayDir,
         float maxDist, IEnumerable<ProjectShockGL.Core.Object> objects)
     {
-        ProjectShockGL.Core.Object? closest = null;
-        
-        var closestDist = float.MaxValue;
+        var hits = new List<(ProjectShockGL.Core.Object Object, float Distance)>();
 
         foreach (var obj in objects)
         {
@@ -43,20 +91,15 @@ public static class ObjectPicker
             }
 
             var (min, max) = obj.GetWorldBounds();
-
-            if (RayAabb(rayOrigin, rayDir, maxDist, min, max, out var dist))
+            if (RayAabb(rayOrigin, rayDir, maxDist, min, max, out var distance))
             {
-                if (dist < closestDist)
-                {
-                    closestDist = dist;
-                    closest = obj;
-                }
+                hits.Add((obj, distance));
             }
         }
 
-        return closest;
+        // OrderBy keeps world order for equal distances, so overlapping bounds cycle predictably.
+        return hits.OrderBy(hit => hit.Distance).Select(hit => hit.Object).ToArray();
     }
-    
     private static bool RayAabb(Vector3 origin, Vector3 dir, float maxDist,
         Vector3 min, Vector3 max, out float distance)
     {

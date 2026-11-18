@@ -13,6 +13,8 @@ public sealed class TextureAtlas : IDisposable
 
     public Texture Texture { get; }
 
+    internal string? FindRegion(TextureRegion region) => _regions.FirstOrDefault(pair => pair.Value == region).Key;
+
     private TextureAtlas(Texture texture, Dictionary<string, TextureRegion> regions)
     {
         Texture = texture;
@@ -20,6 +22,8 @@ public sealed class TextureAtlas : IDisposable
     }
 
     public TextureRegion GetRegion(string name) => _regions[name];
+
+    public bool TryGetRegion(string name, out TextureRegion region) => _regions.TryGetValue(name, out region);
 
     internal static TextureAtlas Load(GL gl, string descriptorPath, string texturePath)
     {

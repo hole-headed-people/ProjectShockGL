@@ -146,6 +146,141 @@ if (args.Contains("--simple-pbr"))
     return;
 }
 
+Run("Render counters separate world, postprocessing and UI, reset every frame and draw the debug overlay", () =>
+{
+    graphics.BeginDraw(Camera.Active);
+    Check(graphics.Statistics.DrawCalls == 0 && graphics.Statistics.Triangles == 0);
+    graphics.BeginWorld();
+    for (var i = 0; i < 2; i++)
+        graphics.DrawQuad(new Vector3(i, 0, -2), Quaternion.Identity, Vector2.One,
+            Content.GetWhitePixel(), Color.Red);
+    graphics.EndWorld();
+    var stats = graphics.Statistics;
+    Check(stats.WorldDrawCalls == 2 && stats.PostProcessDrawCalls == 1);
+    Check(stats.DrawCalls == 3 && stats.Triangles == 5);
+    Check(stats.WorldWidth == 640 && stats.WorldHeight == 240);
+    graphics.BeginUI(new Vector2(640, 240));
+    graphics.DrawUIRect(new Vector2(620, 220), new Vector2(10), Color.Red);
+    graphics.EndUI();
+    Check(graphics.Statistics.DrawCalls == 4 && graphics.Statistics.Triangles == 7);
+
+    var fonts = Path.Combine(fixture, "Fonts");
+    Directory.CreateDirectory(fonts);
+    File.Copy(Path.Combine(root, "StarterContent/Fonts/NotoSans-Regular.ttf"),
+        Path.Combine(fonts, "NotoSans-Regular.ttf"), true);
+    var overlayType = typeof(Renderer).Assembly.GetType("ProjectShockGL.Rendering.DebugStatisticsOverlay")!;
+    var overlay = Activator.CreateInstance(overlayType, nonPublic: true)!;
+    overlayType.GetMethod("Draw", BindingFlags.Instance | BindingFlags.NonPublic)!
+        .Invoke(overlay, [graphics, new Vector2(640, 240)]);
+    Check(graphics.Statistics.DrawCalls > stats.DrawCalls + 10);
+    Check(Pixel(9, 230)[0] < 100);
+    Check(gl.GetError() == GLEnum.NoError);
+    graphics.EndDraw();
+
+    graphics.BeginDraw(Camera.Active);
+    Check(graphics.Statistics.DrawCalls == 0 && graphics.Statistics.WorldDrawCalls == 0 &&
+        graphics.Statistics.PostProcessDrawCalls == 0 && graphics.Statistics.Triangles == 0);
+    graphics.EndDraw();
+});
+Run("Mesh backfaces are optional, Lit reverses their normals and CullFace is restored", () =>
+{
+    var environment = ProjectShockGL.Environment.Capture();
+    using var scene = new PbrScene();
+    using var mesh = new Mesh(gl, [
+        -.5f, -.5f, 0, 0, 0, 1, 0, 0,
+         .5f, -.5f, 0, 0, 0, 1, 1, 0,
+         .5f,  .5f, 0, 0, 0, 1, 1, 1,
+        -.5f,  .5f, 0, 0, 0, 1, 0, 1
+    ], [0, 1, 2, 0, 2, 3]);
+    try
+    {
+        ProjectShockGL.Environment.AmbientColor = Color.Black;
+        ProjectShockGL.Environment.IsFogEnabled = false;
+        var light = scene.World.Spawn<Light>();
+        light.Type = LightType.Directional;
+        light.Intensity = 1;
+        foreach (var initiallyEnabled in new[] { true, false })
+        {
+            foreach (var culling in new[] { true, false })
+            {
+                graphics.BeginDraw(Camera.Active);
+                if (initiallyEnabled) gl.Enable(EnableCap.CullFace);
+                else gl.Disable(EnableCap.CullFace);
+                var command = new MeshCommand
+                {
+                    Mesh = mesh, Texture = Content.GetWhitePixel(), Color = Color.Red,
+                    Position = new Vector3(0, 0, -2), Scale = Vector3.One,
+                    Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI),
+                    Lit = true, BackfaceCulling = culling
+                };
+                command.Execute(graphics);
+                var pixel = Pixel(320, 120);
+                Check(pixel[0] > 245 && (culling ? pixel[1] > 245 : pixel[1] < 5));
+                Check(gl.IsEnabled(EnableCap.CullFace) == initiallyEnabled);
+                Check(gl.GetError() == GLEnum.NoError);
+                graphics.EndDraw();
+            }
+        }
+        Check(new MeshComponent().BackfaceCulling && new MeshCommand().BackfaceCulling);
+    }
+    finally { ProjectShockGL.Environment.Apply(environment); }
+});
+Run("Resolution scale preserves full-resolution UI, depth and viewport with Linear/Nearest and effects on/off", () =>
+{
+    var settingsPath = Path.Combine(AppContext.BaseDirectory, "GameSettings.ini");
+    var originalSettings = File.ReadAllText(settingsPath);
+    var originalEffects = PostProcessSettings.Enabled;
+    try
+    {
+        foreach (var filter in new[] { "Linear", "Nearest" })
+        foreach (var effects in new[] { false, true })
+        {
+            File.WriteAllText(settingsPath, originalSettings + "\n[Rendering]\nResolutionScale=0.5\nResolutionFilter=" + filter + "\n");
+            Settings.Initialize();
+            PostProcessSettings.Enabled = effects;
+            PostProcessSettings.Parameters.Set("uVignetteStrength", 0f);
+            using var scaledRenderer = new Renderer(gl, 640, 240);
+            var scaled = new Graphics(scaledRenderer);
+            gl.Viewport(0, 0, 640, 240);
+            scaled.BeginDraw(Camera.Active);
+            scaled.BeginWorld();
+            var viewport = new int[4];
+            gl.GetInteger(GetPName.Viewport, viewport.AsSpan());
+            Check(viewport[2] == 320 && viewport[3] == 120);
+
+            gl.ClearColor(0, 0, 0, 1);
+            gl.Clear(ClearBufferMask.ColorBufferBit);
+            gl.Enable(EnableCap.ScissorTest);
+            gl.Scissor(0, 0, 1, 120);
+            gl.ClearColor(1, 1, 1, 1);
+            gl.Clear(ClearBufferMask.ColorBufferBit);
+            gl.Disable(EnableCap.ScissorTest);
+            scaled.DrawQuad(new Vector3(0, 0, -2), Quaternion.Identity, Vector2.One,
+                Content.GetWhitePixel(), Color.Red);
+            scaled.EndWorld();
+            gl.GetInteger(GetPName.Viewport, viewport.AsSpan());
+            Check(viewport.SequenceEqual(new[] { 0, 0, 640, 240 }));
+            var edge = Pixel(1, 10)[0];
+            Check(filter == "Nearest" ? edge > 250 : edge is > 150 and < 230);
+            scaled.DrawQuad(new Vector3(0, 0, -3), Quaternion.Identity, Vector2.One,
+                Content.GetWhitePixel(), new Color(0, 1, 0));
+            Check(Pixel(320, 120)[0] > 245 && Pixel(320, 120)[1] < 5);
+            scaled.BeginUI(new Vector2(640, 240));
+            scaled.DrawUIRect(new Vector2(10, 10), Vector2.One, Color.Red);
+            scaled.EndUI();
+            Check(Pixel(10, 229)[0] > 245 && Pixel(11, 229)[0] < 5);
+            Check(gl.GetError() == GLEnum.NoError);
+            scaled.EndDraw();
+        }
+    }
+    finally
+    {
+        File.WriteAllText(settingsPath, originalSettings);
+        Settings.Initialize();
+        PostProcessSettings.Enabled = originalEffects;
+        PostProcessSettings.Parameters.Set("uVignetteStrength", 0.8f);
+    }
+});
 Run("Vignette preserves the center, darkens corners and keeps UI/overlays untouched", () =>
 {
     graphics.BeginDraw(Camera.Active);

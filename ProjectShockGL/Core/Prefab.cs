@@ -149,6 +149,7 @@ public static class Prefab
             Position = position ?? copy.Position, Rotation = rotation ?? copy.Rotation, Scale = state?.Scale ?? copy.Scale,
             IsActive = state?.IsActive ?? copy.IsActive, SimulatePhysics = copy.SimulatePhysics,
             RigidbodyMass = copy.RigidbodyMass,
+            BackfaceCulling = copy.BackfaceCulling,
             Layer = copy.Layer,
             CollidesWith = copy.CollidesWith,
             Brush = copy.Brush, Properties = copy.Properties, Outputs = copy.Outputs

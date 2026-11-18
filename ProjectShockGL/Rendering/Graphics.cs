@@ -13,6 +13,7 @@ public class Graphics
 { 
     private Camera _camera = null!;
     private Renderer Renderer { get; }
+    public RenderStatistics Statistics => Renderer.Statistics;
     
     public Graphics(Renderer renderer)
     {
@@ -159,13 +160,13 @@ public class Graphics
         Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters);
     }
 
-    public void DrawMesh(Mesh mesh, Vector3 position, Quaternion rotation, Vector3 scale, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
+    public void DrawMesh(Mesh mesh, Vector3 position, Quaternion rotation, Vector3 scale, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, bool backfaceCulling = true)
     {
         var model = Matrix4x4.CreateScale(scale)
                   * Matrix4x4.CreateFromQuaternion(rotation)
                   * Matrix4x4.CreateTranslation(position);
 
-        Renderer.DrawMesh(mesh, texture, model, color, lit, ignoreDepth, shader, shaderParameters);
+        Renderer.DrawMesh(mesh, texture, model, color, lit, ignoreDepth, shader, shaderParameters, backfaceCulling);
     }
 
     public void DrawBillboard(Vector3 position, Vector2 size, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
@@ -199,6 +200,16 @@ public class Graphics
         Renderer.EndWorld();
     }
 
+    internal (Vector2 Min, Vector2 Max)? UIClip { get; set; }
+
+    internal void ClipUI(Vector2 position, Vector2 size)
+    {
+        var max = position + size;
+        UIClip = UIClip is { } parent
+            ? (Vector2.Max(position, parent.Min), Vector2.Min(max, parent.Max))
+            : (position, max);
+    }
+
     public void BeginUI(Vector2 size)
     {
         Renderer.BeginUI(size);
@@ -211,6 +222,12 @@ public class Graphics
     
     public void DrawUIRect(Vector2 position, Vector2 size, Color color, Texture? texture = null)
     {
+        if (UIClip.HasValue)
+        {
+            DrawUIRegion(position, size, texture ?? Content.GetWhitePixel(), new Vector4(0, 0, 1, 1), color);
+            return;
+        }
+
         var model = Matrix4x4.CreateScale(size.X, -size.Y, 1f)
                     * Matrix4x4.CreateTranslation(new Vector3(position + size * 0.5f, 0f));
         
@@ -225,6 +242,16 @@ public class Graphics
             return;
         }
         
+        if (UIClip is { } parent)
+        {
+            var min = clipPosition.HasValue && clipSize.HasValue
+                ? Vector2.Max(parent.Min, clipPosition.Value) : parent.Min;
+            var max = clipPosition.HasValue && clipSize.HasValue
+                ? Vector2.Min(parent.Max, clipPosition.Value + clipSize.Value) : parent.Max;
+            clipPosition = min;
+            clipSize = max - min;
+        }
+
         if (clipPosition.HasValue && clipSize.HasValue)
         {
             var min = Vector2.Max(position, clipPosition.Value);

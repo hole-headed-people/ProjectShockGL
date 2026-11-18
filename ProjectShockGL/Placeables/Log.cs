@@ -3,23 +3,23 @@ using ProjectShockGL.Core;
 
 namespace ProjectShockGL.Placeables;
 
-public class Message : Entity
+public class Log : Entity
 {
     [Input("Print")]
     public void Print(string message)
     {
-        Console.WriteLine(message);
+        ProjectShockGL.Log.Print(message);
     }
 
     [Input("PrintInt")]
     public void PrintInt(int value)
     {
-        Console.WriteLine(value);
+        ProjectShockGL.Log.Print(value.ToString());
     }
 
     [Input("PrintFloat")]
     public void PrintFloat(float value)
     {
-        Console.WriteLine(value);
+        ProjectShockGL.Log.Print(value.ToString());
     }
 }

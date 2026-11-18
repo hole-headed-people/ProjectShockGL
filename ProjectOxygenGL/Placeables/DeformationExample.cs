@@ -36,18 +36,26 @@ public class DeformationExample : Entity
     public override void Create()
     {
         base.Create();
+        
         _mesh = AddComponent<MeshComponent>();
-        _mesh.Mesh = Content.LoadMesh("Cube");
+        
+        _mesh.Mesh = Content.LoadMesh("Suzanne");
         _mesh.Texture = Content.LoadTexture("Default");
-        _mesh.Color = new Color(0.2f, 0.8f, 1f);
-        _mesh.Shader = Content.LoadShaderProgram("Deform", "Pulse");
+        
+        _mesh.Shader = Content.LoadShaderProgram("Deform", "Lit");
+        
         _mesh.ShaderParameters.Set("uAmplitude", Amplitude);
         _mesh.ShaderParameters.Set("uSpeed", Speed);
         _mesh.ShaderParameters.Set("uFrequency", Frequency);
+
+        _mesh.Lit = true;
     }
 
     private static void Validate(float value)
     {
-        if (!float.IsFinite(value)) throw new ArgumentOutOfRangeException(nameof(value));
+        if (!float.IsFinite(value))
+        {
+            throw new ArgumentOutOfRangeException(nameof(value));
+        }
     }
 }
