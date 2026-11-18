@@ -1110,6 +1110,143 @@ void Render()
         Camera.Active.Orthographic = detailOrtho;
         ImGuiNET.ImGui.DestroyContext(detailContext);
     }
+    var slicePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".bmp");
+    var sliceClear = Camera.Active.ClearColor;
+    var sliceCanvas = new Canvas();
+    sliceCanvas.Resize(new Vector2(640, 240));
+    try
+    {
+        // 12x12 BMP with a unique color per texel, region (2,2,8,8).
+        using (var writer = new BinaryWriter(File.Create(slicePath)))
+        {
+            writer.Write((ushort)0x4d42); writer.Write(54 + 12 * 12 * 3);
+            writer.Write(0); writer.Write(54); writer.Write(40); writer.Write(12); writer.Write(12);
+            writer.Write((ushort)1); writer.Write((ushort)24); writer.Write(0);
+            writer.Write(12 * 12 * 3); writer.Write(0); writer.Write(0); writer.Write(0); writer.Write(0);
+            for (var y = 11; y >= 0; y--)
+            for (var x = 0; x < 12; x++)
+            {
+                writer.Write((byte)100); writer.Write((byte)(30 + y * 15)); writer.Write((byte)(30 + x * 15));
+            }
+        }
+        using var sliceTexture = Texture.Load(gl, slicePath);
+        var image = sliceCanvas.Add<Image>();
+        image.Region = new TextureRegion(sliceTexture, new Vector4(2f / 12, 2f / 12, 8f / 12, 8f / 12));
+        image.Rect.Position = new Vector2(10);
+        image.Rect.Size = new Vector2(37, 33);
+        image.DrawMode = ImageDrawMode.Sliced;
+        image.Border = new Vector4(2);
+        image.BorderScale = 2;
+        image.EdgeMode = image.CenterMode = ImageSliceMode.Tile;
+        Camera.Active.ClearColor = Color.Black;
+        gl.Viewport(0, 0, 640, 240);
+        byte[] SlicePixel(int x, int y)
+        {
+            var pixel = new byte[4];
+            unsafe { fixed (byte* data = pixel) gl.ReadPixels(10 + x, 239 - 10 - y, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+            return pixel;
+        }
+        void DrawSlice(bool clip = false)
+        {
+            graphics.BeginDraw(Camera.Active);
+            graphics.BeginUI(sliceCanvas.Size);
+            if (clip)
+            {
+                typeof(Graphics).GetMethod("ClipUI", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                    .Invoke(graphics, [new Vector2(10), new Vector2(20, 33)]);
+            }
+            sliceCanvas.Draw(graphics);
+            typeof(Graphics).GetProperty("UIClip", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .SetValue(graphics, null);
+            graphics.EndUI();
+            graphics.EndDraw();
+            gl.Finish();
+        }
+        int Texel(int pixel, int length) => pixel < 4 ? pixel / 2 :
+            pixel >= length - 4 ? 6 + (pixel - length + 4) / 2 : 2 + (pixel - 4) % 8 / 2;
+        DrawSlice();
+        foreach (var y in new[] { 0, 3, 4, 11, 12, 27, 28, 29, 32 })
+        foreach (var x in new[] { 0, 3, 4, 11, 12, 27, 28, 32, 33, 36 })
+        {
+            var pixel = SlicePixel(x, y);
+            Check(Math.Abs(pixel[0] - (30 + (2 + Texel(x, 37)) * 15)) < 3 &&
+                Math.Abs(pixel[1] - (30 + (2 + Texel(y, 33)) * 15)) < 3);
+        }
+        image.FillCenter = false;
+        DrawSlice();
+        Check(SlicePixel(15, 15).Take(3).All(c => c < 3));
+        image.FillCenter = true;
+        DrawSlice(clip: true);
+        Check(SlicePixel(25, 1).Take(3).All(c => c < 3) && SlicePixel(15, 1)[0] > 30);
+        Check(gl.GetError() == GLEnum.NoError);
+        Console.WriteLine("PASS: Nine-slice atlas renders corners, repeated edges/center, partial tiles, empty center and parent clipping");
+    }
+    finally
+    {
+        sliceCanvas.Destroy();
+        Camera.Active.ClearColor = sliceClear;
+        File.Delete(slicePath);
+    }
+    var linkWorld = new World();
+    var linkEditor = Application.IsEditor;
+    var linkCamera = ProjectShockGLEditor.TransformState.Capture(Camera.Active.Transform);
+    var linkAspect = Camera.Active.AspectRatio;
+    var linkOrtho = Camera.Active.Orthographic;
+    var linkOrthoSize = Camera.Active.OrthoSize;
+    var linkClear = Camera.Active.ClearColor;
+    var linkEnvironment = ProjectShockGL.Environment.Capture();
+    try
+    {
+        editorProperty.SetValue(null, true);
+        Camera.Active.Transform.Position = Vector3.Zero;
+        Camera.Active.Transform.Rotation = Quaternion.Identity;
+        Camera.Active.AspectRatio = 640f / 240;
+        Camera.Active.Orthographic = true;
+        Camera.Active.OrthoSize = 4;
+        Camera.Active.ClearColor = Color.Black;
+        ProjectShockGL.Environment.IsFogEnabled = false;
+        var source = linkWorld.Spawn<ProjectShockGL.Core.Entity>();
+        source.Transform.Position = new Vector3(-1, 0, -3);
+        var target = linkWorld.Spawn<ProjectShockGL.Core.Object>();
+        target.Name = "link-target"; target.Transform.Position = new Vector3(1, 0, -3);
+        source.Outputs.Add(new ProjectShockGL.Core.OutputData { TargetName = target.Name });
+        source.Outputs.Add(new ProjectShockGL.Core.OutputData { TargetName = target.Name, Event = "Other" });
+        var renderLinks = typeof(ProjectShockGLEditor.Editor).Assembly.GetType("ProjectShockGLEditor.OutputLinks")!
+            .GetMethod("Render", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+        gl.Viewport(0, 0, 640, 240);
+        graphics.BeginDraw(Camera.Active);
+        gl.Enable(EnableCap.CullFace);
+        graphics.DrawQuad(new Vector3(0, 0, -1), Quaternion.Identity, new Vector2(4),
+            Content.GetWhitePixel(), Color.Red);
+        renderLinks.Invoke(null, [graphics, linkWorld, new ProjectShockGL.Core.Object[] { source }]);
+        Check(graphics.Statistics.DrawCalls == 2 && gl.IsEnabled(EnableCap.CullFace) && gl.IsEnabled(EnableCap.DepthTest));
+        var pixel = new byte[4];
+        unsafe { fixed (byte* data = pixel) gl.ReadPixels(320, 120, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+        Check(pixel[0] > 220 && pixel[1] > 180 && pixel[2] < 110);
+        graphics.DrawQuad(new Vector3(0, 0, -2), Quaternion.Identity, new Vector2(4),
+            Content.GetWhitePixel(), Color.Blue);
+        unsafe { fixed (byte* data = pixel) gl.ReadPixels(320, 120, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+        Check(pixel[0] > 220 && pixel[1] > 180 && pixel[2] < 110);
+        graphics.EndDraw();
+        editorProperty.SetValue(null, false);
+        graphics.BeginDraw(Camera.Active);
+        renderLinks.Invoke(null, [graphics, linkWorld, new ProjectShockGL.Core.Object[] { source }]);
+        Check(graphics.Statistics.DrawCalls == 0);
+        graphics.EndDraw();
+        Check(gl.GetError() == GLEnum.NoError);
+        Console.WriteLine("PASS: Selected Output links draw yellow through an occluding wall, merge duplicates and preserve depth/culling state");
+    }
+    finally
+    {
+        linkWorld.Clear();
+        editorProperty.SetValue(null, linkEditor);
+        linkCamera.Apply(Camera.Active.Transform);
+        Camera.Active.AspectRatio = linkAspect;
+        Camera.Active.Orthographic = linkOrtho;
+        Camera.Active.OrthoSize = linkOrthoSize;
+        Camera.Active.ClearColor = linkClear;
+        ProjectShockGL.Environment.Apply(linkEnvironment);
+    }
     Content.UnloadAll();
     Check(font.IsDisposed && deformation.Handle == 0 && litDeformation.Handle == 0);
     Check(gl.GetError() == GLEnum.NoError);

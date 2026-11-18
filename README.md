@@ -694,6 +694,21 @@ var nested = Content.LoadUI("Screens/Note").Instantiate(canvas, parentPanel);
 
 JSON хранится в Content/UI/Screens/Note.json. Путь передаётся без расширения. SaveUI сохраняет переданный виджет и его потомков. Поддерживаются стандартные Widget, Image, Text, Button и TextScrollView. Встроенные части Button и TextScrollView восстанавливаются в уже созданные элементы.
 
+Image поддерживает DrawMode = Simple (по умолчанию) и Sliced (9-slice). Border задаёт отступы в пикселях исходной текстуры или региона атласа в порядке Left, Top, Right, Bottom. BorderScale масштабирует рамку и повторяемые фрагменты. Углы сохраняют размер; EdgeMode и CenterMode независимо выбирают Stretch или Tile для полос и центра. FillCenter = false оставляет только рамку. Последняя плитка обрезается без растягивания; маленький Rect пропорционально уменьшает противоположные рамки. Настройки доступны в UI Editor и сохраняются в JSON. Слишком большое число плиток (более 16384 на часть) заменяется растягиванием этой части.
+
+Пример настройки из кода:
+
+~~~csharp
+var panel = screen.Add<Image>();
+panel.Region = Content.LoadTextureAtlas("Interface")!.GetRegion("Panel");
+panel.Rect.Size = new Vector2(400, 200);
+panel.DrawMode = ImageDrawMode.Sliced;
+panel.Border = new Vector4(8, 8, 8, 8); // Left, Top, Right, Bottom
+panel.BorderScale = 1;
+panel.EdgeMode = ImageSliceMode.Tile;
+panel.CenterMode = ImageSliceMode.Stretch;
+panel.FillCenter = true;
+~~~
 Сохраняются Rect, имена, видимость, доступность ввода и настройки стандартных виджетов. Текстуры, шрифты и области атласа должны быть загружены через Content, чтобы при сохранении получить их имена. Файл содержит ссылки на эти ресурсы. Действия кнопок подключаются игровым кодом после создания экземпляра. Позиция прокрутки начинается сверху. Каждый вызов Instantiate создаёт собственное дерево, разделяя загруженные графические ресурсы через Content.
 
 ## Редактирование UI

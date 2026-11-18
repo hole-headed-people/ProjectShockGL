@@ -7,6 +7,61 @@ using Silk.NET.Maths;
 using Silk.NET.OpenGL;
 using Silk.NET.Windowing;
 
+Run("Nine-slice preserves corners, crops tile UVs inside an atlas and handles small rects", () =>
+{
+    var image = new Image { DrawMode = ImageDrawMode.Sliced, Border = new Vector4(2), BorderScale = 2 };
+    var method = typeof(Image).GetMethod("GetSlices", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+    var uv = new Vector4(.25f, .125f, .5f, .25f);
+    (Vector2 Position, Vector2 Size, Vector4 Uv)[] Parts(Vector2 size) =>
+        ((IEnumerable<(Vector2 Position, Vector2 Size, Vector4 Uv)>)method.Invoke(image, [size, new Vector2(10), uv])!).ToArray();
+    var parts = Parts(new Vector2(37, 33));
+    Check(parts.Length == 9 && parts[0].Size == new Vector2(4));
+    Check(Vector2.Distance(parts[4].Size, new Vector2(29, 25)) < .001f);
+    image.EdgeMode = image.CenterMode = ImageSliceMode.Tile;
+    parts = Parts(new Vector2(37, 33));
+    Check(parts.Length == 25); // 4 corners + 6 horizontal + 6 vertical + 9 center.
+    var last = parts.Single(p => Vector2.Distance(p.Position, new Vector2(28, 28)) < .001f);
+    Check(Vector2.Distance(last.Size, new Vector2(5, 1)) < .001f);
+    Check(Math.Abs(last.Uv.Z - .125f) < .001f && Math.Abs(last.Uv.W - .0125f) < .001f);
+    Check(parts.All(p => p.Uv.X >= uv.X && p.Uv.Y >= uv.Y &&
+        p.Uv.X + p.Uv.Z <= uv.X + uv.Z + .001f && p.Uv.Y + p.Uv.W <= uv.Y + uv.W + .001f));
+    Check(Math.Abs(parts.Sum(p => p.Size.X * p.Size.Y) - 37 * 33) < .01f);
+    image.FillCenter = false;
+    Check(Parts(new Vector2(37, 33)).Length == 16);
+    parts = Parts(new Vector2(3, 2));
+    Check(parts.Length == 4 && Math.Abs(parts.Sum(p => p.Size.X * p.Size.Y) - 6) < .001f);
+    image.Border = new Vector4(100, 100, 200, 200);
+    parts = Parts(new Vector2(3, 2));
+    Check(parts.All(p => float.IsFinite(p.Size.X) && p.Size.X >= 0));
+    Check(Parts(Vector2.Zero).Length == 0);
+    Throws<ArgumentOutOfRangeException>(() => image.Border = new Vector4(-1));
+    Throws<ArgumentOutOfRangeException>(() => image.BorderScale = 0);
+    Throws<ArgumentOutOfRangeException>(() => image.BorderScale = float.NaN);
+});
+
+Run("Nine-slice UI JSON roundtrip keeps settings and old assets keep Simple defaults", () =>
+{
+    var canvas = new Canvas();
+    var root = canvas.Add<Widget>();
+    var image = root.Add<Image>();
+    image.Name = "Panel";
+    image.DrawMode = ImageDrawMode.Sliced;
+    image.Border = new Vector4(2, 3, 4, 5);
+    image.BorderScale = 1.5f;
+    image.FillCenter = false;
+    image.EdgeMode = ImageSliceMode.Tile;
+    image.CenterMode = ImageSliceMode.Stretch;
+    var json = Newtonsoft.Json.JsonConvert.SerializeObject(UIAsset.Capture(root));
+    var asset = Newtonsoft.Json.JsonConvert.DeserializeObject<UIAsset>(json)!;
+    var copy = asset.Instantiate(canvas).Find<Image>("Panel")!;
+    Check(copy.DrawMode == image.DrawMode && copy.Border == image.Border &&
+        copy.BorderScale == image.BorderScale && !copy.FillCenter &&
+        copy.EdgeMode == image.EdgeMode && copy.CenterMode == image.CenterMode);
+    var old = new UIAsset { Root = new WidgetData { Type = "Image" } };
+    var oldImage = (Image)old.Instantiate(canvas);
+    Check(oldImage.DrawMode == ImageDrawMode.Simple && oldImage.FillCenter && oldImage.BorderScale == 1);
+    canvas.Destroy();
+});
 Run("Button colors, left release, cancellation and callback mutation", () =>
 {
     var canvas = new Canvas();

@@ -169,6 +169,7 @@ public static class Editor
             graphics.DrawBoxWireframe(bounds.min, bounds.max, selected.Transform.GetModelMatrix(), Color.White);
 
         }
+        OutputLinks.Render(graphics, ProjectShockGL.Core.Game.Instance.World, Selection.Objects);
     }
 
     private static void OnAfterRender(float deltaTime)

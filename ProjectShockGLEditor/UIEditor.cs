@@ -1004,6 +1004,28 @@ public static class UIEditor
                 
                 data.Atlas = Resource("Atlas", data.Atlas);
                 data.Region = Resource("Region", data.Region);
+                EnumField(data, "DrawMode", "Simple\0Sliced\0");
+                if ((data.Properties.Value<int?>("DrawMode") ?? 0) == (int)ImageDrawMode.Sliced)
+                {
+                    var border = data.Properties["Border"]?.ToObject<Vector4>() ?? Vector4.Zero;
+                    if (ImGui.DragFloat4("Border (L T R B)", ref border, 1, 0, float.MaxValue))
+                    {
+                        data.Properties["Border"] = JObject.FromObject(Vector4.Max(border, Vector4.Zero));
+                        Changed();
+                    }
+                    var borderScale = data.Properties.Value<float?>("BorderScale") ?? 1;
+                    if (ImGui.DragFloat("Border scale", ref borderScale, .01f, .001f, 1000))
+                    {
+                        data.Properties["BorderScale"] = Math.Max(.001f, borderScale);
+                        Changed();
+                    }
+                    BoolField(data, "FillCenter", true);
+                    EnumField(data, "EdgeMode", "Stretch\0Tile\0");
+                    if (data.Properties.Value<bool?>("FillCenter") ?? true)
+                    {
+                        EnumField(data, "CenterMode", "Stretch\0Tile\0");
+                    }
+                }
                 
                 break;
             case "Text":

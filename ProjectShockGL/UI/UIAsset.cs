@@ -87,7 +87,7 @@ public sealed class WidgetData
 
     private static string[] PropertyNames(Widget widget) => widget switch
     {
-        Image => ["Color"],
+        Image => ["Color", "DrawMode", "Border", "BorderScale", "FillCenter", "EdgeMode", "CenterMode"],
         Text => ["Content", "Color", "WordWrap", "ClipToRect", "HorizontalAlignment", "VerticalAlignment"],
         Button => ["NormalColor", "HoverColor", "PressedColor", "DisabledColor"],
         TextScrollView => ["WheelStep"],

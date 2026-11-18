@@ -1142,6 +1142,49 @@ RunScene("Mixed deletion stays undoable when an object Destroy callback throws",
         ThrowingDeleteEntity.RejectDestroy = previous;
     }
 });
+RunScene("Selected Output links match World.Find, merge repeated targets and skip empty, missing and destroyed endpoints", () =>
+{
+    var world = Game.Instance.World;
+    var source = (Entity)Entity.Create("Check")!;
+    var other = (Entity)Entity.Create("Check")!;
+    source.SetActive(false);
+    var first = world.Spawn<GameObject>(); first.Name = "door"; first.SetActive(false);
+    var duplicateName = world.Spawn<GameObject>(); duplicateName.Name = "door";
+    var timer = world.Spawn<GameObject>(); timer.Name = "timer";
+    var dead = world.Spawn<GameObject>(); dead.Name = "dead"; dead.Destroy();
+    source.Outputs.AddRange([
+        new OutputData { Event = "Use", TargetName = "door", Input = "SetActive" },
+        new OutputData { Event = "Other", TargetName = "door", Input = "Different" },
+        new OutputData { TargetName = "timer" },
+        new OutputData { TargetName = "" },
+        new OutputData { TargetName = "   " },
+        new OutputData { TargetName = "missing" },
+        new OutputData { TargetName = "dead" }
+    ]);
+    other.Outputs.Add(new OutputData { TargetName = "door" });
+    UndoRedo.Clear();
+    var before = JsonConvert.SerializeObject(source.Outputs);
+    var links = OutputLinks.Collect(world, [source, other, source, timer]).ToArray();
+    Check(links.Length == 3 && links.Count(link => link.Source == source && link.Target == first) == 1);
+    Check(links.Any(link => link.Source == source && link.Target == timer) &&
+          links.Any(link => link.Source == other && link.Target == first));
+    Check(links.All(link => link.Target != duplicateName && link.Target != dead));
+    Check(JsonConvert.SerializeObject(source.Outputs) == before && !source.IsActive && !first.IsActive && !UndoRedo.CanUndo);
+    source.EditorGroups.Add("hide-link-source");
+    World.HiddenEditorGroups.Add("hide-link-source");
+    try
+    {
+        Check(OutputLinks.Collect(world, [source, other]).Single().Source == other);
+        other.Destroy();
+        Check(!OutputLinks.Collect(world, [source, other]).Any());
+        World.HiddenEditorGroups.Remove("hide-link-source");
+        var editor = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+        editor.SetValue(null, false);
+        try { Check(!OutputLinks.Collect(world, [source]).Any()); }
+        finally { editor.SetValue(null, true); }
+    }
+    finally { World.HiddenEditorGroups.Remove("hide-link-source"); }
+});
 Run("Saving includes pending objects, skips runtime objects and copies output values", () =>
 {
     Game.Instance.World.Clear();
