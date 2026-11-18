@@ -139,6 +139,13 @@ public class World
         }
     }
 
+    internal void RenderCameraCaptures()
+    {
+        foreach (var obj in GetAllObjects())
+        {
+            obj.RenderCameraCaptures(this);
+        }
+    }
     public void Render(RenderQueue queue, bool? debugOnly = null)
     {
         var batch = StaticBatchingEnabled && !Application.IsEditor && debugOnly != true;

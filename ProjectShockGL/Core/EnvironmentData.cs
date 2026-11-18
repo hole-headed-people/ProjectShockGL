@@ -4,6 +4,8 @@ namespace ProjectShockGL.Core;
 
 public sealed class EnvironmentData
 {
+    public bool SkyColorEnabled { get; init; }
+    public Color SkyColor { get; init; } = Color.Black;
     public Color AmbientColor { get; init; } = Color.White;
     public bool IsFogEnabled { get; init; }
     public Color FogColor { get; init; } = Color.Gray;
@@ -12,7 +14,7 @@ public sealed class EnvironmentData
 
     public void Validate()
     {
-        if (!Finite(AmbientColor) || !Finite(FogColor))
+        if (!Finite(SkyColor) || !Finite(AmbientColor) || !Finite(FogColor))
         {
             throw new InvalidDataException("Environment colors must contain finite values.");
         }

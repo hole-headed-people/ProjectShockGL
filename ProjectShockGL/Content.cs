@@ -35,6 +35,7 @@ public static class Content
     private static readonly Dictionary<string, PostProcessProfile> PostProcessProfiles = new();
     
     private static Texture? _whiteTexture;
+    private static Mesh? _quadMesh;
     
     public static void Initialize(GL gl)
     {
@@ -68,6 +69,16 @@ public static class Content
         Log.Print($"Content directory: {Path}");
     }
     
+    // Runtime targets belong to their creator, not to the Content cache.
+    public static RenderTexture CreateRenderTexture(int width, int height, RenderTextureFilter filter = RenderTextureFilter.Nearest)
+    {
+        if (!_isInitialized)
+        {
+            throw new InvalidOperationException("Initialize Content before creating a RenderTexture.");
+        }
+
+        return new RenderTexture(_gl, width, height, filter);
+    }
     private static string GetTextureFormat(TextureFormat format)
     {
         return format switch
@@ -482,6 +493,16 @@ public static class Content
         }
     }
         
+    internal static Mesh GetQuadMesh()
+    {
+        return _quadMesh ??= CreateMesh(
+        [
+            -.5f, -.5f, 0, 0, 0, 1, 0, 1,
+             .5f, -.5f, 0, 0, 0, 1, 1, 1,
+             .5f,  .5f, 0, 0, 0, 1, 1, 0,
+            -.5f,  .5f, 0, 0, 0, 1, 0, 0
+        ], [0, 1, 2, 0, 2, 3]);
+    }
     public static Texture GetWhitePixel()
     {
         if (_whiteTexture != null)
@@ -803,6 +824,9 @@ public static class Content
         {
             resources.Add(_whiteTexture);
         }
+
+        if (_quadMesh != null) resources.Add(_quadMesh);
+        _quadMesh = null;
 
         Fonts.Clear();
         TextureAtlases.Clear();

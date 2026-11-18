@@ -2,7 +2,8 @@ namespace ProjectShockGL.Core;
 
 public class Entity : Object
 {
-    private BillboardComponent _billboardComponent = null!;
+    private BillboardComponent? _debugBillboardComponent;
+    private MeshComponent? _debugMeshComponent;
     
     private bool _belowKillY;
     
@@ -15,18 +16,6 @@ public class Entity : Object
     
     public Rigidbody? Rigidbody => GetComponent<Rigidbody>() is { IsDestroyed: false } body ? body : null;
     
-    public override void Create()
-    {
-        base.Create();
-
-        _billboardComponent = AddComponent<BillboardComponent>();
-        
-        _billboardComponent.IsDebug = true;
-        _billboardComponent.IgnoreDepth = true;
-        _billboardComponent.UseParentScale = false;
-        _billboardComponent.RenderOrder = 1000;
-    }
-
     internal void CheckKillY(float killY)
     {
         if (IsDestroyed || !IsActive)
@@ -58,9 +47,31 @@ public class Entity : Object
 
     public virtual void Load(Dictionary<string, object> arguments)
     {
-        if (arguments.TryGetValue("DebugBillboard", out var argument))
+        if (arguments.TryGetValue("DebugBillboard", out var debugBillboard))
         {
-            _billboardComponent.Texture = Content.LoadTexture((string)argument, TextureFormat.Png);
+            _debugBillboardComponent ??= AddComponent<BillboardComponent>();
+            
+            _debugBillboardComponent.IsDebug = true;
+            _debugBillboardComponent.IgnoreDepth = false;
+            _debugBillboardComponent.UseParentScale = false;
+            
+            _debugBillboardComponent.RenderOrder = 1000;
+            
+            _debugBillboardComponent.Texture = Content.LoadTexture((string)debugBillboard, TextureFormat.Png);
+        }
+
+        if (arguments.TryGetValue("DebugMesh", out var debugMesh))
+        {
+            _debugMeshComponent ??= AddComponent<MeshComponent>();
+            
+            _debugMeshComponent.IsDebug = true;
+            _debugMeshComponent.IgnoreDepth = false;
+            _debugMeshComponent.UseParentScale = false;
+            
+            _debugMeshComponent.RenderOrder = 500;
+            
+            _debugMeshComponent.Mesh = Content.LoadMesh((string)debugMesh);
+            _debugMeshComponent.Texture = Content.LoadTexture("Default") ?? Content.GetWhitePixel();
         }
     }
     

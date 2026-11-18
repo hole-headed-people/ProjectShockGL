@@ -38,6 +38,25 @@ public static class EnvironmentWindow
                 if (ImGui.IsItemDeactivated()) UndoRedo.RecordEdit(EditOwner, field, before, before, Apply, false);
             }
             
+            ImGui.TextUnformatted("Sky");
+            var skyEnabled = Environment.SkyColorEnabled;
+
+            if (ImGui.Checkbox("Enable sky color", ref skyEnabled))
+            {
+                Environment.SkyColorEnabled = skyEnabled;
+                Changed("SkyColorEnabled", true);
+            }
+
+            var skyColor = ToVector(Environment.SkyColor);
+
+            if (ImGui.ColorEdit3("Sky color", ref skyColor))
+            {
+                Environment.SkyColor = new Color(skyColor.X, skyColor.Y, skyColor.Z, Environment.SkyColor.A);
+                Changed("SkyColor");
+            }
+
+            Finish("SkyColor");
+            ImGui.Separator();
             ImGui.TextUnformatted("Lighting");
             
             var ambient = ToVector(Environment.AmbientColor);

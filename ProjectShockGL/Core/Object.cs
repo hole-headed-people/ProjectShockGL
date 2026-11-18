@@ -496,6 +496,15 @@ public class Object
         component.Release();
     }
 
+    internal void RenderCameraCaptures(World world)
+    {
+        if (IsDestroyed || !IsActive || !IsEditorVisible) return;
+        foreach (var capture in _components.OfType<CameraCaptureComponent>().ToArray())
+        {
+            if (IsDestroyed || !IsActive) break;
+            capture.Capture(world);
+        }
+    }
     public T? GetComponent<T>() where T : Component
     {
         return _components.OfType<T>().FirstOrDefault();

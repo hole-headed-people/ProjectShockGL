@@ -10,8 +10,8 @@ public class Texture : IDisposable
     public uint Handle { get; private set; }
 
     internal bool IsOpaque { get; }
-    public int Width { get; }
-    public int Height { get; }
+    public int Width { get; private set; }
+    public int Height { get; private set; }
 
     private Texture(GL gl, uint handle, int width, int height, bool isOpaque)
     {
@@ -96,6 +96,24 @@ public class Texture : IDisposable
         }
     }
 
+    internal static Texture CreateRenderTarget(GL gl)
+    {
+        return new Texture(gl, gl.GenTexture(), 0, 0, true);
+    }
+
+    internal unsafe void ResizeRenderTarget(int width, int height, RenderTextureFilter filter)
+    {
+        _gl.BindTexture(TextureTarget.Texture2D, Handle);
+        _gl.TexImage2D<byte>(TextureTarget.Texture2D, 0, InternalFormat.Rgba8, (uint)width, (uint)height,
+            0, PixelFormat.Rgba, PixelType.UnsignedByte, null);
+        var mode = filter == RenderTextureFilter.Nearest ? GLEnum.Nearest : GLEnum.Linear;
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)mode);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)mode);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
+        Width = width;
+        Height = height;
+    }
     public void Dispose()
     {
         if (Handle == 0)

@@ -56,6 +56,7 @@ public class Game
         
         Application.Load += Instance.Load;
         Application.Update += Instance.Update;
+        Application.RenderCaptures += Instance.RenderCaptures;
         Application.Render += Instance.Render;
         Application.RenderOverlay += Instance.RenderDebug;
         Application.RenderUI += Instance.RenderUI;
@@ -102,6 +103,8 @@ public class Game
         }
     }
     
+    private void RenderCaptures() => World.RenderCameraCaptures();
+
     protected virtual void Render(Graphics graphics)
     {
         World.Render(_renderQueue, false);

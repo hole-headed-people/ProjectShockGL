@@ -334,6 +334,76 @@ LocalPosition задаётся в локальных координатах вл
 Камеры автоматически синхронизируются непосредственно перед отрисовкой в Application, после завершения обновления игровой логики и физики. В Game.Update синхронизация не выполняется. Если игровому коду нужен актуальный трансформ раньше, вызовите Synchronize(). Отключение IsEnabled, SetActive(false), удаление компонента, уничтожение владельца или выгрузка уровня возвращают активный вид к Camera.Default. Уничтожение неактивной камеры не переключает текущий вид. Повторное включение само по себе не активирует камеру: вызовите MakeActive явно. Персонажи примера и ProjectA делают это при повторном включении.
 
 FramebufferResize обновляет пропорции запасной и активной камеры; при переключении неактивная получает актуальный AspectRatio. Нулевой framebuffer при сворачивании игнорируется. Camera.Create/ToggleTo остаются низкоуровневым API, но для камер объектов используйте компонент, чтобы жизненный цикл был связан с владельцем.
+### Камера наблюдения и RenderTexture
+
+CameraCaptureComponent наследует CameraComponent: у него есть Camera, LocalPosition и LocalRotation. Перед основной камерой Application запускает захваты текущего World. Они не переключают Camera.Active, не обновляют игровую логику повторно и рисуют только мир: обычные меши, статические батчи и Details, без UI, отладочного рендера и общей постобработки. Освещение, туман и SkyColor берутся из Environment. Захваты работают и в редакторе; выключенный компонент, неактивный объект и скрытая редакторская группа не захватывают изображение, сохраняя последний кадр.
+
+Пример настройки в Create сущности камеры:
+
+~~~csharp
+public CameraCaptureComponent Capture { get; private set; } = null!;
+
+public override void Create()
+{
+    base.Create();
+    Capture = AddComponent<CameraCaptureComponent>();
+    Capture.SetResolution(256, 192);
+    Capture.Filter = RenderTextureFilter.Nearest;
+    Capture.Camera.Fov = MathF.PI / 3;
+    Capture.LocalPosition = new Vector3(0, 1.5f, 0);
+}
+~~~
+
+После создания объектов можно подключить экран монитора:
+
+~~~csharp
+var screen = monitor.GetComponent<MeshComponent>()!;
+screen.Texture = securityCamera.Capture.Texture;
+screen.Lit = false;
+~~~
+
+Здесь monitor — объект с мешем экрана, securityCamera — экземпляр сущности из примера. Размещайте камеру трансформом её владельца. Несколько мониторов могут использовать одну Texture. RenderTexture выдаёт изображение с той же ориентацией UV, что и обычная загруженная текстура; вручную переворачивать его не нужно. Меши, использующие текстуру текущего захвата, в этом захвате пропускаются. Рекурсивный захват не поддерживается.
+
+По умолчанию разрешение 256x192, фильтрация Nearest. Linear даёт более мягкое увеличение. SetResolution(width, height), Width, Height и Filter можно менять в игре: ссылка на Texture и её GPU handle сохраняются, поэтому переназначать текстуру экранам не нужно. Соотношение сторон проекции на время захвата соответствует разрешению RenderTexture. Отключение через IsEnabled останавливает обновление; Destroy компонента или выгрузка World освобождает его камеру, текстуру и framebuffer. Не освобождайте Capture.Texture или Capture.Target вручную — ими владеет компонент.
+
+Для ручного захвата есть Content.CreateRenderTexture(width, height, filter) и target.Capture(world, camera). Такой RenderTexture не попадает в кеш Content; вызывающий код обязан освободить его через Dispose. Создание, изменение размеров, захват и освобождение выполняются в потоке OpenGL после инициализации Content. Статистика прохода доступна через Target.Statistics; основная экранная статистика draw calls пока не включает отдельные захваты. Каждый включённый компонент добавляет отдельную отрисовку мира. Эффекты захвата пока не добавлены; настройки размещаемых камер описаны ниже.
+
+### Размещаемые камеры
+
+В Palette → Entity → Placeables доступны Camera (класс CameraEntity) и CameraCapture (класс CameraCaptureEntity). Их ассеты находятся в StarterContent/Entities/Placeables; для своей папки Content скопируйте эти JSON и текстуру Editor/Entity.png из StarterContent. В Content ProjectA ассеты уже добавлены.
+
+Обе сущности имеют настройки FieldOfView (в градусах), NearClip, FarClip, Orthographic, OrthoSize и ClearColor. Положение и направление задаются Transform; при выделении жёлтая стрелка показывает взгляд вдоль локальной -Z. При включённом Environment.SkyColorEnabled цвет фона берётся из Environment, а не ClearColor камеры.
+
+Camera не становится активной при создании или загрузке уровня. Назовите её в Inspector и переключайте из игрового кода или через Input MakeActive:
+
+~~~csharp
+if (World.Find("ViewCamera") is CameraEntity camera)
+{
+    camera.MakeActive();
+}
+~~~
+
+MakeActive возвращает bool; в редакторе и для выключенной камеры он возвращает false. Input ReleaseActive возвращает запасную камеру, если именно эта камера сейчас активна. Отключение или уничтожение активной камеры также возвращает запасную.
+
+У CameraCapture дополнительно редактируются Width, Height и Filter (Nearest / Linear). Разрешение по умолчанию 256x192; параметры сохраняются в map, префабах и истории Inspector. Width и Height задаются в пикселях, значения меньше 1 ограничиваются единицей; при создании GPU-ресурсов разрешение проверяется по возможностям видеокарты. Камера наблюдения автоматически захватывает мир, не переключая активную камеру. Результат доступен как entity.Texture или entity.Capture.Texture. При изменении разрешения ссылка на Texture сохраняется. Для вывода на поверхность используйте Monitor.
+
+### Monitor
+
+В Palette → Entity → Placeables доступен Monitor (ProjectShockGL.Placeables.Monitor). Это односторонний Unlit-квад размером 1x1 без коллайдера. Лицевая сторона направлена вдоль локальной +Z; ширина и высота задаются Transform.Scale.X и Transform.Scale.Y. Разрешение захвата не меняет размер и пропорции квада: изображение растягивается на всю поверхность, а пропорции подгоняются вручную через Scale.
+
+В Inspector задайте CameraName — Name сущности CameraCapture на текущем уровне, а не путь к её ассету. Имя сохраняется в map и префабах, поддерживает историю Inspector и дублирование. В игре начальное подключение происходит в Start, когда все объекты уровня уже созданы; в редакторе изменение CameraName применяется при отрисовке предпросмотра.
+
+~~~csharp
+if (World.Find("HallMonitor") is ProjectShockGL.Placeables.Monitor monitor)
+{
+    monitor.Setup("HallCamera");
+}
+~~~
+
+Через Outputs выберите монитор в Target, Setup в Input и имя камеры в Parameter. Повторный Setup позволяет сменить источник или повторить поиск после создания камеры. Пустое имя, отсутствующая цель или цель другого класса дают чёрный экран; при явном Setup с непустым неверным именем выводится предупреждение. Уничтожение камеры или её компонента также даёт чёрный экран. Отключение захвата сохраняет последний кадр камеры.
+
+Несколько мониторов используют одну текстуру захвата. Monitor не освобождает её при уничтожении: ею владеет CameraCaptureComponent. Квад создаётся движком и хранится в Content до очистки кеша; дополнительные модели и текстуры для Monitor не нужны.
+
 ## Время, таймеры и корутины
 
 ### Источники времени
@@ -418,7 +488,7 @@ CharacterController — капсула с Move(displacement), а не полно
 
 Light поддерживает Directional, Point и Spot. Inspector показывает редактируемые параметры света, включая Color, Intensity, Radius и внутренний/внешний углы конуса Spot (InnerAngle/OuterAngle); реализация в [Light.cs](ProjectShockGL/Core/Light.cs). Выбранный Point показывает радиус, Spot — конус, Directional — направление. Свет выключенного объекта не участвует в сцене.
 
-Environment хранит AmbientColor, IsFogEnabled, FogColor, FogNear и FogFar; редактор сохраняет их в map, загрузчик применяет при смене уровня. Динамических теней и запекания света нет.
+Environment хранит SkyColorEnabled, SkyColor, AmbientColor, IsFogEnabled, FogColor, FogNear и FogFar; редактор сохраняет их в map, загрузчик применяет при смене уровня. При SkyColorEnabled цвет очистки берётся из SkyColor, иначе — из ClearColor активной камеры. По умолчанию SkyColorEnabled выключен. Отключение Environment в предпросмотре редактора также возвращает цвет камеры. Динамических теней и запекания света нет.
 
 ### Detail: декоративные размещения и instancing
 

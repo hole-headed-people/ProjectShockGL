@@ -1,9 +1,12 @@
-﻿using ProjectShockGL.Rendering;
+using ProjectShockGL.Rendering;
 
 namespace ProjectShockGL;
 
 public static class Environment
 {
+    public static bool SkyColorEnabled { get; set; }
+    public static Color SkyColor { get; set; } = Color.Black;
+
     public static Color AmbientColor { get; set; } = Color.White;
 
     public static bool IsFogEnabled { get; set; } = false;
@@ -14,6 +17,8 @@ public static class Environment
     
     public static Core.EnvironmentData Capture() => new()
     {
+        SkyColorEnabled = SkyColorEnabled,
+        SkyColor = SkyColor,
         AmbientColor = AmbientColor,
         IsFogEnabled = IsFogEnabled,
         FogColor = FogColor,
@@ -27,6 +32,8 @@ public static class Environment
         
         data.Validate();
         
+        SkyColorEnabled = data.SkyColorEnabled;
+        SkyColor = data.SkyColor;
         AmbientColor = data.AmbientColor;
         IsFogEnabled = data.IsFogEnabled;
         FogColor = data.FogColor;

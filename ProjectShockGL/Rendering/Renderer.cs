@@ -81,6 +81,8 @@ public class Renderer : IDisposable
     private int _worldWidth;
     private int _worldHeight;
 
+    internal Texture? ExcludedTexture { get; init; }
+
     public RenderStatistics Statistics => new(_drawCalls, _worldDrawCalls, _postProcessDrawCalls,
         _triangles, _worldWidth, _worldHeight);
 
@@ -181,7 +183,8 @@ public class Renderer : IDisposable
         _frameForceUnlit = _preview?.Unlit ?? false;
 
         _gl.Viewport(0, 0, (uint)_screenWidth, (uint)_screenHeight);
-        _gl.ClearColor(camera.ClearColor.R, camera.ClearColor.G, camera.ClearColor.B, 1f);
+        var clearColor = environmentEnabled && Environment.SkyColorEnabled ? Environment.SkyColor : camera.ClearColor;
+        _gl.ClearColor(clearColor.R, clearColor.G, clearColor.B, 1f);
         _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
         var projection = camera.GetProjectionMatrix();
@@ -460,6 +463,7 @@ public class Renderer : IDisposable
 
     internal void DrawInstances(InstancedMesh instances, Texture texture, Color color, bool lit, bool backfaceCulling)
     {
+        if (ReferenceEquals(texture, ExcludedTexture)) return;
         if (_frameForceUnlit)
         {
             lit = false;
@@ -520,6 +524,7 @@ public class Renderer : IDisposable
     private void DrawMeshInternal(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit,
         bool ignoreDepth = false, Vector4? uvRect = null, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
     {
+        if (ReferenceEquals(texture, ExcludedTexture)) return;
         if (_frameForceUnlit)
         {
             lit = false;

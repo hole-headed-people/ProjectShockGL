@@ -1,4 +1,4 @@
-﻿namespace ProjectShockGL.Core;
+namespace ProjectShockGL.Core;
 
 public class Component
 {
@@ -60,6 +60,10 @@ public class Component
             if (this is Collider collider)
             {
                 Physics.Unregister(collider);
+            }
+            if (this is CameraCaptureComponent capture)
+            {
+                capture.ReleaseTarget();
             }
             if (this is CameraComponent camera)
             {

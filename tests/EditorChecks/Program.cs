@@ -1,4 +1,7 @@
 using System.Numerics;
+using CameraEntity = ProjectShockGL.Placeables.CameraEntity;
+using CameraCaptureEntity = ProjectShockGL.Placeables.CameraCaptureEntity;
+using MonitorEntity = ProjectShockGL.Placeables.Monitor;
 using Newtonsoft.Json;
 using ProjectShockGL;
 using ProjectShockGL.Core;
@@ -27,6 +30,11 @@ File.WriteAllText(Path.Combine(testRoot, "Entities", "Light.json"),
     "{\"Class\":\"ProjectShockGL.Core.Light, ProjectShockGL\",\"Parameters\":{}}");
 File.WriteAllText(Path.Combine(testRoot, "Geometry", "Box.json"),
     "{\"Model\":\"Missing\",\"Texture\":\"Missing\",\"ColliderType\":\"Box\",\"Size\":[1,1,1]}");
+foreach (var (cameraAssetName, cameraAssetType) in new[] { ("Camera", typeof(CameraEntity)), ("CameraCapture", typeof(CameraCaptureEntity)), ("Monitor", typeof(MonitorEntity)) })
+{
+    File.WriteAllText(Path.Combine(testRoot, "Entities", cameraAssetName + ".json"),
+        JsonConvert.SerializeObject(new EntityData { Class = cameraAssetType.AssemblyQualifiedName! }));
+}
 Settings.Initialize();
 Content.Initialize(null!); // Fixture assets deliberately contain no GPU resources.
 Game.Initialize();
@@ -1142,6 +1150,102 @@ RunScene("Mixed deletion stays undoable when an object Destroy callback throws",
         ThrowingDeleteEntity.RejectDestroy = previous;
     }
 });
+RunScene("Monitor stores camera names in maps and supports Setup, scale, duplication and Inspector history", () =>
+{
+    var monitor = (MonitorEntity)SceneObjects.Create(PlaceableType.Entity, "Monitor");
+    Check(!monitor.Screen.Lit && monitor.Screen.BackfaceCulling && monitor.Screen.UseParentScale && !monitor.Screen.IsDebug);
+    Check(InputInvoker.GetInputNames(typeof(MonitorEntity)).Contains("Setup"));
+    monitor.Transform.Scale = new Vector3(3, 2, 1);
+    monitor.Setup("CameraA");
+    Check(monitor.CameraName == "CameraA");
+    InputInvoker.Invoke(monitor, "Setup", "CameraB");
+    Check(monitor.CameraName == "CameraB");
+    UndoRedo.Clear();
+    RecordInspector(monitor, "CameraName", () => monitor.CameraName = "CameraC");
+    UndoRedo.Undo(); Check(monitor.CameraName == "CameraB");
+    UndoRedo.Redo(); Check(monitor.CameraName == "CameraC");
+    var duplicate = (MonitorEntity)SceneObjects.Duplicate(monitor);
+    Check(duplicate.CameraName == "CameraC" && duplicate.Screen != monitor.Screen &&
+        duplicate.Transform.Scale == new Vector3(3, 2, 1));
+    var path = Path.Combine(testRoot, "monitors.map");
+    EditorLevelManager.SaveCurrentLevel(path);
+    EditorLevelManager.OpenLevel(path);
+    var loaded = Game.Instance.World.GetAllObjects(true).OfType<MonitorEntity>().ToArray();
+    Check(loaded.Length == 2 && loaded.All(m => m.CameraName == "CameraC" &&
+        m.Transform.Scale == new Vector3(3, 2, 1) && !m.Screen.Lit && m.Screen.BackfaceCulling));
+    Check(!EditorLevelManager.IsDirty);
+});
+RunScene("Placeable cameras preserve lens/resolution settings through map loading, undo and duplication", () =>
+{
+    var active = ProjectShockGL.Rendering.Camera.Active;
+    var camera = (CameraEntity)SceneObjects.Create(PlaceableType.Entity, "Camera");
+    var capture = (CameraCaptureEntity)SceneObjects.Create(PlaceableType.Entity, "CameraCapture");
+    camera.Name = "View";
+    camera.Transform.Position = new Vector3(3, 4, 5);
+    camera.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, .6f);
+    camera.FieldOfView = 85;
+    camera.NearClip = .5f;
+    camera.FarClip = 500;
+    camera.Orthographic = true;
+    camera.OrthoSize = 12;
+    camera.ClearColor = Color.Red;
+    capture.Width = 320;
+    capture.Height = 180;
+    capture.Filter = ProjectShockGL.Rendering.RenderTextureFilter.Linear;
+    capture.FieldOfView = 75;
+    capture.SetActive(false);
+    Check(camera.CameraComponent.GetType() == typeof(CameraComponent) &&
+        capture.CameraComponent.GetType() == typeof(CameraCaptureComponent));
+    Check(ProjectShockGL.Rendering.Camera.Active == active && !camera.MakeActive());
+    Check(EditableProperties.Get(typeof(CameraCaptureEntity)).Select(p => p.Name)
+        .Intersect(new[] { "Width", "Height", "Filter", "FieldOfView", "ClearColor" }).Count() == 5);
+    Check(InputInvoker.GetInputNames(typeof(CameraEntity)).Contains("MakeActive"));
+
+    UndoRedo.Clear();
+    RecordInspector(capture, "Width", () => capture.Width = 640);
+    UndoRedo.Undo(); Check(capture.Width == 320);
+    UndoRedo.Redo(); Check(capture.Width == 640);
+    var duplicate = (CameraCaptureEntity)SceneObjects.Duplicate(capture);
+    Check(duplicate.Width == 640 && duplicate.Height == 180 && duplicate.Filter == capture.Filter &&
+        !duplicate.IsActive && duplicate.Capture != capture.Capture);
+    var oldCamera = camera.Camera;
+    var oldCaptureCamera = capture.Camera;
+    var path = Path.Combine(testRoot, "cameras.map");
+    EditorLevelManager.SaveCurrentLevel(path);
+    EditorLevelManager.OpenLevel(path);
+    Check(oldCamera.IsDisposed && oldCaptureCamera.IsDisposed);
+    var loadedCamera = Game.Instance.World.Find("View") as CameraEntity;
+    Check(loadedCamera != null && loadedCamera.Camera.Transform.Position != camera.Transform.Position);
+    loadedCamera!.CameraComponent.Synchronize();
+    Check(loadedCamera.Transform.Position == new Vector3(3, 4, 5) &&
+        Vector3.Distance(loadedCamera.Camera.Transform.Forward, camera.Transform.Forward) < .001f);
+    Check(Math.Abs(loadedCamera.FieldOfView - 85) < .001f && loadedCamera.NearClip == .5f &&
+        loadedCamera.FarClip == 500 && loadedCamera.Orthographic && loadedCamera.OrthoSize == 12 &&
+        loadedCamera.ClearColor.Equals(Color.Red));
+    var loadedCaptures = Game.Instance.World.GetAllObjects(true).OfType<CameraCaptureEntity>().ToArray();
+    Check(loadedCaptures.Length == 2 && loadedCaptures.All(c => c.Width == 640 && c.Height == 180 &&
+        c.Filter == ProjectShockGL.Rendering.RenderTextureFilter.Linear && !c.IsActive));
+    Check(ProjectShockGL.Rendering.Camera.Active == active && !EditorLevelManager.IsDirty);
+
+    var editor = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+    try
+    {
+        editor.SetValue(null, false);
+        Check(loadedCamera.MakeActive() && ProjectShockGL.Rendering.Camera.Active == loadedCamera.Camera);
+        loadedCamera.SetActive(false);
+        Check(ProjectShockGL.Rendering.Camera.Active == ProjectShockGL.Rendering.Camera.Default);
+        loadedCamera.SetActive(true);
+        InputInvoker.Invoke(loadedCamera, "MakeActive", "");
+        Check(ProjectShockGL.Rendering.Camera.Active == loadedCamera.Camera);
+        InputInvoker.Invoke(loadedCamera, "ReleaseActive", "");
+        Check(ProjectShockGL.Rendering.Camera.Active == ProjectShockGL.Rendering.Camera.Default);
+    }
+    finally
+    {
+        editor.SetValue(null, true);
+        ProjectShockGL.Rendering.Camera.ToggleTo(active);
+    }
+});
 RunScene("Selected Output links match World.Find, merge repeated targets and skip empty, missing and destroyed endpoints", () =>
 {
     var world = Game.Instance.World;
@@ -1323,6 +1427,7 @@ Run("Environment is captured independently and survives a saved map roundtrip", 
 {
     Environment.Apply(new EnvironmentData
     {
+        SkyColorEnabled = true, SkyColor = new(0.2f, 0.3f, 0.4f),
         AmbientColor = new(0.15f, 0.25f, 0.35f), IsFogEnabled = true,
         FogColor = new(0.45f, 0.55f, 0.65f), FogNear = 4, FogFar = 45
     });
@@ -1438,6 +1543,7 @@ Run("Invalid environment rejects the map without changing scene or environment",
         new EnvironmentData { FogNear = 10, FogFar = 10 },
         new EnvironmentData { FogNear = -1 },
         new EnvironmentData { FogFar = float.NaN },
+        new EnvironmentData { SkyColor = new(float.NaN, 0, 0) },
         new EnvironmentData { AmbientColor = new(float.PositiveInfinity, 0, 0) }
     })
     {
@@ -3357,23 +3463,40 @@ if (args.Contains("--imgui"))
             UndoRedo.Undo();
             Check(world.GetAllObjects(true).Length==0);
         });
-        Run("Real ImGui Environment checkbox joins the same undo history", () =>
+        RunScene("Real ImGui camera capture resolution editing participates in Undo/Redo", () =>
+        {
+            var capture = (CameraCaptureEntity)SceneObjects.Create(PlaceableType.Entity, "CameraCapture");
+            UndoRedo.Clear();
+            Frame(Inspector.Draw);
+            for (var y = 170; y <= 270 && capture.Width == 256; y += 3)
+            {
+                Frame(Inspector.Draw, 30, y, true);
+                Frame(Inspector.Draw, 70, y, true);
+                Frame(Inspector.Draw, 110, y, true);
+                Frame(Inspector.Draw, 110, y, false);
+            }
+            Check(capture.Width != 256 && UndoRedo.CanUndo);
+            var width = capture.Width;
+            UndoRedo.Undo(); Check(capture.Width == 256);
+            UndoRedo.Redo(); Check(capture.Width == width);
+        });
+        Run("Real ImGui Environment sky checkbox joins the same undo history", () =>
         {
             UndoRedo.Clear();
             var open = true;
             void DrawEnvironment() => EnvironmentWindow.Draw(ref open);
             Frame(DrawEnvironment);
-            var fog = Environment.IsFogEnabled;
-            for (var y = 65; y <= 100 && Environment.IsFogEnabled == fog; y += 3)
+            var fog = Environment.SkyColorEnabled;
+            for (var y = 35; y <= 65 && Environment.SkyColorEnabled == fog; y += 3)
             {
                 Frame(DrawEnvironment,15,y,true);
                 Frame(DrawEnvironment,15,y,false);
             }
-            Check(Environment.IsFogEnabled != fog && UndoRedo.CanUndo);
+            Check(Environment.SkyColorEnabled != fog && UndoRedo.CanUndo);
             UndoRedo.Undo();
-            Check(Environment.IsFogEnabled == fog && !UndoRedo.CanUndo);
+            Check(Environment.SkyColorEnabled == fog && !UndoRedo.CanUndo);
             UndoRedo.Redo();
-            Check(Environment.IsFogEnabled != fog);
+            Check(Environment.SkyColorEnabled != fog);
         });
         Run("Real ImGui editor errors have a wide, bounded message area", () =>
         {
@@ -3431,6 +3554,7 @@ static void RecordInspector(GameObject obj, string field, Action change, bool ed
 }
 
 static bool SameEnvironment(EnvironmentData a, EnvironmentData b) =>
+    a.SkyColorEnabled == b.SkyColorEnabled && a.SkyColor.Equals(b.SkyColor) &&
     a.AmbientColor.Equals(b.AmbientColor) && a.IsFogEnabled == b.IsFogEnabled &&
     a.FogColor.Equals(b.FogColor) && a.FogNear == b.FogNear && a.FogFar == b.FogFar;
 

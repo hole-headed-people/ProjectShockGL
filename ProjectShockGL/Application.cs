@@ -17,6 +17,7 @@ public static class Application
     public static event Action? Load;
     public static event Action<float>? Update;
     public static event Action<float>? BeforeRender;
+    internal static event Action? RenderCaptures;
     public static event Action<Graphics>? Render;
     public static event Action<Graphics>? RenderOverlay;
     public static event Action<Graphics>? RenderUI;
@@ -244,6 +245,7 @@ public static class Application
         
         var renderStart = System.Diagnostics.Stopwatch.GetTimestamp();
         Camera.SynchronizeComponents();
+        RenderCaptures?.Invoke();
         _graphics.BeginDraw(Camera.Active);
 
         BeforeRender?.Invoke((float)deltaTime);

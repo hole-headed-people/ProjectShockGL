@@ -132,6 +132,51 @@ void Render()
     using var renderer = new Renderer(gl, 640, 240, preview);
     var graphics = new Graphics(renderer);
     Camera.Initialize(window);
+    var skyEnvironment = ProjectShockGL.Environment.Capture();
+    var skyCamera = Camera.Active;
+    var skyClear = skyCamera.ClearColor;
+    using (var otherSkyCamera = Camera.Create())
+    {
+        try
+        {
+            void ClearIs(Color expected)
+            {
+                graphics.BeginDraw(Camera.Active);
+                var pixel = new byte[4];
+                unsafe { fixed (byte* data = pixel) gl.ReadPixels(320, 120, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+                graphics.EndDraw();
+                Check(Math.Abs(pixel[0] - expected.R * 255) < 2 && Math.Abs(pixel[1] - expected.G * 255) < 2 &&
+                    Math.Abs(pixel[2] - expected.B * 255) < 2);
+            }
+            skyCamera.ClearColor = Color.Red;
+            otherSkyCamera.ClearColor = Color.Blue;
+            ProjectShockGL.Environment.SkyColor = Color.Green;
+            ProjectShockGL.Environment.SkyColorEnabled = true;
+            ClearIs(Color.Green);
+            Camera.ToggleTo(otherSkyCamera);
+            ClearIs(Color.Green);
+            Check(skyCamera.ClearColor.Equals(Color.Red) && otherSkyCamera.ClearColor.Equals(Color.Blue));
+            ProjectShockGL.Environment.SkyColorEnabled = false;
+            ClearIs(Color.Blue);
+            Camera.ToggleTo(skyCamera);
+            ClearIs(Color.Red);
+            ProjectShockGL.Environment.SkyColorEnabled = true;
+            preview.EnvironmentEnabled = false;
+            ClearIs(Color.Red);
+            Check(ProjectShockGL.Environment.SkyColorEnabled);
+            preview.EnvironmentEnabled = true;
+            ClearIs(Color.Green);
+            Check(gl.GetError() == GLEnum.NoError);
+            Console.WriteLine("PASS: Environment sky color overrides frame clear without mutating cameras; disabled sky/preview uses active camera");
+        }
+        finally
+        {
+            Camera.ToggleTo(skyCamera);
+            skyCamera.ClearColor = skyClear;
+            ProjectShockGL.Environment.Apply(skyEnvironment);
+            preview.EnvironmentEnabled = true;
+        }
+    }
     graphics.BeginDraw(Camera.Active);
     graphics.DrawLine2D(new Vector3(-0.5f, 0, -2), new Vector3(0.5f, 0, -2),
         ProjectShockGL.Rendering.Plane.Xy, Content.GetWhitePixel(), Color.White, ignoreDepth: true);
@@ -1187,6 +1232,328 @@ void Render()
         Camera.Active.ClearColor = sliceClear;
         File.Delete(slicePath);
     }
+    var captureWorld = new World();
+    var captureEnvironment = ProjectShockGL.Environment.Capture();
+    var captureActive = Camera.Active;
+    var captureEditor = Application.IsEditor;
+    var capturePostEnabled = PostProcessSettings.Enabled;
+    using var captureQuad = new Mesh(gl,
+    [
+        -.5f, -.5f, 0, 0, 0, 1, 0, 1,
+         .5f, -.5f, 0, 0, 0, 1, 1, 1,
+         .5f,  .5f, 0, 0, 0, 1, 1, 0,
+        -.5f,  .5f, 0, 0, 0, 1, 0, 0
+    ], [0, 1, 2, 0, 2, 3]);
+    try
+    {
+        editorProperty.SetValue(null, false);
+        ProjectShockGL.Environment.IsFogEnabled = false;
+        ProjectShockGL.Environment.SkyColorEnabled = false;
+        PostProcessSettings.Enabled = true; // Capture bypasses global postprocessing.
+        var cameraOwner = captureWorld.Spawn<CaptureProbe>();
+        var captureEntity = (ProjectShockGL.Placeables.CameraCaptureEntity)ProjectShockGL.Core.Entity.Create("Placeables/CameraCapture", captureWorld)!;
+        var capture = captureEntity.Capture;
+        captureEntity.Width = 64;
+        captureEntity.Height = 32;
+        capture.Camera.Orthographic = true;
+        capture.Camera.OrthoSize = 4;
+        capture.Camera.AspectRatio = 7;
+        capture.Camera.ClearColor = Color.Black;
+        var target = capture.Target;
+        var targetTexture = capture.Texture;
+        var targetHandle = targetTexture.Handle;
+        Check(ReferenceEquals(target.Texture, targetTexture) && target.Width == 64 && target.Height == 32);
+        ProjectShockGL.Core.Object ColoredQuad(Vector3 position, Color color, Texture? texture = null)
+        {
+            var obj = captureWorld.Spawn<ProjectShockGL.Core.Object>();
+            obj.Transform.Position = position;
+            var mesh = obj.AddComponent<ProjectShockGL.Core.MeshComponent>();
+            mesh.Mesh = captureQuad;
+            mesh.Texture = texture ?? Content.GetWhitePixel();
+            mesh.Color = color;
+            mesh.Scale = 1.5f;
+            return obj;
+        }
+        var upper = ColoredQuad(new Vector3(-1, 1, -3), Color.Red);
+        ColoredQuad(new Vector3(-1, -1, -3), Color.Blue);
+        ColoredQuad(new Vector3(-1, 1, -6), Color.Green); // Depth behind red.
+        ColoredQuad(new Vector3(-1, 1, -1), Color.White, targetTexture); // Excluded self-monitor.
+        var debug = ColoredQuad(new Vector3(-1, 1, -2), Color.Green);
+        debug.GetComponent<ProjectShockGL.Core.MeshComponent>()!.IsDebug = true;
+        captureWorld.Update(0, simulate: false);
+        var renderCaptures = typeof(World).GetMethod("RenderCameraCaptures", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        void CaptureWorld() => renderCaptures.Invoke(captureWorld, null);
+        byte[] CapturedPixel(int x, int y)
+        {
+            graphics.BeginDraw(captureActive);
+            graphics.BeginUI(new Vector2(640, 240));
+            graphics.DrawUIRect(Vector2.Zero, new Vector2(256, 128), Color.White, targetTexture);
+            graphics.EndUI();
+            var result = new byte[4];
+            unsafe { fixed (byte* data = result) gl.ReadPixels(x, 239 - y, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+            graphics.EndDraw();
+            return result;
+        }
+        bool Red(byte[] p) => p[0] > 230 && p[1] < 10 && p[2] < 10;
+        bool Blue(byte[] p) => p[2] > 230 && p[0] < 10 && p[1] < 10;
+
+        // Separate read/draw FBOs and an unusual viewport must survive capture.
+        using var destination = new RenderTexture(gl, 40, 30);
+        var fbField = typeof(RenderTexture).GetField("_framebuffer", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var outputFbField = typeof(RenderTexture).GetField("_outputFramebuffer", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var destinationDraw = (uint)fbField.GetValue(destination)!;
+        var destinationRead = (uint)outputFbField.GetValue(destination)!;
+        gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, destinationDraw);
+        gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, destinationRead);
+        gl.Viewport(3, 4, 20, 18);
+        gl.Disable(EnableCap.DepthTest); gl.Enable(EnableCap.ScissorTest);
+        gl.DepthMask(false); gl.ColorMask(true, false, true, false);
+        CaptureWorld();
+        Check(gl.GetInteger(GetPName.DrawFramebufferBinding) == destinationDraw &&
+            gl.GetInteger(GetPName.ReadFramebufferBinding) == destinationRead);
+        var viewport = new int[4]; gl.GetInteger(GetPName.Viewport, viewport);
+        Check(viewport.SequenceEqual(new[] { 3, 4, 20, 18 }) && gl.IsEnabled(EnableCap.ScissorTest) &&
+            !gl.IsEnabled(EnableCap.DepthTest) && !gl.GetBoolean(GetPName.DepthWritemask));
+        var mask = new bool[4]; gl.GetBoolean(GetPName.ColorWritemask, mask);
+        Check(mask.SequenceEqual(new[] { true, false, true, false }));
+        gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        gl.Disable(EnableCap.ScissorTest); gl.DepthMask(true); gl.ColorMask(true, true, true, true);
+        gl.Viewport(0, 0, 640, 240);
+
+        Check(ReferenceEquals(Camera.Active, captureActive) && capture.Camera.AspectRatio == 7);
+        Check(target.Statistics.DrawCalls == 3 && target.Statistics.PostProcessDrawCalls == 0);
+        Check(Red(CapturedPixel(96, 32)) && Blue(CapturedPixel(96, 96)));
+        using (var monitorCamera = Camera.Create())
+        {
+            monitorCamera.Orthographic = true;
+            monitorCamera.OrthoSize = 4;
+            monitorCamera.AspectRatio = 640f / 240;
+            graphics.BeginDraw(monitorCamera);
+            graphics.DrawMesh(captureQuad, new Vector3(0, 0, -3), Quaternion.Identity,
+                new Vector3(32f / 3, 4, 1), targetTexture, Color.White, lit: false);
+            var screenPixel = new byte[4];
+            unsafe
+            {
+                fixed (byte* data = screenPixel) gl.ReadPixels(240, 179, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, data);
+            }
+            Check(Red(screenPixel));
+            unsafe
+            {
+                fixed (byte* data = screenPixel) gl.ReadPixels(240, 59, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, data);
+            }
+            Check(Blue(screenPixel));
+            graphics.EndDraw();
+        }
+        Check(cameraOwner.Starts == 0 && cameraOwner.Updates == 0);
+
+        upper.GetComponent<ProjectShockGL.Core.MeshComponent>()!.Color = Color.Green;
+        capture.IsEnabled = false; CaptureWorld();
+        Check(Red(CapturedPixel(96, 32)));
+        capture.IsEnabled = true;
+        captureEntity.SetActive(false); CaptureWorld();
+        Check(Red(CapturedPixel(96, 32)));
+        captureEntity.SetActive(true); CaptureWorld();
+        Check(CapturedPixel(96, 32)[1] > 120 && CapturedPixel(96, 32)[0] < 10);
+
+        captureEntity.Width = 80;
+        captureEntity.Height = 40;
+        captureEntity.Filter = RenderTextureFilter.Linear;
+        Check(ReferenceEquals(capture.Texture, targetTexture) && targetTexture.Handle == targetHandle &&
+            target.Width == 80 && target.Height == 40 && target.Filter == RenderTextureFilter.Linear);
+        CaptureWorld();
+        Check(Blue(CapturedPixel(96, 96)));
+        Throws<ArgumentOutOfRangeException>(() => target.Resize(0, 40));
+        Check(target.Width == 80 && target.Height == 40);
+        capture.LocalPosition = new Vector3(100, 0, 0);
+        CaptureWorld();
+        Check(capture.Camera.Transform.Position.X == 100 && CapturedPixel(96, 32).Take(3).All(c => c < 3));
+        capture.LocalPosition = Vector3.Zero;
+
+        var failure = cameraOwner.AddComponent<CaptureFaultComponent>();
+        failure.ThrowOnRender = true;
+        Throws<System.Reflection.TargetInvocationException>(CaptureWorld);
+        Check(ReferenceEquals(Camera.Active, captureActive) && capture.Camera.AspectRatio == 7 &&
+            gl.GetInteger(GetPName.DrawFramebufferBinding) == 0);
+        failure.ThrowOnRender = false;
+        CaptureWorld();
+        Check(Blue(CapturedPixel(96, 96)));
+        var camera = capture.Camera;
+        var targetFramebuffer = (uint)fbField.GetValue(target)!;
+        captureWorld.Clear();
+        Check(target.IsDisposed && targetTexture.Handle == 0 && camera.IsDisposed &&
+            !gl.IsTexture(targetHandle) && !gl.IsFramebuffer(targetFramebuffer));
+        Throws<ObjectDisposedException>(() => target.Capture(captureWorld, captureActive));
+        Check(gl.GetError() == GLEnum.NoError);
+        Console.WriteLine("PASS: Camera capture renders a live world to an upright monitor texture, preserves active camera/GL state, resizes and releases on unload");
+    }
+    finally
+    {
+        captureWorld.Clear();
+        ProjectShockGL.Environment.Apply(captureEnvironment);
+        editorProperty.SetValue(null, captureEditor);
+        PostProcessSettings.Enabled = capturePostEnabled;
+    }
+    var monitorWorld = new World();
+    var monitorEnvironment = ProjectShockGL.Environment.Capture();
+    var monitorActive = Camera.Active;
+    var monitorEditor = Application.IsEditor;
+    using var monitorView = Camera.Create();
+    try
+    {
+        editorProperty.SetValue(null, false);
+        ProjectShockGL.Environment.IsFogEnabled = false;
+        ProjectShockGL.Environment.SkyColorEnabled = false;
+        monitorView.Orthographic = true;
+        monitorView.OrthoSize = 4;
+        monitorView.AspectRatio = 640f / 240;
+        monitorView.ClearColor = Color.Green;
+        var sourceA = monitorWorld.Spawn<ProjectShockGL.Placeables.CameraCaptureEntity>();
+        sourceA.Name = "CameraA"; sourceA.Transform.Position = new Vector3(1000, 0, 0);
+        sourceA.Camera.ClearColor = Color.Red; sourceA.Capture.SetResolution(64, 32);
+        var sourceB = monitorWorld.Spawn<ProjectShockGL.Placeables.CameraCaptureEntity>();
+        sourceB.Name = "CameraB"; sourceB.Transform.Position = new Vector3(1000, 0, 0);
+        sourceB.Camera.ClearColor = Color.Blue; sourceB.Capture.SetResolution(32, 32);
+        var ordinary = monitorWorld.Spawn<ProjectShockGL.Placeables.CameraEntity>(); ordinary.Name = "Ordinary";
+        var monitor = (ProjectShockGL.Placeables.Monitor)ProjectShockGL.Core.Entity.Create("Placeables/Monitor", monitorWorld)!;
+        monitor.Transform.Position = new Vector3(0, 0, -3);
+        monitor.Transform.Scale = new Vector3(2, 1, 1);
+        monitor.CameraName = "CameraA";
+        monitorWorld.Update(0); // Start resolves authored CameraName after all objects have been created.
+        typeof(World).GetMethod("RenderCameraCaptures", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(monitorWorld, null);
+        Check(ReferenceEquals(Camera.Active, monitorActive));
+        var queue = new RenderQueue();
+        byte[] DrawMonitor(int x = 320)
+        {
+            graphics.BeginDraw(monitorView);
+            monitorWorld.Render(queue, false);
+            queue.Flush(graphics);
+            var pixel = new byte[4];
+            unsafe { fixed (byte* data = pixel) gl.ReadPixels(x, 120, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+            graphics.EndDraw();
+            return pixel;
+        }
+        bool Black(byte[] p) => p.Take(3).All(c => c < 3);
+        Check(DrawMonitor()[0] > 240 && DrawMonitor()[2] < 3);
+        Check(ReferenceEquals(monitor.Screen.Texture, sourceA.Texture));
+        var outside = DrawMonitor(400);
+        Check(outside[1] > 100 && outside[0] < 3);
+        sourceA.Capture.SetResolution(128, 128);
+        sourceA.Capture.Target.Capture(monitorWorld, sourceA.Camera);
+        Check(DrawMonitor()[0] > 240 && DrawMonitor(400)[0] < 3 && monitor.Transform.Scale == new Vector3(2, 1, 1));
+        monitor.Transform.Scale = new Vector3(4, 2, 1);
+        Check(DrawMonitor(400)[0] > 240);
+        monitor.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI);
+        Check(DrawMonitor()[1] > 100 && DrawMonitor()[0] < 3); // Back side is culled.
+        monitor.Transform.Rotation = Quaternion.Identity;
+
+        monitor.Setup("Missing");
+        Check(Black(DrawMonitor()));
+        monitor.Setup("Ordinary");
+        Check(Black(DrawMonitor()));
+        monitor.Setup("");
+        Check(Black(DrawMonitor()));
+        InputInvoker.Invoke(monitor, "Setup", "CameraB");
+        Check(DrawMonitor()[2] > 240 && ReferenceEquals(monitor.Screen.Texture, sourceB.Texture));
+        var textureB = sourceB.Texture;
+        monitorWorld.Destroy(sourceB);
+        Check(Black(DrawMonitor()) && textureB.Handle == 0);
+        monitor.CameraName = "CameraA"; // Inspector-style change also updates the editor preview.
+        Check(DrawMonitor()[0] > 240);
+        var textureA = sourceA.Texture;
+        var quad = monitor.Screen.Mesh!;
+        monitorWorld.Destroy(monitor);
+        Check(textureA.Handle != 0 && gl.IsTexture(textureA.Handle) && !quad.IsDisposed);
+        Check(gl.GetError() == GLEnum.NoError);
+        Console.WriteLine("PASS: Monitor renders a single-sided Unlit quad, scales independently, switches cameras via Setup/Input and shows black for missing/destroyed targets");
+    }
+    finally
+    {
+        monitorWorld.Clear();
+        ProjectShockGL.Environment.Apply(monitorEnvironment);
+        editorProperty.SetValue(null, monitorEditor);
+    }
+    var debugDepthWorld = new World();
+    var debugFlag = typeof(Application).GetProperty(nameof(Application.IsDebug))!;
+    var previousDebugFlag = Application.IsDebug;
+    var debugEnvironment = ProjectShockGL.Environment.Capture();
+    var gridShow = ProjectShockGLEditor.SceneGrid.Show;
+    var gridStep = ProjectShockGLEditor.SceneGrid.Step;
+    using var debugCamera = Camera.Create();
+    try
+    {
+        debugFlag.SetValue(null, true);
+        ProjectShockGL.Environment.IsFogEnabled = false;
+        ProjectShockGL.Environment.SkyColorEnabled = false;
+        debugCamera.Orthographic = true;
+        debugCamera.OrthoSize = 4;
+        debugCamera.AspectRatio = 640f / 240;
+        debugCamera.Transform.Position = new Vector3(0, 4, 4);
+        debugCamera.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitX, -MathF.PI / 4);
+        var obj = debugDepthWorld.Spawn<DebugEntityProbe>();
+        obj.Transform.Position = new Vector3(0, .6f, 0);
+        Check(ReferenceEquals(obj.GetComponent<ProjectShockGL.Core.MeshComponent>(), obj.MainMesh));
+        obj.Load(new Dictionary<string, object> { ["Mesh"] = "Cube", ["Texture"] = "Default" });
+        var normal = new RenderQueue();
+        obj.Render(normal, false);
+        Check(((IReadOnlyList<RenderCommand>)typeof(RenderQueue).GetProperty("Commands", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(normal)!).Count == 1); // Runtime mesh must not become a debug overlay.
+        var debugArguments = new Dictionary<string, object> { ["DebugMesh"] = "Cube", ["DebugBillboard"] = "Editor/Entity" };
+        obj.Load(debugArguments);
+        obj.Load(debugArguments);
+        Check(ReferenceEquals(obj.GetComponent<ProjectShockGL.Core.MeshComponent>(), obj.MainMesh) &&
+            !obj.MainMesh.IsDebug && !obj.MainMesh.IgnoreDepth);
+        var queue = new RenderQueue();
+        obj.Render(queue, true);
+        var commands = (IReadOnlyList<RenderCommand>)typeof(RenderQueue).GetProperty("Commands", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(queue)!;
+        Check(commands.Count == 2); // Repeated Load reuses the debug components.
+        var meshCommand = commands.OfType<MeshCommand>().Single();
+        var billboardCommand = commands.OfType<BillboardCommand>().Single();
+        Check(!meshCommand.IgnoreDepth && !billboardCommand.IgnoreDepth);
+        meshCommand.Color = billboardCommand.Color = Color.Red;
+        meshCommand.Lit = false;
+        meshCommand.Texture = billboardCommand.Texture = Content.GetWhitePixel();
+        ProjectShockGLEditor.SceneGrid.Show = true;
+        ProjectShockGLEditor.SceneGrid.Step = 1;
+        var projected = Vector4.Transform(new Vector4(obj.Transform.Position, 1),
+            debugCamera.GetViewMatrix() * debugCamera.GetProjectionMatrix());
+        var px = (int)((projected.X / projected.W + 1) * 320);
+        var py = (int)((projected.Y / projected.W + 1) * 120);
+        byte[] Pixel()
+        {
+            var pixel = new byte[4];
+            unsafe { fixed (byte* data = pixel) gl.ReadPixels(px, py, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+            return pixel;
+        }
+        foreach (var command in commands)
+        {
+            graphics.BeginDraw(debugCamera);
+            command.Execute(graphics);
+            Check(Pixel()[0] > 240);
+            ProjectShockGLEditor.SceneGrid.Render(graphics);
+            var pixel = Pixel();
+            Check(pixel[0] > 240 && pixel[1] < 10 && pixel[2] < 10);
+            graphics.EndDraw();
+
+            graphics.BeginDraw(debugCamera);
+            var wallPosition = (debugCamera.Transform.Position + obj.Transform.Position) * .5f;
+            graphics.DrawQuad(wallPosition, debugCamera.Transform.Rotation, new Vector2(3),
+                Content.GetWhitePixel(), Color.Blue);
+            command.Execute(graphics);
+            pixel = Pixel();
+            Check(pixel[2] > 240 && pixel[0] < 10);
+            graphics.EndDraw();
+        }
+        Check(gl.GetError() == GLEnum.NoError);
+        Console.WriteLine("PASS: Entity debug assets do not replace gameplay meshes, respect walls and occlude the grid with mesh/billboard depth");
+    }
+    finally
+    {
+        debugDepthWorld.Clear();
+        debugFlag.SetValue(null, previousDebugFlag);
+        ProjectShockGL.Environment.Apply(debugEnvironment);
+        ProjectShockGLEditor.SceneGrid.Show = gridShow;
+        ProjectShockGLEditor.SceneGrid.Step = gridStep;
+    }
     var linkWorld = new World();
     var linkEditor = Application.IsEditor;
     var linkCamera = ProjectShockGLEditor.TransformState.Capture(Camera.Active.Transform);
@@ -1261,3 +1628,37 @@ static void Throws<T>(Action action) where T : Exception
     throw new Exception("Expected " + typeof(T).Name);
 }
 
+
+public sealed class CaptureProbe : ProjectShockGL.Core.Object
+{
+    public int Starts, Updates;
+    public override void Start() { Starts++; }
+    public override void Update(float dt) { Updates++; base.Update(dt); }
+}
+
+public sealed class CaptureFaultComponent : ProjectShockGL.Core.RenderComponent
+{
+    public bool ThrowOnRender;
+    public override void Render(RenderQueue queue)
+    {
+        if (ThrowOnRender) throw new InvalidOperationException("Capture failure");
+    }
+}
+public sealed class DebugEntityProbe : ProjectShockGL.Core.Entity
+{
+    public ProjectShockGL.Core.MeshComponent MainMesh { get; private set; } = null!;
+
+    public override void Create()
+    {
+        base.Create();
+        MainMesh = AddComponent<ProjectShockGL.Core.MeshComponent>();
+    }
+
+    public override void Load(Dictionary<string, object> arguments)
+    {
+        base.Load(arguments);
+        var mesh = GetComponent<ProjectShockGL.Core.MeshComponent>()!;
+        if (arguments.TryGetValue("Mesh", out var name)) mesh.Mesh = Content.LoadMesh((string)name);
+        if (arguments.TryGetValue("Texture", out var texture)) mesh.Texture = Content.LoadTexture((string)texture);
+    }
+}

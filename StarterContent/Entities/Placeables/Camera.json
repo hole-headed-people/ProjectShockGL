@@ -1,0 +1,6 @@
+{
+  "Class": "ProjectShockGL.Placeables.CameraEntity, ProjectShockGL",
+  "Parameters": {
+    "DebugBillboard": "Editor/Entity"
+  }
+}

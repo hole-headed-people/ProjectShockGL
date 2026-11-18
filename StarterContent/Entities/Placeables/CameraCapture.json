@@ -1,0 +1,6 @@
+{
+  "Class": "ProjectShockGL.Placeables.CameraCaptureEntity, ProjectShockGL",
+  "Parameters": {
+    "DebugBillboard": "Editor/Entity"
+  }
+}
