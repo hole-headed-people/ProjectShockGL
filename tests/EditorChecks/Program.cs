@@ -2067,6 +2067,143 @@ Run("BrushBox mesh has outward faces and constant world UV density after nonunif
     }
 });
 
+Run("Brush face UV overrides preserve geometry, inherit defaults and reject invalid data", () =>
+{
+    var size = new Vector3(2, 3, 4);
+    var scale = new Vector3(2, 1, 2);
+    var baseline = ProjectShockGL.Rendering.BrushBoxMesh.Build(size, scale, 2);
+    var face = new BrushFaceData { TextureScale = new Vector2(0.5f, 2), TextureOffset = new Vector2(0.25f, -0.5f) };
+    var settings = new Dictionary<BrushFace, BrushFaceData> { [BrushFace.PositiveX] = face };
+    var actual = ProjectShockGL.Rendering.BrushBoxMesh.Build(size, scale, 2, settings);
+    Check(actual.Indices.SequenceEqual(baseline.Indices));
+    for (var i = 0; i < actual.Vertices.Length; i++)
+        if (i >= 32 || i % 8 < 6) Check(actual.Vertices[i] == baseline.Vertices[i]);
+    Check(new Vector2(actual.Vertices[6], actual.Vertices[7]) == new Vector2(0.25f, 5.5f));
+    Check(new Vector2(actual.Vertices[14], actual.Vertices[15]) == new Vector2(4.25f, 5.5f));
+    var brush = new BrushBox();
+    brush.SetFaces(settings);
+    settings.Clear();
+    Check(brush.Faces[BrushFace.PositiveX] == face);
+    Throws(() => brush.SetFace(BrushFace.PositiveY, new BrushFaceData { TextureScale = Vector2.Zero }));
+    Throws(() => brush.SetFace(BrushFace.PositiveY, new BrushFaceData { TextureOffset = new Vector2(float.NaN) }));
+    Throws(() => brush.SetFaces(new Dictionary<BrushFace, BrushFaceData> { [(BrushFace)99] = face }));
+    Check(brush.Faces.Count == 1 && brush.Faces[BrushFace.PositiveX] == face);
+    brush.SetFace(BrushFace.PositiveX, null);
+    Check(brush.Faces.Count == 0);
+});
+
+RunScene("Brush faces survive map, prefab, duplication and Inspector undo with independent copies", () =>
+{
+    var brush = (BrushBox)SceneObjects.Create(PlaceableType.BrushBox);
+    var face = new BrushFaceData { Texture = "WhitePixel", TextureFormat = TextureFormat.Png,
+        TextureScale = new Vector2(0.5f, 2), TextureOffset = new Vector2(0.25f, -0.5f) };
+    RecordInspector(brush, "Face settings", () => brush.SetFace(BrushFace.PositiveZ, face));
+    UndoRedo.Undo();
+    Check(brush.Faces.Count == 0);
+    UndoRedo.Redo();
+    Check(brush.Faces[BrushFace.PositiveZ] == face);
+    var path = Path.Combine(testRoot, "brush-faces.map");
+    EditorLevelManager.SaveCurrentLevel(path);
+    EditorLevelManager.OpenLevel(path);
+    var loaded = Game.Instance.World.Find<BrushBox>()!;
+    Check(loaded.Faces.Count == 1 && loaded.Faces[BrushFace.PositiveZ] == face);
+    var copy = (BrushBox)EditorLevelManager.DuplicateObject(loaded);
+    Check(copy.Faces[BrushFace.PositiveZ] == face);
+    copy.SetFace(BrushFace.PositiveZ, null);
+    Check(loaded.Faces.Count == 1);
+    var template = EditorLevelManager.CaptureLevel([loaded]).Placeables.Single();
+    var json = Newtonsoft.Json.JsonConvert.SerializeObject(template, JsonHelper.GetSettings());
+    var restored = Newtonsoft.Json.JsonConvert.DeserializeObject<Placeable>(json, JsonHelper.GetSettings())!;
+    var instance = (BrushBox)Prefab.Instantiate(restored, Game.Instance.World);
+    Check(instance.Faces[BrushFace.PositiveZ] == face && instance.Guid != loaded.Guid);
+    instance.SetFace(BrushFace.PositiveZ, face with { TextureOffset = Vector2.One });
+    Check(loaded.Faces[BrushFace.PositiveZ] == face && restored.Brush!.Faces[BrushFace.PositiveZ] == face);
+    var legacy = (BrushBox)LevelManager.CreateObject(Game.Instance.World, new Placeable
+        { Type = PlaceableType.BrushBox, Brush = new BrushBoxData { TextureScale = 3 } });
+    Check(legacy.Faces.Count == 0 && legacy.TextureScale == 3);
+});
+
+RunScene("Brush texture face picking respects rotation, mirrored scale, distance and inside rays", () =>
+{
+    var brush = (BrushBox)SceneObjects.Create(PlaceableType.BrushBox);
+    brush.Size = new Vector3(2, 4, 6);
+    brush.Transform.Position = new Vector3(3, 1, -4);
+    brush.Transform.Rotation = Quaternion.CreateFromYawPitchRoll(0.8f, -0.3f, 0.2f);
+    brush.Transform.Scale = new Vector3(-2, 0.5f, 3);
+    var model = brush.Transform.GetModelMatrix();
+    foreach (var face in Enum.GetValues<BrushFace>())
+    {
+        var axis = (int)face / 2;
+        var sign = (int)face % 2 == 0 ? 1 : -1;
+        var normal = (axis == 0 ? Vector3.UnitX : axis == 1 ? Vector3.UnitY : Vector3.UnitZ) * sign;
+        var surface = Vector3.Transform(normal * brush.Size * 0.5f, model);
+        var outward = Vector3.Normalize(Vector3.TransformNormal(normal, model));
+        var origin = surface + outward * 5;
+        Check(BrushTextureWindow.RayFace(brush, origin, -outward, 20, out var distance, out var hit) && hit == face);
+        Check(MathF.Abs(distance - 5) < 0.0001f);
+        Check(!BrushTextureWindow.RayFace(brush, origin, -outward, 4, out _, out _));
+        Check(BrushTextureWindow.RayFace(brush, brush.Transform.Position, outward, 20, out _, out hit) && hit == face);
+    }
+    Check(!BrushTextureWindow.RayFace(brush, brush.Transform.Position + new Vector3(100), Vector3.UnitX, 10, out _, out _));
+});
+
+RunScene("Brush texture Fit maps exactly one repeat and face edits form independent undo steps", () =>
+{
+    var brush = (BrushBox)SceneObjects.Create(PlaceableType.BrushBox);
+    brush.Size = new Vector3(2, 4, 6);
+    brush.Transform.Scale = new Vector3(-2, 0.5f, 3);
+    var original = new BrushFaceData { Texture = "WhitePixel", TextureOffset = new Vector2(0.3f), TextureScale = new Vector2(2) };
+    brush.SetFace(BrushFace.PositiveX, original);
+    UndoRedo.Clear();
+    foreach (var face in Enum.GetValues<BrushFace>())
+    {
+        var fit = BrushTextureWindow.Fit(brush, face);
+        Check(fit.TextureOffset == Vector2.Zero);
+        var mesh = ProjectShockGL.Rendering.BrushBoxMesh.Build(brush.Size, brush.Transform.Scale, brush.TextureScale,
+            new Dictionary<BrushFace, BrushFaceData> { [face] = fit });
+        var at = (int)face * 32;
+        Check(MathF.Abs(mesh.Vertices[at + 14] - 1) < 0.0001f && MathF.Abs(mesh.Vertices[at + 7] - 1) < 0.0001f);
+    }
+    BrushTextureWindow.Apply(brush, BrushFace.PositiveX, BrushTextureWindow.Fit(brush, BrushFace.PositiveX), "Fit");
+    var fitted = brush.Faces[BrushFace.PositiveX];
+    Check(fitted.Texture == original.Texture);
+    BrushTextureWindow.Apply(brush, BrushFace.PositiveX, fitted with { TextureOffset = new Vector2(0.1f) }, "Offset", true);
+    BrushTextureWindow.Apply(brush, BrushFace.PositiveX, fitted with { TextureOffset = new Vector2(0.2f) }, "Offset", true);
+    UndoRedo.CommitPending();
+    UndoRedo.Undo();
+    Check(brush.Faces[BrushFace.PositiveX] == fitted);
+    UndoRedo.Undo();
+    Check(brush.Faces[BrushFace.PositiveX] == original);
+    UndoRedo.Redo();
+    Check(brush.Faces[BrushFace.PositiveX] == fitted);
+    BrushTextureWindow.Apply(brush, BrushFace.PositiveX, null, "Reset");
+    Check(!brush.Faces.ContainsKey(BrushFace.PositiveX));
+    UndoRedo.Undo();
+    Check(brush.Faces[BrushFace.PositiveX] == fitted);
+});
+
+Run("Screen selection bounds rotate with objects and clip edges at the camera frustum", () =>
+{
+    var projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 2, 1, 0.1f, 100);
+    var screen = new Vector2(800);
+    var min = new Vector3(-0.5f);
+    var max = new Vector3(0.5f);
+    var model = Matrix4x4.CreateTranslation(0, 0, -5);
+    var edges = SelectionBounds.Project(min, max, model, projection, screen);
+    Check(edges.Length == 12);
+    var rotated = SelectionBounds.Project(min, max,
+        Matrix4x4.CreateRotationY(0.7f) * model, projection, screen);
+    Check(rotated.Length == 12 && !edges.SequenceEqual(rotated));
+    Check(SelectionBounds.Project(min, max, Matrix4x4.CreateTranslation(0, 0, 5), projection, screen).Length == 0);
+    var crossing = SelectionBounds.Project(min, max,
+        Matrix4x4.CreateScale(0.1f, 0.1f, 1) * Matrix4x4.CreateTranslation(0, 0, -0.4f), projection, screen);
+    Check(crossing.Length > 0);
+    foreach (var edge in crossing)
+        foreach (var point in new[] { edge.A, edge.B })
+            Check(float.IsFinite(point.X) && float.IsFinite(point.Y) &&
+                point.X >= -0.01f && point.X <= 800.01f && point.Y >= -0.01f && point.Y <= 800.01f);
+});
+
 Run("BrushBox dimensions keep collider and transformed bounds aligned", () =>
 {
     EditorLevelManager.NewLevel();
@@ -3441,6 +3578,54 @@ if (args.Contains("--imgui"))
             draw();
             ImGuiNET.ImGui.Render();
         }
+        RunScene("Real Texture window draws face controls, fits through its button and restores with undo", () =>
+        {
+            var brush = (BrushBox)SceneObjects.Create(PlaceableType.BrushBox);
+            brush.Size = new Vector3(2, 4, 6);
+            Selection.Object = brush;
+            UndoRedo.Clear();
+            BrushTextureWindow.Open = true;
+            try
+            {
+                void DrawTexture() => BrushTextureWindow.Draw(new Vector2(600, 1000), Vector2.Zero, new Vector2(600, 1000));
+                Frame(DrawTexture);
+                Check(ImGuiNET.ImGui.GetDrawData().TotalVtxCount > 0);
+                for (var y = 200; y < 330 && !brush.Faces.ContainsKey(BrushFace.PositiveZ); y += 3)
+                {
+                    Frame(DrawTexture, 20, y, true);
+                    Frame(DrawTexture, 20, y, false);
+                }
+                Check(brush.Faces.TryGetValue(BrushFace.PositiveZ, out var settings) &&
+                    settings.TextureScale == new Vector2(0.5f, 0.25f));
+                UndoRedo.Undo();
+                Check(brush.Faces.Count == 0);
+                UndoRedo.Redo();
+                Check(brush.Faces[BrushFace.PositiveZ].TextureScale == new Vector2(0.5f, 0.25f));
+            }
+            finally { BrushTextureWindow.Open = false; }
+        });
+        RunScene("Screen selection bounds draw in ImGui and disappear while the UI Editor is open", () =>
+        {
+            var brush = (BrushBox)SceneObjects.Create(PlaceableType.BrushBox);
+            brush.Transform.Position = ProjectShockGL.Rendering.Camera.Active.Transform.Position + ProjectShockGL.Rendering.Camera.Active.Transform.Forward * 5;
+            Selection.Object = brush;
+            var previousUI = UIEditor.Open;
+            try
+            {
+                int DrawBounds(bool uiOpen)
+                {
+                    UIEditor.Open = uiOpen;
+                    io.AddMousePosEvent(-100, -100);
+                    ImGuiNET.ImGui.NewFrame();
+                    SelectionBounds.Draw(io.DisplaySize, Vector2.Zero, io.DisplaySize);
+                    ImGuiNET.ImGui.Render();
+                    return ImGuiNET.ImGui.GetDrawData().TotalVtxCount;
+                }
+                Check(DrawBounds(false) > 0);
+                Check(DrawBounds(true) == 0);
+            }
+            finally { UIEditor.Open = previousUI; }
+        });
         RunScene("Real Scene Ctrl-click toggles membership and multiple Inspector does not edit objects", () =>
         {
             var a = SceneObjects.Create(PlaceableType.BrushBox);

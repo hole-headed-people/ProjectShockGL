@@ -86,7 +86,7 @@ public static class EditorLevelManager
                     Movable = brush.Movable,
                     SimulatePhysics = brush.SimulatePhysics,
                     Size = brush.Size, Texture = brush.TextureName, TextureFormat = brush.TextureFormat,
-                    TextureScale = brush.TextureScale, Color = brush.Color, Lit = brush.Lit
+                    TextureScale = brush.TextureScale, Color = brush.Color, Lit = brush.Lit, Faces = brush.CaptureFaces()
                 } : null,
                 
                 Position = obj.Transform.Position, Rotation = obj.Transform.Rotation, Scale = obj.Transform.Scale,

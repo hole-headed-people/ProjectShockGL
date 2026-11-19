@@ -279,7 +279,8 @@ public static class LevelManager
     {
         var data = placement.Brush ?? new BrushBoxData();
         
-        BrushBoxMesh.Build(data.Size, placement.Scale, data.TextureScale);
+        if (data.Faces == null) throw new InvalidDataException("BrushBox Faces cannot be null.");
+        BrushBoxMesh.Build(data.Size, placement.Scale, data.TextureScale, data.Faces);
 
         if (!Enum.IsDefined(data.TextureFormat) || !float.IsFinite(data.Color.R) || !float.IsFinite(data.Color.G) ||
             !float.IsFinite(data.Color.B) || !float.IsFinite(data.Color.A))
@@ -287,21 +288,23 @@ public static class LevelManager
             throw new InvalidDataException("Invalid BrushBox material.");
         }
         
-        if (!string.IsNullOrWhiteSpace(data.Texture) && data.Texture != "WhitePixel")
+        var textures = Enumerable.Range(0, 6).Select(index =>
         {
-            var extension = data.TextureFormat == TextureFormat.Png ? ".png" : ".jpg";
-            var path = Path.Combine(Content.Path, "Textures", data.Texture + extension);
-            
+            data.Faces.TryGetValue((BrushFace)index, out var face);
+            return BrushFaceData.GetTexture(face, data.Texture, data.TextureFormat);
+        }).Distinct();
+        foreach (var texture in textures)
+        {
+            if (texture.Name == "WhitePixel") continue;
+            var extension = texture.Format == TextureFormat.Png ? ".png" : ".jpg";
+            var path = Path.Combine(Content.Path, "Textures", texture.Name + extension);
             if (!File.Exists(path))
             {
-                throw new FileNotFoundException("BrushBox texture was not found.", path);
+                throw new FileNotFoundException("BrushBox face texture was not found.", path);
             }
-            
             using var stream = File.OpenRead(path);
-            
             StbImageSharp.ImageResult.FromStream(stream, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
         }
-        
         var brush = world.Spawn<BrushBox>(guid);
         
         brush.Size = data.Size;
@@ -310,6 +313,7 @@ public static class LevelManager
         brush.TextureName = data.Texture;
         brush.TextureFormat = data.TextureFormat;
         brush.TextureScale = data.TextureScale;
+        brush.SetFaces(data.Faces);
         brush.Color = data.Color;
         brush.Lit = data.Lit;
         

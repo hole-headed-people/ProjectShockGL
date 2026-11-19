@@ -5,6 +5,7 @@ namespace ProjectShockGL.Core;
 
 public sealed class BrushBoxData
 {
+    public Dictionary<BrushFace, BrushFaceData> Faces { get; init; } = [];
     public bool Movable { get; init; }
     public bool SimulatePhysics { get; init; }
     public Vector3 Size { get; init; } = Vector3.One;

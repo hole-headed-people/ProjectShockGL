@@ -513,7 +513,7 @@ void Render()
     brushWorld.Update(0);
     Camera.Active.Orthographic = true;
     Camera.Active.OrthoSize = 4;
-    void CheckBrushPattern()
+    void CheckBrushPattern(bool inverted = false)
     {
         graphics.BeginDraw(Camera.Active);
         var queue = new RenderQueue();
@@ -524,7 +524,7 @@ void Render()
         {
             var pixel = new byte[4];
             unsafe { fixed (byte* p = pixel) gl.ReadPixels(275 + sample * 30, 120, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, p); }
-            Check(sample % 2 == 0 ? pixel[0] > 240 : pixel[0] < 10);
+            Check((sample % 2 == 0) != inverted ? pixel[0] > 240 : pixel[0] < 10);
         }
         Check(gl.GetError() == GLEnum.NoError);
     }
@@ -534,6 +534,27 @@ void Render()
     brush.Transform.Scale = Vector3.One;
     brush.Size = new Vector3(4, 2, 0.5f);
     CheckBrushPattern();
+    brush.SetFace(ProjectShockGL.Core.BrushFace.PositiveZ,
+        new ProjectShockGL.Core.BrushFaceData { Texture = "WhitePixel" });
+    graphics.BeginDraw(Camera.Active);
+    var faceQueue = new RenderQueue();
+    brushWorld.Render(faceQueue);
+    faceQueue.Flush(graphics);
+    gl.Finish();
+    var facePixel = new byte[4];
+    unsafe { fixed (byte* p = facePixel) gl.ReadPixels(300, 120, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, p); }
+    Check(facePixel[0] > 240 && facePixel[1] > 240 && facePixel[2] > 240);
+    var faceBatches = (Array)typeof(ProjectShockGL.Core.BrushBox).GetField("_faceBatches",
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(brush)!;
+    Check(faceBatches.Length == 2);
+    var oldFaceMeshes = faceBatches.Cast<object>().Select(batch => (Mesh)batch.GetType().GetProperty("Mesh")!.GetValue(batch)!).ToArray();
+    brush.SetFace(ProjectShockGL.Core.BrushFace.PositiveZ,
+        new ProjectShockGL.Core.BrushFaceData { TextureOffset = new Vector2(0.5f, 0) });
+    CheckBrushPattern(inverted: true);
+    Check(oldFaceMeshes.All(mesh => mesh.IsDisposed));
+    brush.SetFace(ProjectShockGL.Core.BrushFace.PositiveZ, null);
+    CheckBrushPattern();
+    Console.WriteLine("PASS: Brush face textures and UV offsets render independently and replaced face meshes are released");
     var brushMesh = (Mesh)typeof(ProjectShockGL.Core.BrushBox).GetField("_mesh",
         System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(brush)!;
     var brushVao = (uint)typeof(Mesh).GetField("_vao",

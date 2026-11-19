@@ -168,12 +168,7 @@ public static class Editor
     {
         ProjectShockGL.Core.Game.Instance.World.DebugRenderSelected(new DebugDraw(graphics), Selection.Objects);
         
-        foreach (var selected in Selection.Targets.Where(o => o.IsEditorVisible))
-        {
-            var bounds = selected.GetLocalBounds();
-            graphics.DrawBoxWireframe(bounds.min, bounds.max, selected.Transform.GetModelMatrix(), Color.White);
 
-        }
         OutputLinks.Render(graphics, ProjectShockGL.Core.Game.Instance.World, Selection.Objects);
     }
 
@@ -191,6 +186,7 @@ public static class Editor
         DrawMenuBar();
         DrawToolbar();
         DrawSceneHints();
+        SelectionBounds.Draw(_windowSize, SceneMin, SceneMax);
         DrawHierarchy();
         
         ImGui.SetNextWindowPos(new Vector2(0, 82 + (_windowSize.Y - 110) * 0.32f));
@@ -214,6 +210,7 @@ public static class Editor
         Inspector.Draw();
         EnvironmentWindow.Draw(ref _showEnvironment);
         UIEditor.Draw();
+        BrushTextureWindow.Draw(_windowSize, SceneMin, SceneMax);
         
         DrawStatus();
         DrawPopups();
@@ -223,11 +220,12 @@ public static class Editor
                          _pendingAction == null && _error == null &&
                          !ImGui.IsMouseDown(ImGuiMouseButton.Right) && !ImGui.IsMouseDown(ImGuiMouseButton.Middle);
         
-        var owned = ObjectManipulator.Draw(_windowSize, SceneMin, SceneMax, allowScene);
+        var owned = !BrushTextureWindow.Open && ObjectManipulator.Draw(_windowSize, SceneMin, SceneMax, allowScene);
 
         if (allowScene && !owned && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
-            ObjectPicker.PickAt(mouse, _windowSize, ImGui.GetIO().KeyCtrl || Input.IsKey(Key.ControlLeft) || Input.IsKey(Key.ControlRight));
+            if (BrushTextureWindow.Open) BrushTextureWindow.PickAt(mouse, _windowSize);
+            else ObjectPicker.PickAt(mouse, _windowSize, ImGui.GetIO().KeyCtrl || Input.IsKey(Key.ControlLeft) || Input.IsKey(Key.ControlRight));
         }
         
         _imGui.Render();
@@ -518,6 +516,12 @@ public static class Editor
                 DeleteSelection();
             }
             
+            if (ImGui.MenuItem("Texture", "", BrushTextureWindow.Open))
+            {
+                ObjectManipulator.Commit();
+                UndoRedo.CommitPending();
+                BrushTextureWindow.Open = !BrushTextureWindow.Open;
+            }
             if (ImGui.MenuItem("UI Editor", "", UIEditor.Open)) UIEditor.Open = !UIEditor.Open;
 
             if (ImGui.MenuItem("Environment", "", _showEnvironment))

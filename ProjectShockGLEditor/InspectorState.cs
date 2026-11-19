@@ -40,7 +40,7 @@ public static class InspectorState
                 Movable = brush.Movable,
                 SimulatePhysics = brush.SimulatePhysics,
                 Size = brush.Size, Texture = brush.TextureName, TextureFormat = brush.TextureFormat,
-                TextureScale = brush.TextureScale, Color = brush.Color, Lit = brush.Lit
+                TextureScale = brush.TextureScale, Color = brush.Color, Lit = brush.Lit, Faces = brush.CaptureFaces()
             } : null,
             Outputs = obj is Entity entity ? entity.Outputs.ToArray() : []
         };
@@ -79,6 +79,7 @@ public static class InspectorState
             brush.TextureName = data.Texture;
             brush.TextureFormat = data.TextureFormat;
             brush.TextureScale = data.TextureScale;
+            brush.SetFaces(data.Faces);
             brush.Color = data.Color;
             brush.Lit = data.Lit;
         }

@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Collections.ObjectModel;
 using ProjectShockGL.Rendering;
 
 namespace ProjectShockGL.Core;
@@ -26,7 +27,11 @@ public class BrushBox : Object
         get => GetComponent<Rigidbody>() is { IsEnabled: true, IsDestroyed: false };
         set
         {
-            if (IsRuntimeStaticLocked) return;
+            if (IsRuntimeStaticLocked)
+            {
+                return;
+            }
+            
             if (!value)
             {
                 RemoveComponent<Rigidbody>();
@@ -59,14 +64,89 @@ public class BrushBox : Object
     
     private float _meshTextureScale;
     
-    private (string Name, TextureFormat Format)? _failedTexture;
+    private readonly Dictionary<BrushFace, BrushFaceData> _faces = [];
+    private readonly HashSet<(string Name, TextureFormat Format)> _failedTextures = [];
+    
+    private FaceBatch[] _faceBatches = [];
+    
+    private int _facesVersion;
+    private int _meshFacesVersion = -1;
+    
+    private (string Name, TextureFormat Format) _meshTexture;
+
+    public IReadOnlyDictionary<BrushFace, BrushFaceData> Faces { get; }
+
+    private sealed record FaceBatch(Mesh Mesh, (string Name, TextureFormat Format) Texture);
+
+    public BrushBox()
+    {
+        Faces = new ReadOnlyDictionary<BrushFace, BrushFaceData>(_faces);
+    }
+
+    public void SetFace(BrushFace face, BrushFaceData? settings)
+    {
+        if (!Enum.IsDefined(face))
+        {
+            throw new ArgumentOutOfRangeException(nameof(face));
+        }
+        
+        settings?.Validate();
+
+        if (settings == null)
+        {
+            _faces.Remove(face);
+        }
+        else
+        {
+            _faces[face] = settings with { };
+        }
+        
+        _facesVersion++;
+        _failedTextures.Clear();
+    }
+
+    public void SetFaces(IReadOnlyDictionary<BrushFace, BrushFaceData> faces)
+    {
+        ArgumentNullException.ThrowIfNull(faces);
+        
+        var copy = faces.ToArray();
+        
+        foreach (var (face, settings) in copy)
+        {
+            if (!Enum.IsDefined(face) || settings == null)
+            {
+                throw new InvalidDataException("Invalid BrushBox face settings.");
+            }
+            
+            settings.Validate();
+        }
+        
+        _faces.Clear();
+
+        foreach (var (face, settings) in copy)
+        {
+            _faces.Add(face, settings with { });
+        }
+        
+        _facesVersion++;
+        _failedTextures.Clear();
+    }
+
+    public Dictionary<BrushFace, BrushFaceData> CaptureFaces()
+    {
+        return _faces.ToDictionary(pair => pair.Key, pair => pair.Value with { });
+    }
     
     public Vector3 Size
     {
         get => _size;
         set
         {
-            if (IsRuntimeStaticLocked) return;
+            if (IsRuntimeStaticLocked)
+            {
+                return;
+            }
+            
             BrushBoxMesh.Validate(value, nameof(Size));
             
             _size = value;
@@ -79,8 +159,10 @@ public class BrushBox : Object
     }
 
     public string TextureName { get; set; } = "WhitePixel";
+    
     public TextureFormat TextureFormat { get; set; } = TextureFormat.Jpeg;
     public Color Color { get; set; } = Color.White;
+    
     public bool Lit { get; set; } = true;
     
     public float TextureScale
@@ -109,51 +191,95 @@ public class BrushBox : Object
         IsStatic = !SimulatePhysics;
     }
 
-    private void Prepare(BrushRenderer renderer)
+    private void Prepare()
     {
-        if (_mesh == null || _meshSize != Size || _meshScale != Transform.Scale || _meshTextureScale != TextureScale)
+        var textureKey = (TextureName, TextureFormat);
+
+        if (_mesh != null && _meshSize == Size && _meshScale == Transform.Scale &&
+            _meshTextureScale == TextureScale && _meshFacesVersion == _facesVersion && _meshTexture == textureKey)
         {
-            var data = BrushBoxMesh.Build(Size, Transform.Scale, TextureScale);
-            var mesh = Content.CreateMesh(data.Vertices, data.Indices);
+            return;
+        }
+
+        var data = BrushBoxMesh.Build(Size, Transform.Scale, TextureScale, _faces);
+        var created = new List<Mesh>();
+        
+        try
+        {
+            var fullMesh = Content.CreateMesh(data.Vertices, data.Indices);
+            created.Add(fullMesh);
             
-            _mesh?.Dispose();
+            var groups = Enumerable.Range(0, 6).GroupBy(index =>
+            {
+                _faces.TryGetValue((BrushFace)index, out var settings);
+                return BrushFaceData.GetTexture(settings, TextureName, TextureFormat);
+            }).ToArray();
             
-            _mesh = mesh;
+            var batches = groups.Select(group =>
+            {
+                var mesh = groups.Length == 1 ? fullMesh : Content.CreateMesh(data.Vertices,
+                    group.SelectMany(index => data.Indices.Skip(index * 6).Take(6)).ToArray());
+                if (groups.Length != 1)
+                {
+                    created.Add(mesh);
+                }
+                
+                return new FaceBatch(mesh, group.Key);
+            }).ToArray();
+
+            ReleaseMeshes();
+            
+            _mesh = fullMesh;
+            _faceBatches = batches;
             
             _meshSize = Size;
             _meshScale = Transform.Scale;
-            
             _meshTextureScale = TextureScale;
+            _meshFacesVersion = _facesVersion;
+            
+            _meshTexture = textureKey;
+            
+            _failedTextures.Clear();
         }
-        
-        renderer.Mesh = _mesh;
-        
-        var textureKey = (TextureName, TextureFormat);
-        
-        if (_failedTexture != textureKey)
+        catch
         {
-            try
-            {
-                renderer.Texture = string.IsNullOrWhiteSpace(TextureName) || TextureName == "WhitePixel"
-                    ? Content.GetWhitePixel()
-                    : Content.LoadTexture(TextureName, TextureFormat)
-                        ?? throw new FileNotFoundException($"BrushBox texture '{TextureName}' ({TextureFormat}) was not found.");
-                
-                _failedTexture = null;
-            }
-            catch (Exception error) when (Application.IsEditor)
-            {
-                Log.PrintWarning($"BrushBox '{Name}', texture '{TextureName}': {error.Message}");
-                renderer.Texture = Content.GetWhitePixel();
-                
-                _failedTexture = textureKey;
-            }
+            Cleanup.Run(created.Select<Mesh, Action>(mesh => mesh.Dispose).ToArray());
+            
+            throw;
         }
-        
-        renderer.Color = Color;
-        renderer.Lit = Lit;
     }
 
+    private Texture ResolveTexture((string Name, TextureFormat Format) key)
+    {
+        if (Application.IsEditor && _failedTextures.Contains(key))
+        {
+            return Content.GetWhitePixel();
+        }
+        
+        try
+        {
+            return key.Name == "WhitePixel" ? Content.GetWhitePixel() : Content.LoadTexture(key.Name, key.Format)
+                ?? throw new FileNotFoundException($"BrushBox texture '{key.Name}' ({key.Format}) was not found.");
+        }
+        catch (Exception error) when (Application.IsEditor)
+        {
+            Log.PrintWarning($"BrushBox '{Name}', texture '{key.Name}': {error.Message}");
+            
+            _failedTextures.Add(key);
+            
+            return Content.GetWhitePixel();
+        }
+    }
+
+    private void ReleaseMeshes()
+    {
+        var owned = _faceBatches.Select(batch => batch.Mesh).Append(_mesh).OfType<Mesh>().Distinct().ToArray();
+        
+        _faceBatches = [];
+        _mesh = null;
+        
+        Cleanup.Run(owned.Select<Mesh, Action>(mesh => mesh.Dispose).ToArray());
+    }
     public override void Destroy()
     {
         try
@@ -164,8 +290,7 @@ public class BrushBox : Object
         {
             if (IsDestroyed)
             {
-                _mesh?.Dispose();
-                _mesh = null;
+                ReleaseMeshes();
             }
         }
     }
@@ -174,9 +299,25 @@ public class BrushBox : Object
     {
         public override void Render(RenderQueue queue)
         {
-            ((BrushBox)Owner).Prepare(this);
+            var brush = (BrushBox)Owner;
+            brush.Prepare();
             
-            base.Render(queue);
+            try
+            {
+                foreach (var batch in brush._faceBatches)
+                {
+                    Mesh = batch.Mesh;
+                    Texture = brush.ResolveTexture(batch.Texture);
+                    Color = brush.Color;
+                    Lit = brush.Lit;
+                    
+                    base.Render(queue);
+                }
+            }
+            finally
+            {
+                Mesh = brush._mesh;
+            }
         }
     }
 }

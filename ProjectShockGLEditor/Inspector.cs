@@ -159,6 +159,14 @@ public static class Inspector
             Finish("TextureScale");
             
             ImGui.TextUnformatted("Texture scale = repeats per world unit");
+
+            if (ImGui.Button("Texture..."))
+            {
+                ObjectManipulator.Commit();
+                UndoRedo.CommitPending();
+                BrushTextureWindow.Open = true;
+            }
+
             
             if (ImGui.BeginCombo("Texture", $"{brush.TextureName} ({brush.TextureFormat})"))
             {

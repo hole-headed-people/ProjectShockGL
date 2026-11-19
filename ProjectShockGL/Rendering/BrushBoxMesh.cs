@@ -1,10 +1,11 @@
 using System.Numerics;
+using ProjectShockGL.Core;
 
 namespace ProjectShockGL.Rendering;
 
 public static class BrushBoxMesh
 {
-    public static (float[] Vertices, uint[] Indices) Build(Vector3 size, Vector3 scale, float textureScale)
+    public static (float[] Vertices, uint[] Indices) Build(Vector3 size, Vector3 scale, float textureScale, IReadOnlyDictionary<BrushFace, BrushFaceData>? faceSettings = null)
     {
         Validate(size, nameof(size));
         Validate(Vector3.Abs(scale), nameof(scale));
@@ -14,10 +15,19 @@ public static class BrushBoxMesh
             throw new ArgumentOutOfRangeException(nameof(textureScale));
         }
         
-        var worldSize = Vector3.Abs(size * scale) * textureScale;
+        var worldSize = Vector3.Abs(size * scale);
         
         Validate(worldSize, nameof(scale));
         
+        if (faceSettings != null)
+        {
+            foreach (var (face, settings) in faceSettings)
+            {
+                if (!Enum.IsDefined(face) || settings == null)
+                    throw new InvalidDataException("Invalid BrushBox face settings.");
+                settings.Validate();
+            }
+        }
         var vertices = new float[24 * 8];
         var indices = new uint[36];
         
@@ -37,8 +47,14 @@ public static class BrushBoxMesh
             var center = normal * size * 0.5f;
             var du = u * size * 0.5f;
             var dv = v * size * 0.5f;
-            var repeatsU = Vector3.Dot(Vector3.Abs(u), worldSize);
-            var repeatsV = Vector3.Dot(Vector3.Abs(v), worldSize);
+            var settings = faceSettings != null && faceSettings.TryGetValue((BrushFace)f, out var face) ? face : null;
+            var density = settings?.TextureScale ?? new Vector2(textureScale);
+            var offset = settings?.TextureOffset ?? Vector2.Zero;
+            var repeatsU = Vector3.Dot(Vector3.Abs(u), worldSize) * density.X;
+            var repeatsV = Vector3.Dot(Vector3.Abs(v), worldSize) * density.Y;
+            if (!float.IsFinite(repeatsU) || !float.IsFinite(repeatsV) ||
+                !float.IsFinite(repeatsU + offset.X) || !float.IsFinite(repeatsV + offset.Y))
+                throw new InvalidDataException("Brush face UV coordinates must be finite.");
             
             Vector3[] corners = [center - du - dv, center + du - dv, center + du + dv, center - du + dv];
             Vector2[] uv = [new(0, repeatsV), new(repeatsU, repeatsV), new(repeatsU, 0), Vector2.Zero];
@@ -49,7 +65,7 @@ public static class BrushBoxMesh
                 
                 vertices[at] = corners[c].X; vertices[at + 1] = corners[c].Y; vertices[at + 2] = corners[c].Z;
                 vertices[at + 3] = normal.X; vertices[at + 4] = normal.Y; vertices[at + 5] = normal.Z;
-                vertices[at + 6] = uv[c].X; vertices[at + 7] = uv[c].Y;
+                vertices[at + 6] = uv[c].X + offset.X; vertices[at + 7] = uv[c].Y + offset.Y;
             }
             
             var first = (uint)(f * 4);
