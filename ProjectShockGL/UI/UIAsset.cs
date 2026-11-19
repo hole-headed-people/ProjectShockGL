@@ -11,7 +11,7 @@ public sealed class UIAsset
     public int Version { get; set; } = 1;
     public WidgetData Root { get; set; } = new();
 
-    public Widget Instantiate(Canvas canvas, Widget? parent = null)
+    public Widget Instantiate(Canvas canvas, Widget? parent = null, bool enableActions = true)
     {
         ArgumentNullException.ThrowIfNull(canvas);
 
@@ -31,6 +31,28 @@ public sealed class UIAsset
         {
             Root.Apply(root);
             root.SetAsScreenRoot();
+            
+            var widgets = new Dictionary<Guid, Widget>();
+            
+            void Collect(Widget widget)
+            {
+                if (widget.Id == Guid.Empty || !widgets.TryAdd(widget.Id, widget))
+                {
+                    throw new InvalidDataException("UI widget IDs must be nonempty and unique within the screen.");
+                }
+
+                foreach (var child in widget.Children)
+                {
+                    Collect(child);
+                }
+            }
+            
+            Collect(root);
+            
+            foreach (var button in widgets.Values.OfType<Button>())
+            {
+                button.BindActions(root, widgets, enableActions);
+            }
             
             return root;
         }
@@ -53,6 +75,8 @@ public sealed class UIAsset
 
 public sealed class WidgetData
 {
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public List<UIActionCall> ClickActions { get; set; } = [];
     public string Type { get; set; } = "Widget";
     public string Name { get; set; } = string.Empty;
     public Vector2 Position { get; set; }
@@ -75,7 +99,7 @@ public sealed class WidgetData
     public WidgetData? Body { get; set; }
     public List<WidgetData> Children { get; set; } = [];
 
-    internal Type GetWidgetType() => Type switch
+    public Type GetWidgetType() => Type switch
     {
         "Widget" => typeof(Widget),
         "Image" => typeof(Image),
@@ -85,6 +109,29 @@ public sealed class WidgetData
         _ => throw new InvalidDataException($"Unsupported UI widget type '{Type}'.")
     };
 
+    public IEnumerable<WidgetData> Traverse()
+    {
+        yield return this;
+        foreach (var child in new[] { ButtonImage, ButtonText, Body }.OfType<WidgetData>().Concat(Children))
+        {
+            foreach (var node in child.Traverse()) yield return node;
+        }
+    }
+
+    public void RegenerateIds()
+    {
+        var nodes = Traverse().ToArray();
+        var ids = nodes.ToDictionary(node => node.Id, _ => Guid.NewGuid());
+        foreach (var node in nodes)
+        {
+            node.Id = ids[node.Id];
+            foreach (var action in node.ClickActions)
+            {
+                if (action.Target == UIActionTarget.Widget && ids.TryGetValue(action.TargetId, out var replacement))
+                    action.TargetId = replacement;
+            }
+        }
+    }
     private static string[] PropertyNames(Widget widget) => widget switch
     {
         Image => ["Color", "DrawMode", "Border", "BorderScale", "FillCenter", "EdgeMode", "CenterMode"],
@@ -99,7 +146,7 @@ public sealed class WidgetData
         var rect = widget.Rect.AuthoredRect;
         var data = new WidgetData
         {
-            Type = widget.GetType().Name, Name = widget.Name,
+            Id = widget.Id, Type = widget.GetType().Name, Name = widget.Name,
             Position = rect.Position, Size = rect.Size,
             Anchor = rect.Anchor, Pivot = rect.Pivot,
             Visible = widget.Visible, IsEnabled = widget.IsEnabled, HitTestVisible = widget.HitTestVisible,
@@ -137,6 +184,7 @@ public sealed class WidgetData
         
         if (widget is Button button)
         {
+            data.ClickActions = button.ClickActions.Select(action => action.Copy()).ToList();
             data.ButtonImage = Capture(button.Background);
             data.ButtonText = Capture(button.Text);
         }
@@ -181,6 +229,7 @@ public sealed class WidgetData
             throw new InvalidDataException("UI coordinates must be finite.");
         }
 
+        widget.Id = Id;
         widget.Name = Name;
         widget.Rect.Position = Position;
         widget.Rect.Size = Size;
@@ -217,6 +266,8 @@ public sealed class WidgetData
         
         if (widget is Button button)
         {
+            button.ClickActions.Clear();
+            button.ClickActions.AddRange(ClickActions.Select(action => action.Copy()));
             ButtonImage?.Apply(button.Background);
             ButtonText?.Apply(button.Text);
         }

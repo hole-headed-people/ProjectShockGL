@@ -24,6 +24,9 @@ public class Text : Widget
     public HorizontalAlignment HorizontalAlignment { get; set; } = HorizontalAlignment.Left;
     public VerticalAlignment VerticalAlignment { get; set; } = VerticalAlignment.Top;
 
+    [UIAction("Text/Set text")]
+    public void SetText(string text) => Content = text;
+
     public Text()
     {
         HitTestVisible = false;

@@ -239,6 +239,7 @@ public static class UIEditor
         var before = Capture();
         var json = JsonConvert.SerializeObject(_selected, JsonHelper.GetSettings());
         var copy = JsonConvert.DeserializeObject<WidgetData>(json, JsonHelper.GetSettings())!;
+        copy.RegenerateIds();
         var existingNames = new HashSet<string>(StringComparer.Ordinal);
         void CollectNames(WidgetData node)
         {
@@ -795,7 +796,7 @@ public static class UIEditor
             canvas.Resize(_size);
             try
             {
-                var root = _asset.Instantiate(canvas);
+                var root = _asset.Instantiate(canvas, enableActions: false);
                 canvas.Update(0);
                 var map = new Dictionary<WidgetData, Widget>();
                 Bind(_asset.Root, root, map);
@@ -1060,6 +1061,7 @@ public static class UIEditor
                 ColorField(data, "HoverColor", Color.LightGray);
                 ColorField(data, "PressedColor", Color.Gray);
                 ColorField(data, "DisabledColor", Color.DarkGray);
+                DrawClickActions(data);
                 
                 break;
             case "TextScrollView":
@@ -1076,6 +1078,154 @@ public static class UIEditor
         }
     }
 
+    private static void DrawClickActions(WidgetData data)
+    {
+        ImGui.Separator();
+        ImGui.TextUnformatted("Click / Actions");
+        if (ImGui.Button("Add action"))
+        {
+            data.ClickActions.Add(new UIActionCall { TargetId = data.Id });
+            Changed();
+        }
+
+        var choices = new List<(WidgetData Node, string Label)>();
+        void Collect(WidgetData node, string path)
+        {
+            var name = string.IsNullOrWhiteSpace(node.Name) ? node.Type : node.Name;
+            path = path.Length == 0 ? name : path + "/" + name;
+            choices.Add((node, path + " [" + node.Type + "]"));
+            foreach (var (child, _) in Nodes(node)) Collect(child, path);
+        }
+        Collect(_asset.Root, "");
+        for (var i = 0; i < data.ClickActions.Count; i++)
+        {
+            var action = data.ClickActions[i];
+            ImGui.PushID("ClickAction/" + i);
+            ImGui.TextUnformatted($"Action {i + 1}");
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Remove"))
+            {
+                data.ClickActions.RemoveAt(i);
+                Changed();
+                ImGui.PopID();
+                break;
+            }
+            ImGui.SameLine();
+            ImGui.BeginDisabled(i == 0);
+            var up = ImGui.SmallButton("Up");
+            ImGui.EndDisabled();
+            ImGui.SameLine();
+            ImGui.BeginDisabled(i == data.ClickActions.Count - 1);
+            var down = ImGui.SmallButton("Down");
+            ImGui.EndDisabled();
+            if (up || down)
+            {
+                var other = up ? i - 1 : i + 1;
+                (data.ClickActions[i], data.ClickActions[other]) = (data.ClickActions[other], data.ClickActions[i]);
+                Changed();
+                ImGui.PopID();
+                break;
+            }
+
+            var target = choices.FirstOrDefault(choice => choice.Node.Id == action.TargetId);
+            var label = action.Target == UIActionTarget.Global ? "Global actions" :
+                target.Node == null ? "<Missing widget>" : target.Label;
+            if (ImGui.BeginCombo("Target", label))
+            {
+                void SelectTarget(UIActionTarget kind, Guid id)
+                {
+                    action.Target = kind;
+                    action.TargetId = id;
+                    action.Method = "";
+                    action.Parameter = null;
+                    Changed();
+                }
+                if (ImGui.Selectable("Global actions", action.Target == UIActionTarget.Global))
+                    SelectTarget(UIActionTarget.Global, Guid.Empty);
+                foreach (var choice in choices)
+                {
+                    ImGui.PushID(choice.Node.Id.ToString());
+                    if (ImGui.Selectable(choice.Label, action.Target == UIActionTarget.Widget && action.TargetId == choice.Node.Id))
+                        SelectTarget(UIActionTarget.Widget, choice.Node.Id);
+                    ImGui.PopID();
+                }
+                ImGui.EndCombo();
+            }
+
+            // Resolve again because the target may have changed in this frame.
+            target = choices.FirstOrDefault(choice => choice.Node.Id == action.TargetId);
+            var methods = action.Target == UIActionTarget.Global ? UIActionCatalog.GetGlobalMethods() :
+                target.Node == null ? [] : UIActionCatalog.GetWidgetMethods(target.Node.GetWidgetType());
+            var selected = methods.FirstOrDefault(method => method.Id == action.Method);
+            var methodLabel = selected?.Label ?? (string.IsNullOrEmpty(action.Method) ? "<Select method>" : "<Missing method>");
+            if (ImGui.BeginCombo("Method", methodLabel))
+            {
+                foreach (var method in methods)
+                {
+                    ImGui.PushID(method.Id);
+                    if (ImGui.Selectable(method.Label, method.Id == action.Method))
+                    {
+                        action.Method = method.Id;
+                        action.Parameter = method.DefaultParameter();
+                        Changed();
+                    }
+                    ImGui.PopID();
+                }
+                ImGui.EndCombo();
+            }
+            selected = methods.FirstOrDefault(method => method.Id == action.Method);
+            DrawActionParameter(action, selected);
+            if (selected == null && !string.IsNullOrEmpty(action.Method))
+                ImGui.TextWrapped("Method is unavailable. Rebuild the game library or select another method.");
+            ImGui.Separator();
+            ImGui.PopID();
+        }
+    }
+
+    private static void DrawActionParameter(UIActionCall action, UIActionMethod? method)
+    {
+        var type = method?.ParameterType;
+        if (type == null) return;
+        // Keep invalid imported data visible rather than throwing while drawing the Inspector.
+        if (type == typeof(string))
+        {
+            var value = action.Parameter?.Type == JTokenType.String ? action.Parameter.Value<string>()! : "";
+            if (ImGui.InputText("Parameter (string)", ref value, 4096, ImGuiInputTextFlags.NoUndoRedo))
+            {
+                action.Parameter = new JValue(value);
+                Changed();
+            }
+        }
+        else if (type == typeof(bool))
+        {
+            var value = action.Parameter?.Type == JTokenType.Boolean && action.Parameter.Value<bool>();
+            if (ImGui.Checkbox("Parameter (bool)", ref value))
+            {
+                action.Parameter = new JValue(value);
+                Changed();
+            }
+        }
+        else if (type == typeof(int))
+        {
+            var value = action.Parameter?.Type == JTokenType.Integer &&
+                long.TryParse(action.Parameter.ToString(), out var number) && number is >= int.MinValue and <= int.MaxValue ? (int)number : 0;
+            if (ImGui.InputInt("Parameter (int)", ref value))
+            {
+                action.Parameter = new JValue(value);
+                Changed();
+            }
+        }
+        else
+        {
+            var value = action.Parameter?.Type is JTokenType.Float or JTokenType.Integer ? action.Parameter.Value<float>() : 0;
+            if (!float.IsFinite(value)) value = 0;
+            if (ImGui.InputFloat("Parameter (float)", ref value) && float.IsFinite(value))
+            {
+                action.Parameter = new JValue(value);
+                Changed();
+            }
+        }
+    }
     private static string? Resource(string label, string? value)
     {
         var text = value ?? "";
@@ -1158,7 +1308,7 @@ public static class UIEditor
 
             try
             {
-                loaded.Instantiate(validation);
+                loaded.Instantiate(validation, enableActions: false);
             }
             finally
             {
@@ -1220,7 +1370,7 @@ public static class UIEditor
 
             try
             {
-                var root = _asset.Instantiate(next);
+                var root = _asset.Instantiate(next, enableActions: false);
                 next.Update(0);
 
                 _preview?.Destroy();

@@ -313,6 +313,7 @@ public static class Application
         return Closing == null || Closing.GetInvocationList().Cast<Func<bool>?>().All(handler => handler != null && handler());
     }
     
+    [UI.UIAction("Application/Quit")]
     public static void Quit()
     {
         _quitRequested = true;

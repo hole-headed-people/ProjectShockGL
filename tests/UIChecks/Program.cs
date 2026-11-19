@@ -1,4 +1,5 @@
 using System.Numerics;
+using Button = ProjectShockGL.UI.Button;
 using ProjectShockGL;
 using ProjectShockGL.Rendering;
 using ProjectShockGL.UI;
@@ -7,6 +8,270 @@ using Silk.NET.Maths;
 using Silk.NET.OpenGL;
 using Silk.NET.Windowing;
 
+Run("Click Actions keep screen-local widget targets across JSON, rename and multiple instances", () =>
+{
+    UIActionFixtures.Reset();
+    var label = new WidgetData { Type = "Text", Name = "Label" };
+    var button = new WidgetData { Type = "Button", Name = "ActionButton" };
+    var setText = UIActionCatalog.GetWidgetMethods(typeof(Text)).Single(method => method.Label.StartsWith("Text/Set text"));
+    var record = UIActionCatalog.GetGlobalMethods().Single(method => method.Name == "Test/Record");
+    button.ClickActions.Add(new UIActionCall { TargetId = label.Id, Method = setText.Id, Parameter = new Newtonsoft.Json.Linq.JValue("updated") });
+    button.ClickActions.Add(new UIActionCall { Target = UIActionTarget.Global, Method = record.Id, Parameter = new Newtonsoft.Json.Linq.JValue("asset") });
+    var asset = new UIAsset { Root = new WidgetData { Children = [button, label] } };
+    var json = Newtonsoft.Json.JsonConvert.SerializeObject(asset);
+    asset = Newtonsoft.Json.JsonConvert.DeserializeObject<UIAsset>(json)!;
+    var canvas = new Canvas();
+    canvas.Resize(new Vector2(800, 600));
+    try
+    {
+        var first = asset.Instantiate(canvas);
+        var second = asset.Instantiate(canvas);
+        var firstButton = first.Find<Button>("ActionButton")!;
+        var firstLabel = first.Find<Text>("Label")!;
+        var secondLabel = second.Find<Text>("Label")!;
+        firstLabel.Name = "Renamed";
+        firstButton.Click.AddListener(() => UIActionFixtures.Values.Add("code"));
+        firstButton.Click.Invoke();
+        Check(firstLabel.Content == "updated" && secondLabel.Content == "");
+        Check(UIActionFixtures.Values.SequenceEqual(new[] { "code", "asset" }));
+        firstButton.Click.RemoveAllListeners();
+        firstButton.Click.Invoke();
+        Check(UIActionFixtures.Values.SequenceEqual(new[] { "code", "asset", "asset" }));
+        asset.Root.Children[0].ClickActions[0].Parameter = new Newtonsoft.Json.Linq.JValue("changed template");
+        firstButton.Click.Invoke();
+        Check(firstLabel.Content == "updated");
+        var captured = UIAsset.Capture(first);
+        Check(captured.Root.Children[0].ClickActions.Count == 2 &&
+            captured.Root.Children[0].ClickActions[0].TargetId == firstLabel.Id);
+        var third = captured.Instantiate(canvas);
+        third.Find<Button>("ActionButton")!.Click.Invoke();
+        Check(third.Find<Text>("Renamed")!.Content == "updated");
+
+        UIActionFixtures.Reset();
+        var preview = asset.Instantiate(canvas, enableActions: false);
+        preview.Find<Button>("ActionButton")!.Click.Invoke();
+        Check(UIActionFixtures.Values.Count == 0 && preview.Find<Text>("Label")!.Content == "");
+        var editor = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+        var wasEditor = Application.IsEditor;
+        try
+        {
+            editor.SetValue(null, true);
+            second.Find<Button>("ActionButton")!.Click.Invoke();
+            Check(UIActionFixtures.Values.Count == 0 && secondLabel.Content == "");
+        }
+        finally { editor.SetValue(null, wasEditor); }
+    }
+    finally { canvas.Destroy(); }
+});
+
+Run("UIAction discovery limits signatures and invokes typed constants without coercion", () =>
+{
+    UIActionFixtures.Reset();
+    var globals = UIActionCatalog.GetGlobalMethods();
+    Check(!globals.Any(method => method.Name.StartsWith("Unsupported/")));
+    var button = new WidgetData { Type = "Button" };
+    foreach (var (name, value) in new (string, object)[] { ("Test/Integer", 17), ("Test/Float", .25f), ("Test/Bool", true), ("Test/Record", "text") })
+    {
+        var method = globals.Single(method => method.Name == name);
+        button.ClickActions.Add(new UIActionCall { Target = UIActionTarget.Global, Method = method.Id, Parameter = Newtonsoft.Json.Linq.JToken.FromObject(value) });
+    }
+    var asset = new UIAsset { Root = new WidgetData { Children = [button] } };
+    var canvas = new Canvas();
+    try
+    {
+        var screen = asset.Instantiate(canvas);
+        screen.Children.OfType<Button>().Single().Click.Invoke();
+        Check(UIActionFixtures.Number == 17 && UIActionFixtures.Amount == .25f && UIActionFixtures.Flag &&
+            UIActionFixtures.Values.Single() == "text");
+
+        UIActionFixtures.Reset();
+        button.ClickActions[0].Parameter = new Newtonsoft.Json.Linq.JValue("17");
+        asset.Instantiate(canvas).Children.OfType<Button>().Single().Click.Invoke();
+        Check(UIActionFixtures.Number == 0 && UIActionFixtures.Values.Count == 0);
+        button.ClickActions[0].Parameter = new Newtonsoft.Json.Linq.JValue(17);
+        button.ClickActions[0].Method = "Unmarked method";
+        asset.Instantiate(canvas).Children.OfType<Button>().Single().Click.Invoke();
+        Check(UIActionFixtures.Values.Count == 0);
+    }
+    finally { canvas.Destroy(); }
+});
+
+Run("Closing a screen or a failed Action stops the remaining sequence without crashing a click", () =>
+{
+    var root = new WidgetData { Name = "Root" };
+    var button = new WidgetData { Type = "Button", Name = "Close" };
+    root.Children.Add(button);
+    var destroy = UIActionCatalog.GetWidgetMethods(typeof(Widget)).Single(method => method.Name == "Widget/Destroy");
+    var record = UIActionCatalog.GetGlobalMethods().Single(method => method.Name == "Test/Record");
+    var fail = UIActionCatalog.GetGlobalMethods().Single(method => method.Name == "Test/Fail");
+    var later = new UIActionCall { Target = UIActionTarget.Global, Method = record.Id, Parameter = new Newtonsoft.Json.Linq.JValue("must not run") };
+    button.ClickActions.Add(new UIActionCall { TargetId = root.Id, Method = destroy.Id });
+    button.ClickActions.Add(later);
+    var canvas = new Canvas();
+    try
+    {
+        UIActionFixtures.Reset();
+        var screen = new UIAsset { Root = root }.Instantiate(canvas);
+        screen.Find<Button>("Close")!.Click.Invoke();
+        Check(screen.IsDestroyed && UIActionFixtures.Values.Count == 0);
+
+        button.ClickActions[0] = new UIActionCall { Target = UIActionTarget.Global, Method = fail.Id };
+        screen = new UIAsset { Root = root }.Instantiate(canvas);
+        screen.Find<Button>("Close")!.Click.Invoke();
+        Check(!screen.IsDestroyed && UIActionFixtures.Values.Count == 0);
+        button.ClickActions[0] = new UIActionCall { TargetId = Guid.NewGuid(), Method = destroy.Id };
+        new UIAsset { Root = root }.Instantiate(canvas).Find<Button>("Close")!.Click.Invoke();
+        Check(UIActionFixtures.Values.Count == 0);
+    }
+    finally { canvas.Destroy(); }
+});
+
+Run("Duplicating UI branches regenerates IDs and remaps internal Action targets while preserving outside targets", () =>
+{
+    var outside = new WidgetData { Name = "Outside" };
+    var label = new WidgetData { Type = "Text", Name = "BranchText" };
+    var button = new WidgetData { Type = "Button", Name = "BranchButton" };
+    var setText = UIActionCatalog.GetWidgetMethods(typeof(Text)).Single(method => method.Name == "Text/Set text");
+    var enabled = UIActionCatalog.GetWidgetMethods(typeof(Widget)).Single(method => method.Name == "Widget/Set enabled");
+    button.ClickActions.Add(new UIActionCall { TargetId = label.Id, Method = setText.Id, Parameter = new Newtonsoft.Json.Linq.JValue("copy") });
+    button.ClickActions.Add(new UIActionCall { TargetId = outside.Id, Method = enabled.Id, Parameter = new Newtonsoft.Json.Linq.JValue(false) });
+    var branch = new WidgetData { Children = [button, label] };
+    var copy = Newtonsoft.Json.JsonConvert.DeserializeObject<WidgetData>(Newtonsoft.Json.JsonConvert.SerializeObject(branch))!;
+    copy.RegenerateIds();
+    Check(copy.Id != branch.Id && copy.Children[0].Id != button.Id &&
+        copy.Children[0].ClickActions[0].TargetId == copy.Children[1].Id &&
+        copy.Children[0].ClickActions[1].TargetId == outside.Id);
+    var canvas = new Canvas();
+    try
+    {
+        var screen = new UIAsset { Root = new WidgetData { Children = [outside, branch, copy] } }.Instantiate(canvas);
+        screen.Children[2].Find<Button>("BranchButton")!.Click.Invoke();
+        Check(screen.Children[1].Find<Text>("BranchText")!.Content == "" &&
+            screen.Children[2].Find<Text>("BranchText")!.Content == "copy" && !screen.Children[0].IsEnabled);
+        var duplicate = new WidgetData { Id = branch.Id };
+        Throws<InvalidDataException>(() => new UIAsset { Root = new WidgetData { Children = [branch, duplicate] } }.Instantiate(canvas));
+        Check(canvas.Children.Count == 1);
+    }
+    finally { canvas.Destroy(); }
+});
+Run("UIEvent dispatches a snapshot, removes listeners and propagates callback failures", () =>
+{
+    var signal = new UIEvent();
+    var calls = new List<string>();
+    Action second = () => calls.Add("second");
+    Action added = () => calls.Add("added");
+    Action first = () =>
+    {
+        calls.Add("first");
+        signal.RemoveListener(second);
+        signal.AddListener(added);
+    };
+    signal.AddListener(first);
+    signal.AddListener(second);
+    signal.Invoke();
+    Check(calls.SequenceEqual(new[] { "first", "second" }));
+    calls.Clear();
+    signal.RemoveListener(first);
+    signal.Invoke();
+    Check(calls.SequenceEqual(new[] { "added" }));
+    signal.RemoveAllListeners();
+    signal.Invoke();
+    Check(calls.Count == 1);
+    Action failure = () => throw new InvalidOperationException("Expected listener failure");
+    signal.AddListener(failure);
+    signal.AddListener(second);
+    Throws<InvalidOperationException>(signal.Invoke);
+    Check(calls.Count == 1);
+    signal.RemoveListener(failure);
+    signal.Invoke();
+    Check(calls.SequenceEqual(new[] { "added", "second" }));
+    Throws<ArgumentNullException>(() => signal.AddListener(null!));
+    Throws<ArgumentNullException>(() => signal.RemoveListener(null!));
+});
+
+Run("UIEvent<T> passes typed values and remains stable while listeners change", () =>
+{
+    var changed = new UIEvent<bool>();
+    var values = new List<bool>();
+    Action<bool> record = values.Add;
+    changed.AddListener(record);
+    changed.Invoke(true);
+    changed.Invoke(false);
+    changed.RemoveListener(record);
+    changed.Invoke(true);
+    Check(values.SequenceEqual(new[] { true, false }));
+
+    var calls = new List<int>();
+    var number = new UIEvent<int>();
+    number.AddListener(value =>
+    {
+        calls.Add(value);
+        number.RemoveAllListeners();
+        number.AddListener(next => calls.Add(next * 10));
+    });
+    number.AddListener(value => calls.Add(-value));
+    number.Invoke(3);
+    number.Invoke(4);
+    Check(calls.SequenceEqual(new[] { 3, -3, 40 }));
+    number.RemoveAllListeners();
+    number.Invoke(5);
+    Check(calls.Count == 3);
+
+    var enabled = true;
+    var guarded = new UIEvent<string>(() => enabled);
+    var text = "";
+    guarded.AddListener(value => { text = value; enabled = false; });
+    guarded.AddListener(_ => throw new Exception("Guard must stop the remaining listener"));
+    guarded.Invoke("hello");
+    Check(text == "hello");
+    guarded.Invoke("ignored");
+    Check(text == "hello");
+    var scalar = new UIEvent<float>();
+    var amount = 0f;
+    scalar.AddListener(value => amount = value);
+    scalar.Invoke(.75f);
+    Check(amount == .75f);
+    Throws<ArgumentNullException>(() => changed.AddListener(null!));
+});
+
+Run("Button.Click stays instance-local, excludes listeners from UI JSON and stops after disabling its screen", () =>
+{
+    var canvas = new Canvas();
+    canvas.Resize(new Vector2(800, 600));
+    var screen = canvas.Add<Widget>();
+    var button = screen.Add<Button>();
+    button.Name = "TestButton";
+    var clicks = 0;
+    Action listener = () => clicks++;
+    button.Click.AddListener(listener);
+    button.Click.RemoveListener(listener);
+    button.Click.Invoke();
+    Check(clicks == 0);
+    button.Click.AddListener(listener);
+    var json = Newtonsoft.Json.JsonConvert.SerializeObject(UIAsset.Capture(screen));
+    Check(!json.Contains("Listeners") && !json.Contains("\"Click\""));
+    var clone = Newtonsoft.Json.JsonConvert.DeserializeObject<UIAsset>(json)!.Instantiate(canvas);
+    var cloneButton = clone.Find<Button>("TestButton")!;
+    cloneButton.Click.Invoke();
+    Check(clicks == 0 && !ReferenceEquals(button.Click, cloneButton.Click));
+    button.Click.Invoke();
+    Check(clicks == 1);
+    button.Click.RemoveAllListeners();
+    button.Click.AddListener(() => screen.IsEnabled = false);
+    button.Click.AddListener(() => clicks++);
+    button.Click.Invoke();
+    Check(clicks == 1 && !screen.IsEnabled);
+    screen.IsEnabled = true;
+    button.Click.RemoveAllListeners();
+    button.Click.AddListener(canvas.Destroy);
+    button.Click.AddListener(() => clicks++);
+    button.Click.Invoke();
+    Check(canvas.IsDestroyed && button.IsDestroyed && clicks == 1);
+    var uncreated = new Button();
+    uncreated.Click.AddListener(() => clicks++);
+    uncreated.Click.Invoke();
+    Check(clicks == 1);
+});
 Run("Nine-slice preserves corners, crops tile UVs inside an atlas and handles small rects", () =>
 {
     var image = new Image { DrawMode = ImageDrawMode.Sliced, Border = new Vector4(2), BorderScale = 2 };
@@ -76,7 +341,7 @@ Run("Button colors, left release, cancellation and callback mutation", () =>
     var inside = new Vector2(20);
     var outside = new Vector2(200);
     var clicks = 0;
-    button.AddAction(() => clicks++);
+    button.Click.AddListener(() => clicks++);
     Mouse(inside);
     ColorIs(button.HoverColor);
     button.HoverColor = Color.Red;
@@ -117,14 +382,14 @@ Run("Button colors, left release, cancellation and callback mutation", () =>
     Check(button.Text.HorizontalAlignment == HorizontalAlignment.Center &&
           button.Text.VerticalAlignment == VerticalAlignment.Center);
 
-    button.RemoveAllActions();
-    button.AddAction(() => button.RemoveAllActions());
-    button.AddAction(() => clicks++);
+    button.Click.RemoveAllListeners();
+    button.Click.AddListener(() => button.Click.RemoveAllListeners());
+    button.Click.AddListener(() => clicks++);
     Mouse(inside, MouseButton.Left);
     Mouse(inside);
     Check(clicks == 2);
-    button.AddAction(button.Destroy);
-    button.AddAction(() => clicks++);
+    button.Click.AddListener(button.Destroy);
+    button.Click.AddListener(() => clicks++);
     Mouse(inside, MouseButton.Left);
     Mouse(inside);
     Check(button.IsDestroyed && clicks == 2);
@@ -570,3 +835,23 @@ public sealed class MouseProbe : Widget
     protected override void OnMouseCancelled(MouseButton button) => Events.Add($"cancel:{button}");
 }
 
+
+public static class UIActionFixtures
+{
+    public static readonly List<string> Values = [];
+    public static int Number;
+    public static float Amount;
+    public static bool Flag;
+    public static void Reset() { Values.Clear(); Number = 0; Amount = 0; Flag = false; }
+
+    [UIAction("Test/Record")] public static void Record(string value) => Values.Add(value);
+    [UIAction("Test/Integer")] public static void Integer(int value) => Number = value;
+    [UIAction("Test/Float")] public static void Float(float value) => Amount = value;
+    [UIAction("Test/Bool")] public static void Bool(bool value) => Flag = value;
+    [UIAction("Test/Fail")] public static void Fail() => throw new InvalidOperationException("Expected Action failure");
+    [UIAction("Unsupported/Return")] public static int ReturnsValue() => 1;
+    [UIAction("Unsupported/Two")] public static void Two(string a, string b) { }
+    [UIAction("Unsupported/Generic")] public static void Generic<T>() { }
+    [UIAction("Unsupported/Ref")] public static void ByReference(ref int value) { }
+    public static void Unmarked() => Values.Add("unmarked");
+}

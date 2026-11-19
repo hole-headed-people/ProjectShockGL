@@ -341,6 +341,7 @@ public static class LevelManager
         return Convert.ChangeType(value, type, CultureInfo.InvariantCulture);
     }
 
+    [UI.UIAction("Level/Load")]
     public static void Load(string name)
     {
         Load(name, null, null);

@@ -1,4 +1,5 @@
 using System.Numerics;
+using Newtonsoft.Json.Linq;
 using ProjectShockGL;
 using ProjectShockGL.Rendering;
 using ProjectShockGL.UI;
@@ -587,7 +588,7 @@ void Render()
     picture.Rect.Position = new Vector2(17, 29);
     picture.FillCanvas = true;
     var calls = 0;
-    button.AddAction(() => calls++);
+    button.Click.AddListener(() => calls++);
     const string uiName = "__UIRoundtripCheck";
     try
     {
@@ -965,6 +966,106 @@ void Render()
         Check(CurrentUI().Root.Children[0].Name == "Right");
         Console.WriteLine("PASS: UI hierarchy moves preserve screen position, reorder siblings, reject cycles and restore through Undo/Redo");
 
+        var actionButtonData = new WidgetData { Type = "Button", Name = "ActionButton" };
+        var actionAsset = new UIAsset { Root = new WidgetData { Name = "ActionScreen", Children = [actionButtonData] } };
+        uiType.GetField("_asset", privateStatic)!.SetValue(null, actionAsset);
+        uiType.GetField("_selected", privateStatic)!.SetValue(null, actionButtonData);
+        uiType.GetMethod("ResetHistory", privateStatic)!.Invoke(null, null);
+        var drawActions = uiType.GetMethod("DrawClickActions", privateStatic)!;
+        void ActionFrame(Vector2 mouse, bool down)
+        {
+            var before = uiType.GetMethod("Capture", privateStatic)!.Invoke(null, null);
+            io.AddMousePosEvent(mouse.X, mouse.Y);
+            io.AddMouseButtonEvent(0, down);
+            ImGuiNET.ImGui.NewFrame();
+            ImGuiNET.ImGui.SetNextWindowPos(Vector2.Zero);
+            ImGuiNET.ImGui.SetNextWindowSize(new Vector2(520, 700));
+            ImGuiNET.ImGui.Begin("Actions Inspector Test");
+            drawActions.Invoke(null, [CurrentUI().Root.Children[0]]);
+            ImGuiNET.ImGui.End();
+            uiType.GetMethod("RecordFrame", privateStatic)!.Invoke(null, [before]);
+            ImGuiNET.ImGui.Render();
+        }
+        ActionFrame(new Vector2(-100), false);
+        ActionFrame(new Vector2(-100), false);
+        for (var y = 38; y < 78 && CurrentUI().Root.Children[0].ClickActions.Count == 0; y += 2)
+        {
+            ActionFrame(new Vector2(30, y), true);
+            ActionFrame(new Vector2(30, y), false);
+        }
+        Check(CurrentUI().Root.Children[0].ClickActions.Count == 1);
+        var authoredButtonId = CurrentUI().Root.Children[0].Id;
+        ProjectShockGLEditor.UIEditor.Undo();
+        Check(CurrentUI().Root.Children[0].ClickActions.Count == 0);
+        ProjectShockGLEditor.UIEditor.Redo();
+        Check(CurrentUI().Root.Children[0].ClickActions.Count == 1 && CurrentUI().Root.Children[0].Id == authoredButtonId);
+        var visibleMethod = UIActionCatalog.GetWidgetMethods(typeof(Widget)).Single(method => method.Name == "Widget/Set visible");
+        EditUI(() =>
+        {
+            var action = CurrentUI().Root.Children[0].ClickActions[0];
+            action.TargetId = CurrentUI().Root.Id;
+            action.Method = visibleMethod.Id;
+            action.Parameter = new Newtonsoft.Json.Linq.JValue(true);
+        }, 2201);
+        ProjectShockGLEditor.UIEditor.Undo();
+        Check(CurrentUI().Root.Children[0].ClickActions[0].Method == "");
+        ProjectShockGLEditor.UIEditor.Redo();
+        Check(CurrentUI().Root.Children[0].ClickActions[0].TargetId == CurrentUI().Root.Id);
+        ActionFrame(new Vector2(-100), false);
+        for (var y = 136; y < 190 && CurrentUI().Root.Children[0].ClickActions[0].Parameter!.Value<bool>(); y += 2)
+        {
+            ActionFrame(new Vector2(15, y), true);
+            ActionFrame(new Vector2(15, y), false);
+        }
+        Check(!CurrentUI().Root.Children[0].ClickActions[0].Parameter!.Value<bool>());
+        ProjectShockGLEditor.UIEditor.Undo();
+        Check(CurrentUI().Root.Children[0].ClickActions[0].Parameter!.Value<bool>());
+        ProjectShockGLEditor.UIEditor.Redo();
+        Check(!CurrentUI().Root.Children[0].ClickActions[0].Parameter!.Value<bool>());
+
+        var globalAction = UIActionCatalog.GetGlobalMethods().Single(method => method.Name == "PreviewTest/Increment");
+        EditUI(() => CurrentUI().Root.Children[0].ClickActions.Add(new UIActionCall
+        {
+            Target = UIActionTarget.Global, Method = globalAction.Id
+        }), 2202);
+        EditUI(() => CurrentUI().Root.Children[0].ClickActions.Reverse(), 2203);
+        Check(CurrentUI().Root.Children[0].ClickActions[0].Method == globalAction.Id);
+        ProjectShockGLEditor.UIEditor.Undo();
+        Check(CurrentUI().Root.Children[0].ClickActions[0].Method == visibleMethod.Id);
+        ProjectShockGLEditor.UIEditor.Redo();
+        Check(CurrentUI().Root.Children[0].ClickActions[0].Method == globalAction.Id);
+
+        uiType.GetField("_selected", privateStatic)!.SetValue(null, CurrentUI().Root.Children[0]);
+        ProjectShockGLEditor.UIEditor.DuplicateSelected();
+        var duplicatedActionButton = CurrentUI().Root.Children[1];
+        Check(duplicatedActionButton.Id != authoredButtonId &&
+            duplicatedActionButton.ClickActions[1].TargetId == CurrentUI().Root.Id);
+        ProjectShockGLEditor.UIEditor.Undo();
+        Check(CurrentUI().Root.Children.Count == 1);
+        ProjectShockGLEditor.UIEditor.Redo();
+        Check(CurrentUI().Root.Children[1].Id == duplicatedActionButton.Id);
+
+        PreviewActionFixture.Calls = 0;
+        uiType.GetField("_rebuild", privateStatic)!.SetValue(null, true);
+        ProjectShockGLEditor.UIEditor.Render(graphics);
+        var actionsPreview = (Canvas)uiType.GetField("_preview", privateStatic)!.GetValue(null)!;
+        var previewRoot = actionsPreview.Children[0];
+        previewRoot.Find<ProjectShockGL.UI.Button>("ActionButton")!.Click.Invoke();
+        Check(PreviewActionFixture.Calls == 0 && previewRoot.Visible);
+
+        // Exercise the actual remove button and its history.
+        ActionFrame(new Vector2(-100), false);
+        for (var y = 70; y < 100 && CurrentUI().Root.Children[0].ClickActions.Count == 2; y += 2)
+        {
+            ActionFrame(new Vector2(95, y), true);
+            ActionFrame(new Vector2(95, y), false);
+        }
+        Check(CurrentUI().Root.Children[0].ClickActions.Count == 1);
+        ProjectShockGLEditor.UIEditor.Undo();
+        Check(CurrentUI().Root.Children[0].ClickActions.Count == 2);
+        ProjectShockGLEditor.UIEditor.Redo();
+        Check(CurrentUI().Root.Children[0].ClickActions.Count == 1);
+        Console.WriteLine("PASS: Real Click Actions Inspector add/parameter/remove controls, target/method/order history, duplicate IDs and disabled preview execution");
         Check(ProjectShockGLEditor.UIEditor.IsDirty);
         Check(!ProjectShockGLEditor.UIEditor.AllowClose());
         var discardClose = (Action)uiType.GetField("_pending", privateStatic)!.GetValue(null)!;
@@ -1661,4 +1762,10 @@ public sealed class DebugEntityProbe : ProjectShockGL.Core.Entity
         if (arguments.TryGetValue("Mesh", out var name)) mesh.Mesh = Content.LoadMesh((string)name);
         if (arguments.TryGetValue("Texture", out var texture)) mesh.Texture = Content.LoadTexture((string)texture);
     }
+}
+public static class PreviewActionFixture
+{
+    public static int Calls;
+    [UIAction("PreviewTest/Increment")]
+    public static void Increment() => Calls++;
 }

@@ -12,11 +12,23 @@ public class Button : Widget
     private Color _disabledColor = Color.DarkGray;
     
     private bool _isPressed;
-
-    private readonly List<Action> _actions = [];
     
     private Image? _image;
 
+    private Widget? _actionRoot;
+    private IReadOnlyDictionary<Guid, Widget>? _actionWidgets;
+    
+    private bool _actionsEnabled;
+
+    internal List<UIActionCall> ClickActions { get; } = [];
+    public UIEvent Click { get; }
+    
+    public Button()
+    {
+        Click = new UIEvent(() => _image != null && CanInteract());
+        Click.InvokeActions = InvokeClickActions;
+    }
+    
     public Color NormalColor
     {
         get => _normalColor;
@@ -171,15 +183,7 @@ public class Button : Widget
             return;
         }
 
-        foreach (var action in _actions.ToArray())
-        {
-            if (!CanInteract())
-            {
-                break;
-            }
-            
-            action.Invoke();
-        }
+        Click.Invoke();
     }
 
     protected override void OnMouseCancelled(MouseButton button)
@@ -223,29 +227,43 @@ public class Button : Widget
         RefreshColor();
     }
 
+    internal void BindActions(Widget root, IReadOnlyDictionary<Guid, Widget> widgets, bool enabled)
+    {
+        _actionRoot = root;
+        _actionWidgets = widgets;
+        _actionsEnabled = enabled;
+    }
+
+    private void InvokeClickActions()
+    {
+        if (!_actionsEnabled || Application.IsEditor || _actionRoot == null || _actionWidgets == null)
+        {
+            return;
+        }
+        
+        foreach (var action in ClickActions.Select(action => action.Copy()).ToArray())
+        {
+            if (!CanInteract() || _actionRoot.IsDestroyed || !_actionRoot.Visible || !_actionRoot.IsEnabled)
+            {
+                break;
+            }
+
+            if (!UIActionCatalog.Execute(action, _actionWidgets, Name))
+            {
+                break;
+            }
+        }
+    }
     protected override void OnDestroy()
     {
         _isPressed = false;
         
-        RemoveAllActions();
+        Click.RemoveAllListeners();
+        ClickActions.Clear();
+        
+        _actionRoot = null;
+        _actionWidgets = null;
         
         base.OnDestroy();
-    }
-
-    public void AddAction(Action action)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-        
-        _actions.Add(action);
-    }
-
-    public void RemoveAction(Action action)
-    {
-        _actions.Remove(action);
-    }
-
-    public void RemoveAllActions()
-    {
-        _actions.Clear();
     }
 }

@@ -15,6 +15,7 @@ public class Widget
     private readonly List<Widget> _children = [];
     
     public Canvas Canvas => _canvas ?? throw new InvalidOperationException("Add the widget to a canvas first.");
+    
     private bool _fillCanvas;
     private bool _isScreenRoot;
 
@@ -34,6 +35,7 @@ public class Widget
         FillCanvas = true;
     }
 
+    public Guid Id { get; internal set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
     public T? Find<T>(string name) where T : Widget => WidgetSearch.Find<T>(Children, name);
 
@@ -247,6 +249,25 @@ public class Widget
         }
     }
 
+    [UIAction("Widget/Set visible")]
+    public void SetVisible(bool visible)
+    {
+        Visible = visible;
+    }
+
+    [UIAction("Widget/Set enabled")]
+    public void SetEnabled(bool enabled)
+    {
+        IsEnabled = enabled;
+    }
+
+    [UIAction("Widget/Set hit testing")]
+    public void SetHitTestVisible(bool enabled)
+    {
+        HitTestVisible = enabled;
+    }
+
+    [UIAction("Widget/Destroy")]
     public void Destroy()
     {
         if (IsDestroyed)
