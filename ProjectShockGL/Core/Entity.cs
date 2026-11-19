@@ -1,3 +1,5 @@
+using ProjectShockGL.UI;
+
 namespace ProjectShockGL.Core;
 
 public class Entity : Object

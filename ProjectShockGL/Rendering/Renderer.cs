@@ -76,6 +76,7 @@ public class Renderer : IDisposable
     private bool _frameEnvironmentEnabled;
     
     private PostProcessor? _postProcessor;
+    private GridRenderer? _gridRenderer;
     private int _drawCalls;
     private long _triangles;
     private int _worldDrawCalls;
@@ -406,6 +407,17 @@ public class Renderer : IDisposable
         _gl.UniformMatrix4(_unlitView, 1, false, (float*)&view);
     }
 
+    internal void DrawGrid(float step, float radius, float fadeStart, float fadeEnd)
+    {
+        if (_isUI) throw new InvalidOperationException("DrawGrid is a world-space operation.");
+        if (!float.IsFinite(step) || step <= 0 || !float.IsFinite(radius) || radius <= 0 ||
+            !float.IsFinite(fadeStart) || !float.IsFinite(fadeEnd) || fadeStart < 0 || fadeEnd <= fadeStart)
+            throw new ArgumentOutOfRangeException(nameof(step), "Grid dimensions and fade range must be finite and positive.");
+        _gridRenderer ??= new GridRenderer(_gl);
+        _gridRenderer.Draw(_quadMesh, _frameCamera, _frameProjection, _frameView, step, radius, fadeStart, fadeEnd);
+        _drawCalls++;
+        _triangles += _quadMesh.TriangleCount;
+    }
     public void DrawQuadMesh(Texture texture, Matrix4x4 model, Color color, bool lit = false, bool ignoreDepth = false,
         Vector4? uvRect = null, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null,
         SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f)
@@ -746,7 +758,7 @@ public class Renderer : IDisposable
         
         _unlitProgram = _litProgram = 0;
         
-        Cleanup.Run(() => _postProcessor?.Dispose(), _quadMesh.Dispose,
+        Cleanup.Run(() => _postProcessor?.Dispose(), () => _gridRenderer?.Dispose(), _quadMesh.Dispose,
             () =>
             {
                 if (unlit != 0)

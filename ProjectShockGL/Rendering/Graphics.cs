@@ -33,6 +33,10 @@ public class Graphics
         Renderer.BeginFrame(camera);
     }
 
+    public void DrawGrid(float step, float radius, float fadeStart, float fadeEnd)
+    {
+        Renderer.DrawGrid(step, radius, fadeStart, fadeEnd);
+    }
     public void DrawLine2D(Vector3 from, Vector3 to, Plane plane, Texture texture, Color color, float thickness = 0.05f, bool ignoreDepth = false)
     {
         var normal = plane switch

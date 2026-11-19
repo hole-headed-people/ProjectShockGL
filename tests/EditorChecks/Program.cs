@@ -3788,6 +3788,51 @@ if (args.Contains("--imgui"))
             }
             finally { UIEditor.Open = previousUI; }
         });
+        Run("Scene axis indicator follows camera rotation, stays in its corner and does not capture input", () =>
+        {
+            var previousUI = UIEditor.Open;
+            try
+            {
+                UIEditor.Open = false;
+                var rotation = Quaternion.CreateFromYawPitchRoll(.7f, -.4f, .2f);
+                foreach (var axis in SceneAxes.GetAxes(rotation))
+                {
+                    var worldAxis = axis.Name == "X" ? Vector3.UnitX : axis.Name == "Y" ? Vector3.UnitY : Vector3.UnitZ;
+                    var expected = new Vector3(
+                        Vector3.Dot(worldAxis, Vector3.Transform(Vector3.UnitX, rotation)),
+                        Vector3.Dot(worldAxis, Vector3.Transform(Vector3.UnitY, rotation)),
+                        Vector3.Dot(worldAxis, Vector3.Transform(Vector3.UnitZ, rotation)));
+                    Check(Vector3.Distance(axis.Direction, expected) < .0001f);
+                }
+                Vector2[] AxisFrame(Quaternion view, bool small = false)
+                {
+                    io.AddMousePosEvent(640, 160);
+                    io.AddMouseButtonEvent(0, false);
+                    ImGuiNET.ImGui.NewFrame();
+                    SceneAxes.Draw(new Vector2(100), small ? new Vector2(200) : new Vector2(700, 500), view);
+                    ImGuiNET.ImGui.Render();
+                    var points = new List<Vector2>();
+                    var drawData = ImGuiNET.ImGui.GetDrawData();
+                    for (var listIndex = 0; listIndex < drawData.CmdListsCount; listIndex++)
+                    {
+                        var list = drawData.CmdLists[listIndex];
+                        for (var i = 0; i < list.VtxBuffer.Size; i++) points.Add(list.VtxBuffer[i].pos);
+                    }
+                    return points.ToArray();
+                }
+                var straight = AxisFrame(Quaternion.Identity);
+                var angled = AxisFrame(rotation);
+                Check(straight.Length > 0 && angled.Length > 0 && !straight.SequenceEqual(angled));
+                Check(angled.All(point => point.X >= 580 && point.X <= 700 && point.Y >= 100 && point.Y <= 220));
+                AxisFrame(rotation);
+                Check(!io.WantCaptureMouse);
+                UIEditor.Open = true;
+                Check(AxisFrame(rotation).Length == 0);
+                UIEditor.Open = false;
+                Check(AxisFrame(rotation, small: true).Length == 0);
+            }
+            finally { UIEditor.Open = previousUI; }
+        });
         RunScene("Real Scene Ctrl-click toggles membership and multiple Inspector does not edit objects", () =>
         {
             var a = SceneObjects.Create(PlaceableType.BrushBox);

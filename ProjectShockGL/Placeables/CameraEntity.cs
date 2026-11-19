@@ -61,23 +61,35 @@ public class CameraEntity : Entity
         CameraComponent = CreateCameraComponent();
     }
 
-    protected virtual CameraComponent CreateCameraComponent() => AddComponent<CameraComponent>();
+    protected virtual CameraComponent CreateCameraComponent()
+    {
+        return AddComponent<CameraComponent>();
+    }
 
     [Input("MakeActive")]
-    public bool MakeActive() => CameraComponent.MakeActive();
+    public bool MakeActive()
+    {
+        return CameraComponent.MakeActive();
+    }
 
     [Input("ReleaseActive")]
-    public void ReleaseActive() => RenderCamera.ReleaseActive(Camera);
+    public void ReleaseActive()
+    {
+        RenderCamera.ReleaseActive(Camera);
+    }
 
     public override void DebugRenderSelected(DebugDraw draw)
     {
         base.DebugRenderSelected(draw);
 
         var origin = Transform.Position;
+        
         var forward = Transform.Forward;
         var right = Transform.Right;
+        
         var tip = origin + forward * 2f;
         var head = tip - forward * .4f;
+        
         draw.Line(origin, tip, Color.Yellow, ignoreDepth: true);
         draw.Line(tip, head + right * .2f, Color.Yellow, ignoreDepth: true);
         draw.Line(tip, head - right * .2f, Color.Yellow, ignoreDepth: true);
@@ -85,7 +97,11 @@ public class CameraEntity : Entity
 
     private static float Finite(float value)
     {
-        if (!float.IsFinite(value)) throw new ArgumentOutOfRangeException(nameof(value));
+        if (!float.IsFinite(value))
+        {
+            throw new ArgumentOutOfRangeException(nameof(value));
+        }
+        
         return value;
     }
 }

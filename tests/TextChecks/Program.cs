@@ -1708,6 +1708,169 @@ void Render()
         ProjectShockGL.Environment.Apply(monitorEnvironment);
         editorProperty.SetValue(null, monitorEditor);
     }
+    var gridEnvironment = ProjectShockGL.Environment.Capture();
+    var previousGridShow = ProjectShockGLEditor.SceneGrid.Show;
+    var previousGridStep = ProjectShockGLEditor.SceneGrid.Step;
+    using var gridCamera = Camera.Create();
+    using (var gridRenderer = new Renderer(gl, 640, 240))
+    {
+        var gridGraphics = new Graphics(gridRenderer);
+        try
+        {
+            ProjectShockGLEditor.SceneGrid.Show = true;
+            ProjectShockGLEditor.SceneGrid.Step = 1;
+            ProjectShockGL.Environment.SkyColorEnabled = false;
+            ProjectShockGL.Environment.IsFogEnabled = false;
+            gridCamera.Orthographic = true;
+            gridCamera.OrthoSize = 8;
+            gridCamera.AspectRatio = 640f / 240;
+            gridCamera.ClearColor = Color.Black;
+            gridCamera.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitX, -MathF.PI / 2);
+            byte[] GridPixel()
+            {
+                var pixel = new byte[4];
+                unsafe { fixed (byte* data = pixel) gl.ReadPixels(320, 120, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+                return pixel;
+            }
+            byte[] DrawGridAt(float height)
+            {
+                gridCamera.Transform.Position = new Vector3(2000, height, 2000);
+                gridGraphics.BeginDraw(gridCamera);
+                ProjectShockGLEditor.SceneGrid.Render(gridGraphics);
+                Check(gridGraphics.Statistics.DrawCalls == 1);
+                var pixel = GridPixel();
+                gridGraphics.EndDraw();
+                return pixel;
+            }
+            var near = DrawGridAt(10);
+            Check(near[0] > 15 && Math.Abs(near[0] - near[1]) < 2);
+            ProjectShockGL.Environment.IsFogEnabled = true;
+            ProjectShockGL.Environment.FogColor = Color.Red;
+            ProjectShockGL.Environment.FogNear = 0;
+            ProjectShockGL.Environment.FogFar = 1;
+            Check(DrawGridAt(10).SequenceEqual(near));
+            var far = DrawGridAt(350);
+            var vanished = DrawGridAt(600);
+            Check(far[0] > 0 && far[0] < near[0] && vanished.Take(3).All(c => c < 2));
+
+            byte[] FineGridImage(float step, float viewSize)
+            {
+                ProjectShockGLEditor.SceneGrid.Step = step;
+                gridCamera.OrthoSize = viewSize;
+                gridCamera.Transform.Position = new Vector3(10.12345f, 10, 20.23456f);
+                gridGraphics.BeginDraw(gridCamera);
+                ProjectShockGLEditor.SceneGrid.Render(gridGraphics);
+                var pixels = new byte[640 * 240 * 4];
+                unsafe { fixed (byte* data = pixels) gl.ReadPixels(0, 0, 640, 240, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+                Check(gridGraphics.Statistics.DrawCalls == 1);
+                gridGraphics.EndDraw();
+                return pixels;
+            }
+            int GridRuns(byte[] pixels)
+            {
+                var count = 0; var inside = false;
+                for (var x = 120; x < 520; x++)
+                {
+                    var line = pixels[(120 * 640 + x) * 4] > 5;
+                    if (line && !inside) count++;
+                    inside = line;
+                }
+                return count;
+            }
+            double GridMean(byte[] pixels)
+            {
+                long sum = 0;
+                for (var i = 0; i < pixels.Length; i += 4) sum += pixels[i];
+                return (double)sum / (640 * 240);
+            }
+            var fineGrid = FineGridImage(.01f, .16f);
+            var widerStep = FineGridImage(.02f, .16f);
+            var proportionalGrid = FineGridImage(.02f, .32f);
+            var partialGrid = FineGridImage(.01f, 1.2f);
+            var unresolvedGrid = FineGridImage(.01f, 3.2f);
+            Check(GridRuns(fineGrid) is >= 24 and <= 29);
+            Check(GridRuns(widerStep) is >= 12 and <= 15);
+            var fineMean = GridMean(fineGrid);
+            Check(fineMean > 1 && GridMean(proportionalGrid) > fineMean * .8 && GridMean(proportionalGrid) < fineMean * 1.2);
+            Check(GridMean(partialGrid) > fineMean * .2 && GridMean(partialGrid) < fineMean * .9);
+            Check(GridMean(unresolvedGrid) == 0 && GridMean(FineGridImage(.1f, 3.2f)) > 1);
+            Check(FineGridImage(.001f, .16f).SequenceEqual(fineGrid));
+            ProjectShockGLEditor.SceneGrid.Step = 1;
+            gridCamera.OrthoSize = 8;
+            Console.WriteLine("PASS: Grid step 0.01 is visible up close, line width scales with cells and subpixel cells fade without a solid fill");
+            // A shallow perspective is the editor's normal case, unlike the overhead test.
+            gridCamera.Orthographic = false;
+            gridCamera.Transform.Position = new Vector3(0, 4, 8);
+            gridCamera.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitX, .06f);
+            gridGraphics.BeginDraw(gridCamera);
+            ProjectShockGLEditor.SceneGrid.Render(gridGraphics);
+            var oblique = new byte[640 * 240 * 4];
+            unsafe { fixed (byte* data = oblique) gl.ReadPixels(0, 0, 640, 240, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+
+            var farAxisClip = Vector4.Transform(new Vector4(0, 0, -142, 1),
+                gridCamera.GetViewMatrix() * gridCamera.GetProjectionMatrix());
+            var farAxisY = (int)((farAxisClip.Y / farAxisClip.W + 1) * 120);
+            var farAxisBrightness = 0;
+            for (var y = Math.Max(0, farAxisY - 1); y <= Math.Min(239, farAxisY + 1); y++)
+            for (var x = 318; x <= 321; x++)
+                farAxisBrightness = Math.Max(farAxisBrightness, oblique[(y * 640 + x) * 4]);
+
+            Check(farAxisBrightness < 25); // No bright axis streak after the minor grid becomes subpixel.
+            gridGraphics.EndDraw();
+            gridCamera.Orthographic = true;
+            gridCamera.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitX, -MathF.PI / 2);
+            gridCamera.Transform.Position = new Vector3(2000, 10, 2000);
+            gridGraphics.BeginDraw(gridCamera);
+            ProjectShockGLEditor.SceneGrid.Render(gridGraphics);
+            gridGraphics.DrawQuad(new Vector3(2000, 1, 2000), gridCamera.Transform.Rotation,
+                new Vector2(2), Content.GetWhitePixel(), Color.White);
+            var foggedWorld = GridPixel();
+            Check(foggedWorld[0] > 240 && foggedWorld[1] < 3 && ProjectShockGL.Environment.IsFogEnabled);
+            gridGraphics.EndDraw();
+
+            ProjectShockGL.Environment.IsFogEnabled = false;
+            gridGraphics.BeginDraw(gridCamera);
+            gridGraphics.DrawQuad(new Vector3(2000, 2, 2000), gridCamera.Transform.Rotation,
+                new Vector2(2), Content.GetWhitePixel(), Color.Blue);
+            ProjectShockGLEditor.SceneGrid.Render(gridGraphics);
+            Check(GridPixel()[2] > 240 && GridPixel()[0] < 3);
+            gridGraphics.EndDraw();
+
+            gridGraphics.BeginDraw(gridCamera);
+            gl.Disable(EnableCap.DepthTest);
+            gl.Enable(EnableCap.CullFace);
+            gl.Disable(EnableCap.Blend);
+            gl.DepthMask(true);
+            gl.BlendFuncSeparate(BlendingFactor.One, BlendingFactor.Zero, BlendingFactor.DstAlpha, BlendingFactor.OneMinusDstAlpha);
+            gl.BlendEquationSeparate(BlendEquationModeEXT.FuncReverseSubtract, BlendEquationModeEXT.Max);
+            var stateProgram = gl.GetInteger(GetPName.CurrentProgram);
+            ProjectShockGLEditor.SceneGrid.Render(gridGraphics);
+            Check(!gl.IsEnabled(EnableCap.DepthTest) && gl.IsEnabled(EnableCap.CullFace) &&
+                !gl.IsEnabled(EnableCap.Blend) && gl.GetBoolean(GetPName.DepthWritemask));
+            Check(gl.GetInteger(GetPName.BlendSrcRgb) == (int)BlendingFactor.One &&
+                gl.GetInteger(GetPName.BlendDstRgb) == (int)BlendingFactor.Zero &&
+                gl.GetInteger(GetPName.BlendSrcAlpha) == (int)BlendingFactor.DstAlpha &&
+                gl.GetInteger(GetPName.BlendEquationRgb) == (int)BlendEquationModeEXT.FuncReverseSubtract &&
+                gl.GetInteger(GetPName.BlendEquationAlpha) == (int)BlendEquationModeEXT.Max &&
+                gl.GetInteger(GetPName.CurrentProgram) == stateProgram);
+            gl.Enable(EnableCap.DepthTest); gl.Enable(EnableCap.Blend);
+            gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            gl.BlendEquation(BlendEquationModeEXT.FuncAdd);
+            gridGraphics.EndDraw();
+            var ownedGrid = typeof(Renderer).GetField("_gridRenderer", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(gridRenderer)!;
+            var gridProgram = (ShaderProgram)ownedGrid.GetType().GetField("_program", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(ownedGrid)!;
+            var handle = gridProgram.Handle;
+            gridRenderer.Dispose();
+            Check(gridProgram.Handle == 0 && !gl.IsProgram(handle) && gl.GetError() == GLEnum.NoError);
+            Console.WriteLine("PASS: Editor grid ignores fog, follows distant cameras, fades by distance, uses one draw and restores depth/blending state");
+        }
+        finally
+        {
+            ProjectShockGL.Environment.Apply(gridEnvironment);
+            ProjectShockGLEditor.SceneGrid.Show = previousGridShow;
+            ProjectShockGLEditor.SceneGrid.Step = previousGridStep;
+        }
+    }
     var debugDepthWorld = new World();
     var debugFlag = typeof(Application).GetProperty(nameof(Application.IsDebug))!;
     var previousDebugFlag = Application.IsDebug;

@@ -187,6 +187,7 @@ public static class Editor
         DrawToolbar();
         DrawSceneHints();
         SelectionBounds.Draw(_windowSize, SceneMin, SceneMax);
+        SceneAxes.Draw(SceneMin, SceneMax, Camera.Active.Transform.Rotation);
         DrawHierarchy();
         
         ImGui.SetNextWindowPos(new Vector2(0, 82 + (_windowSize.Y - 110) * 0.32f));
