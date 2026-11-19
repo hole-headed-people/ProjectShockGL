@@ -71,6 +71,7 @@ public static class EditorLevelManager
                 CollidesWith = obj.CollidesWith,
                 SimulatePhysics = (obj as Entity)?.Rigidbody?.IsEnabled,
                 RigidbodyMass = obj.GetComponent<Rigidbody>() is { IsDestroyed: false } body ? body.Mass : null,
+                RenderSurfaces = RenderSurfaceData.Capture(obj),
                 BackfaceCulling = obj.GetComponent<MeshComponent>() is { IsDestroyed: false } mesh ? mesh.BackfaceCulling : null,
                 EditorGroups = obj.EditorGroups.ToArray(),
                 
@@ -86,7 +87,8 @@ public static class EditorLevelManager
                     Movable = brush.Movable,
                     SimulatePhysics = brush.SimulatePhysics,
                     Size = brush.Size, Texture = brush.TextureName, TextureFormat = brush.TextureFormat,
-                    TextureScale = brush.TextureScale, Color = brush.Color, Lit = brush.Lit, Faces = brush.CaptureFaces()
+                    TextureScale = brush.TextureScale, Color = brush.Color, Lit = brush.Lit, Faces = brush.CaptureFaces(),
+                    SurfaceMode = brush.SurfaceMode, AlphaCutoff = brush.AlphaCutoff
                 } : null,
                 
                 Position = obj.Transform.Position, Rotation = obj.Transform.Rotation, Scale = obj.Transform.Scale,
@@ -177,6 +179,7 @@ public static class EditorLevelManager
             CollidesWith = snapshot.CollidesWith,
             SimulatePhysics = snapshot.SimulatePhysics,
             RigidbodyMass = snapshot.RigidbodyMass,
+            RenderSurfaces = snapshot.RenderSurfaces,
             BackfaceCulling = snapshot.BackfaceCulling,
             EditorGroups = snapshot.EditorGroups,
             Brush = snapshot.Brush,

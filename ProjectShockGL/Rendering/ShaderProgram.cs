@@ -204,7 +204,7 @@ public sealed class ShaderProgram : IDisposable
     {
         return name is
                    "uProjection" or "uView" or "uModel" or "uTexture" or "uColor" or "uUvRect" or
-                   "uAlphaCutoff" or "uCameraPos" or "uTime" or "uFogColor" or "uFogNear" or "uFogFar" or
+                   "uSurfaceMode" or "uAlphaCutoff" or "uCameraPos" or "uTime" or "uFogColor" or "uFogNear" or "uFogFar" or
                    "uFogEnabled" or "uForceUnlit" or "uScreenSize" or "uTexelSize" or "uAmbientColor" or "uMainLightEnabled" or
                    "uLightDirection" or "uLightColor" or "uLightIntensity" or "uPointLightCount" ||
                name.StartsWith("uPointLight", StringComparison.Ordinal);

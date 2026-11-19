@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 
 namespace ProjectShockGL.Rendering;
 
@@ -13,6 +13,8 @@ public class LineCommand : RenderCommand
     public ShaderProgram? Shader { get; set; }
     public ShaderParameters? ShaderParameters { get; set; }
     public bool IgnoreDepth { get; set; }
+
+    internal override bool IsOverlay => IgnoreDepth;
 
     public override void Execute(Graphics graphics)
     {

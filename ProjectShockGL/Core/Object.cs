@@ -537,6 +537,9 @@ public class Object
             capture.Capture(world);
         }
     }
+    public IReadOnlyList<RenderComponent> GetRenderComponents() =>
+        _renderComponents.Where(component => !component.IsDestroyed).ToArray();
+
     public T? GetComponent<T>() where T : Component
     {
         return _components.OfType<T>().FirstOrDefault();

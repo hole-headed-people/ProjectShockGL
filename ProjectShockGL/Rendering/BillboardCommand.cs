@@ -14,11 +14,14 @@ public class BillboardCommand : RenderCommand
     public bool Lit { get; set; }
     public bool IgnoreDepth { get; set; }
 
+    internal override Vector3 SortPosition => Position;
+    internal override bool IsOverlay => IgnoreDepth;
+
     public override void Execute(Graphics graphics)
     {
         if (Texture != null)
         {
-            graphics.DrawBillboard(Position, Size, Texture, Color, Lit, IgnoreDepth, Shader, ShaderParameters, Mode);
+            graphics.DrawBillboard(Position, Size, Texture, Color, Lit, IgnoreDepth, Shader, ShaderParameters, Mode, SurfaceMode, AlphaCutoff);
         }
     }
 }

@@ -5,6 +5,7 @@ public sealed class UIEvent
     private readonly List<Action> _listeners = [];
     private readonly Func<bool>? _canInvoke;
     internal Action? InvokeActions { get; set; }
+    internal Func<bool>? CanContinue { get; set; }
 
     public UIEvent(Func<bool>? canInvoke = null)
     {
@@ -30,9 +31,16 @@ public sealed class UIEvent
 
     public void Invoke()
     {
+        if (_canInvoke?.Invoke() == false)
+        {
+            return;
+        }
+
+        var canContinue = CanContinue ?? _canInvoke;
+
         foreach (var listener in _listeners.ToArray())
         {
-            if (_canInvoke?.Invoke() == false)
+            if (canContinue?.Invoke() == false)
             {
                 break;
             }
@@ -40,7 +48,10 @@ public sealed class UIEvent
             listener.Invoke();
         }
 
-        if (InvokeActions != null && _canInvoke?.Invoke() != false) InvokeActions.Invoke();
+        if (InvokeActions != null && canContinue?.Invoke() != false)
+        {
+            InvokeActions.Invoke();
+        }
     }
 }
 

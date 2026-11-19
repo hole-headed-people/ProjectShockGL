@@ -2204,6 +2204,168 @@ Run("Screen selection bounds rotate with objects and clip edges at the camera fr
                 point.X >= -0.01f && point.X <= 800.01f && point.Y >= -0.01f && point.Y <= 800.01f);
 });
 
+RunScene("Surface modes persist per mesh and billboard through maps, prefabs and Inspector history", () =>
+{
+    File.WriteAllText(Path.Combine(testRoot, "Entities", "SurfaceProbe.json"),
+        JsonConvert.SerializeObject(new EntityData { Class = typeof(SurfaceProbe).AssemblyQualifiedName! }));
+    var entity = (SurfaceProbe)SceneObjects.Create(PlaceableType.Entity, "SurfaceProbe");
+    Check(entity.First.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Cutout && entity.First.AlphaCutoff == 0.5f);
+    UndoRedo.Clear();
+    RecordInspector(entity, "Surface settings", () =>
+    {
+        entity.First.SurfaceMode = ProjectShockGL.Rendering.SurfaceMode.Transparent;
+        entity.Second.SurfaceMode = ProjectShockGL.Rendering.SurfaceMode.Opaque;
+        entity.Billboard.AlphaCutoff = 0.8f;
+    });
+    UndoRedo.Undo();
+    Check(entity.First.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Cutout && entity.Billboard.AlphaCutoff == 0.5f);
+    UndoRedo.Redo();
+    var snapshot = EditorLevelManager.CaptureLevel([entity]).Placeables.Single();
+    Check(snapshot.RenderSurfaces.Length == 3);
+    var template = JsonConvert.DeserializeObject<Placeable>(JsonConvert.SerializeObject(snapshot, JsonHelper.GetSettings()), JsonHelper.GetSettings())!;
+    var instance = (SurfaceProbe)Prefab.Instantiate(template, Game.Instance.World);
+    Check(instance.First.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Transparent &&
+        instance.Second.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Opaque && instance.Billboard.AlphaCutoff == 0.8f);
+    var path = Path.Combine(testRoot, "surfaces.map");
+    EditorLevelManager.SaveCurrentLevel(path);
+    EditorLevelManager.OpenLevel(path);
+    var loaded = Game.Instance.World.Find<SurfaceProbe>()!;
+    Check(loaded.First.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Transparent && loaded.Billboard.AlphaCutoff == 0.8f);
+    Throws(() => loaded.First.AlphaCutoff = float.NaN);
+    Throws(() => loaded.Billboard.SurfaceMode = (ProjectShockGL.Rendering.SurfaceMode)999);
+    var legacy = (SurfaceProbe)LevelManager.CreateObject(Game.Instance.World,
+        new Placeable { Type = PlaceableType.Entity, Path = "SurfaceProbe" });
+    Check(legacy.First.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Cutout && legacy.First.AlphaCutoff == 0.5f);
+});
+
+RunScene("Brush surface defaults and face overrides survive map, prefab and undo independently", () =>
+{
+    var brush = (BrushBox)SceneObjects.Create(PlaceableType.BrushBox);
+    UndoRedo.Clear();
+    RecordInspector(brush, "Brush surface", () =>
+    {
+        brush.SurfaceMode = ProjectShockGL.Rendering.SurfaceMode.Opaque;
+        brush.AlphaCutoff = 0.7f;
+    });
+    var face = new BrushFaceData { SurfaceMode = ProjectShockGL.Rendering.SurfaceMode.Transparent, AlphaCutoff = 0.2f };
+    BrushTextureWindow.Apply(brush, BrushFace.PositiveZ, face, "Surface");
+    UndoRedo.Undo();
+    Check(brush.Faces.Count == 0 && brush.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Opaque);
+    UndoRedo.Undo();
+    Check(brush.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Cutout && brush.AlphaCutoff == 0.5f);
+    UndoRedo.Redo();
+    UndoRedo.Redo();
+    var path = Path.Combine(testRoot, "brush-surfaces.map");
+    EditorLevelManager.SaveCurrentLevel(path);
+    EditorLevelManager.OpenLevel(path);
+    var loaded = Game.Instance.World.Find<BrushBox>()!;
+    Check(loaded.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Opaque && loaded.AlphaCutoff == 0.7f &&
+        loaded.Faces[BrushFace.PositiveZ] == face);
+    var placement = EditorLevelManager.CaptureLevel([loaded]).Placeables.Single();
+    var instance = (BrushBox)Prefab.Instantiate(placement, Game.Instance.World);
+    Check(instance.SurfaceMode == loaded.SurfaceMode && instance.Faces[BrushFace.PositiveZ] == face);
+    Throws(() => instance.SetFace(BrushFace.PositiveX, new BrushFaceData { AlphaCutoff = -1 }));
+});
+
+Run("Indexed level entrances select PlayerStart before Start, reset between transitions and preserve save transforms", () =>
+{
+    var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+    var editorProperty = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+    var wasEditor = Application.IsEditor;
+    editorProperty.SetValue(null, false);
+    var world = Game.Instance.World;
+    var oxygen = new ProjectOxygenGL.Core.Game();
+    typeof(Game).GetProperty(nameof(Game.World))!.SetValue(oxygen, world);
+    var onLoaded = typeof(ProjectOxygenGL.Core.Game).GetMethod("OnLevelLoaded", flags)!.CreateDelegate<Action<Level>>(oxygen);
+    var onSaveLoaded = typeof(ProjectOxygenGL.Core.Game).GetMethod("OnSaveLoaded", flags)!.CreateDelegate<Action<LoadResult>>(oxygen);
+    var saveStateField = typeof(SaveData).GetField("_gameState", flags)!;
+    var previousSaveState = saveStateField.GetValue(SaveManager.GetData());
+    var name = "EntryCheck-" + Guid.NewGuid().ToString("N");
+    var levelA = name + "-A";
+    var levelB = name + "-B";
+    Directory.CreateDirectory(Path.Combine(testRoot, "Levels"));
+    File.WriteAllText(Path.Combine(testRoot, "Entities", name + ".json"),
+        JsonConvert.SerializeObject(new EntityData { Class = typeof(ProjectOxygenGL.Placeables.PlayerStart).AssemblyQualifiedName! }));
+    var entryRotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, 0.8f);
+    Placeable Start(int index, int priority, Vector3 position) => new()
+    {
+        Guid = Guid.NewGuid(), Type = PlaceableType.Entity, Path = name, Name = $"Entry{index}-{priority}",
+        Position = position, Rotation = entryRotation,
+        Properties = new Dictionary<string, object> { ["Index"] = index, ["Priority"] = priority }
+    };
+    EditorLevelManager.SaveLevel(new Level { Placeables = [Start(1, 1, new Vector3(1, 2, 3))] },
+        Path.Combine(testRoot, "Levels", levelA + ".map"));
+    EditorLevelManager.SaveLevel(new Level { Placeables =
+        [Start(1, 100, new Vector3(10, 2, 3)), Start(2, 1, new Vector3(20, 2, 3)), Start(2, 5, new Vector3(25, 2, 3))] },
+        Path.Combine(testRoot, "Levels", levelB + ".map"));
+    LevelManager.Loaded += onLoaded;
+    Vector3? atBeginPlay = null;
+    oxygen.BeginPlay += () => atBeginPlay = oxygen.GetPlayerCharacter()?.Transform.Position;
+    try
+    {
+        File.WriteAllText(settingsPath, gameSettings.Replace("[Game]\n", "[Game]\nPlayerCharacterClass=SessionCheckCharacter, EditorChecks\n"));
+        Settings.Initialize();
+        LevelManager.Load(levelA, 1);
+        Check(LevelManager.EntryIndex == 1 && atBeginPlay == new Vector3(1, 2, 3));
+        File.WriteAllText(Path.Combine(testRoot, "Entities", name + "-Loader.json"),
+            JsonConvert.SerializeObject(new EntityData { Class = typeof(ProjectShockGL.Placeables.LevelLoader).AssemblyQualifiedName! }));
+        var loader = (ProjectShockGL.Placeables.LevelLoader)Entity.Create(name + "-Loader")!;
+        Check(loader.EntryIndex == -1);
+        RecordInspector(loader, "EntryIndex", () => loader.EntryIndex = 2);
+        UndoRedo.Undo();
+        Check(loader.EntryIndex == -1);
+        UndoRedo.Redo();
+        var loaderPlacement = EditorLevelManager.CaptureLevel([loader]).Placeables.Single();
+        var loaderJson = JsonConvert.SerializeObject(loaderPlacement, JsonHelper.GetSettings());
+        var loaderTemplate = JsonConvert.DeserializeObject<Placeable>(loaderJson, JsonHelper.GetSettings())!;
+        var loaderCopy = (ProjectShockGL.Placeables.LevelLoader)Prefab.Instantiate(loaderTemplate, world);
+        Check(loaderCopy.EntryIndex == 2);
+        loaderCopy.Load(levelB);
+        var character = (SessionCheckCharacter)oxygen.GetPlayerCharacter()!;
+        Check(LevelManager.EntryIndex == 2 && character.Transform.Position == new Vector3(25, 2, 3) &&
+            character.Transform.Rotation == entryRotation && character.PositionAtStart == null);
+        world.Update(0);
+        Check(character.PositionAtStart == new Vector3(25, 2, 3) && character.RotationAtStart == entryRotation);
+        var active = LevelManager.ActiveLevel;
+        Throws(() => LevelManager.Load(name + "-Missing", 4));
+        Check(LevelManager.ActiveLevel == active && LevelManager.EntryIndex == 2 && !character.IsDestroyed);
+        Throws(() => LevelManager.Load(levelA, -2));
+        Check(LevelManager.ActiveLevel == active && LevelManager.EntryIndex == 2);
+        Throws(() => LevelManager.Load(new Level { Placeables = [new Placeable { Type = PlaceableType.Entity, Path = name + "-Missing" }] }, 4));
+        Check(LevelManager.ActiveLevel == active && LevelManager.EntryIndex == 2);
+        LevelManager.Load(levelA, 1);
+        Check(atBeginPlay == new Vector3(1, 2, 3));
+        LevelManager.Load(levelB);
+        Check(LevelManager.EntryIndex == -1 && atBeginPlay == new Vector3(10, 2, 3));
+        LevelManager.Load(levelB, 999);
+        Check(atBeginPlay == new Vector3(10, 2, 3));
+        SaveManager.GetData().SetGameState(new ProjectOxygenGL.Core.GameState
+        {
+            Level = levelB, PlayerPosition = new Vector3(8, 4, 6),
+            PlayerRotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, -0.5f)
+        });
+        onSaveLoaded(LoadResult.Success);
+        character = (SessionCheckCharacter)oxygen.GetPlayerCharacter()!;
+        Check(atBeginPlay == new Vector3(8, 4, 6) && character.PositionAtStart == null &&
+            character.Transform.Rotation == Quaternion.CreateFromAxisAngle(Vector3.UnitY, -0.5f));
+        world.Update(0);
+        Check(character.PositionAtStart == new Vector3(8, 4, 6));
+        LevelManager.Load(new Level(), 3);
+        Check(LevelManager.EntryIndex == 3 && ProjectOxygenGL.Placeables.PlayerStart.GetRandom() == null);
+        LevelManager.Unload();
+        Check(LevelManager.EntryIndex == -1);
+    }
+    finally
+    {
+        LevelManager.Loaded -= onLoaded;
+        saveStateField.SetValue(SaveManager.GetData(), previousSaveState);
+        LevelManager.Unload();
+        File.WriteAllText(settingsPath, gameSettings);
+        Settings.Initialize();
+        editorProperty.SetValue(null, wasEditor);
+    }
+});
+
 Run("BrushBox dimensions keep collider and transformed bounds aligned", () =>
 {
     EditorLevelManager.NewLevel();
@@ -4071,5 +4233,18 @@ public sealed class FailingWorldAccessProbe : Entity
         base.Create();
         _ = World;
         throw new InvalidOperationException("Creation failure");
+    }
+}
+public sealed class SurfaceProbe : Entity
+{
+    public MeshComponent First = null!, Second = null!;
+    public BillboardComponent Billboard = null!;
+    public override void Create()
+    {
+        base.Create();
+        First = AddComponent<MeshComponent>();
+        Second = AddComponent<MeshComponent>();
+        Billboard = AddComponent<BillboardComponent>();
+        AddComponent<MeshComponent>().IsDebug = true;
     }
 }

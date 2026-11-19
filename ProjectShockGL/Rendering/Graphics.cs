@@ -13,6 +13,7 @@ public class Graphics
 { 
     private Camera _camera = null!;
     private Renderer Renderer { get; }
+    internal Vector3 CameraPosition => _camera.Transform.Position;
     public RenderStatistics Statistics => Renderer.Statistics;
     
     public Graphics(Renderer renderer)
@@ -156,28 +157,28 @@ public class Graphics
         }
     }
 
-    public void DrawQuad(Vector3 position, Quaternion rotation, Vector2 size, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
+    public void DrawQuad(Vector3 position, Quaternion rotation, Vector2 size, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f)
     {
         var model = Matrix4x4.CreateScale(size.X, size.Y, 1f)
                     * Matrix4x4.CreateFromQuaternion(rotation)
                     * Matrix4x4.CreateTranslation(position);
 
-        Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters);
+        Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters, surfaceMode: surfaceMode, alphaCutoff: alphaCutoff);
     }
 
-    public void DrawMesh(Mesh mesh, Vector3 position, Quaternion rotation, Vector3 scale, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, bool backfaceCulling = true)
+    public void DrawMesh(Mesh mesh, Vector3 position, Quaternion rotation, Vector3 scale, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, bool backfaceCulling = true, SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f)
     {
         var model = Matrix4x4.CreateScale(scale)
                   * Matrix4x4.CreateFromQuaternion(rotation)
                   * Matrix4x4.CreateTranslation(position);
 
-        Renderer.DrawMesh(mesh, texture, model, color, lit, ignoreDepth, shader, shaderParameters, backfaceCulling);
+        Renderer.DrawMesh(mesh, texture, model, color, lit, ignoreDepth, shader, shaderParameters, backfaceCulling, surfaceMode, alphaCutoff);
     }
 
-    public void DrawBillboard(Vector3 position, Vector2 size, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, BillboardMode mode = BillboardMode.ViewAligned)
+    public void DrawBillboard(Vector3 position, Vector2 size, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, BillboardMode mode = BillboardMode.ViewAligned, SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f)
     {
         var model = CreateBillboardModel(_camera, position, size, mode);
-        Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters);
+        Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters, surfaceMode: surfaceMode, alphaCutoff: alphaCutoff);
     }
 
     internal static Matrix4x4 CreateBillboardModel(Camera camera, Vector3 position, Vector2 size, BillboardMode mode)

@@ -22,6 +22,7 @@ public class MeshComponent : RenderComponent
         var command = new MeshCommand
         {
             StaticBatchEligible = Owner.IsStatic && (Owner is Geometry or BrushBox) && !IsDebug,
+            SurfaceMode = SurfaceMode, AlphaCutoff = AlphaCutoff,
             Color = Color,
             Mesh = Mesh,
             Position = Owner.Transform.Position + Offset,

@@ -586,6 +586,119 @@ void Render()
         previewWorld.Clear();
         editorProperty.SetValue(null, wasEditor);
     }
+    var surfaceEnvironment = ProjectShockGL.Environment.Capture();
+    using (var surfaceRenderer = new Renderer(gl, 640, 240))
+    using (var surfaceCamera = Camera.Create())
+    using (var redGlass = Texture.CreateSolid(gl, 255, 0, 0, 64))
+    using (var blueGlass = Texture.CreateSolid(gl, 0, 0, 255, 128))
+    using (var invisibleRed = Texture.CreateSolid(gl, 255, 0, 0, 0))
+    {
+        try
+        {
+            ProjectShockGL.Environment.IsFogEnabled = false;
+            ProjectShockGL.Environment.SkyColorEnabled = false;
+            ProjectShockGL.Environment.AmbientColor = Color.White;
+            surfaceCamera.AspectRatio = 640f / 240;
+            var surfaceGraphics = new Graphics(surfaceRenderer);
+            byte[] SurfacePixel()
+            {
+                gl.Finish();
+                var pixel = new byte[4];
+                unsafe { fixed (byte* data = pixel) gl.ReadPixels(320, 120, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+                return pixel;
+            }
+            foreach (var surfaceLit in new[] { false, true })
+            {
+                surfaceGraphics.BeginDraw(surfaceCamera);
+                surfaceGraphics.DrawQuad(new Vector3(0, 0, -4), Quaternion.Identity, new Vector2(4),
+                    Content.GetWhitePixel(), Color.Green, lit: surfaceLit, surfaceMode: SurfaceMode.Opaque);
+                surfaceGraphics.DrawQuad(new Vector3(0, 0, -2), Quaternion.Identity, new Vector2(2),
+                    invisibleRed, Color.White, lit: surfaceLit, surfaceMode: SurfaceMode.Cutout);
+                Check(SurfacePixel()[1] > 240);
+                surfaceGraphics.DrawQuad(new Vector3(0, 0, -2), Quaternion.Identity, new Vector2(2),
+                    invisibleRed, Color.White, lit: surfaceLit, surfaceMode: SurfaceMode.Opaque);
+                Check(SurfacePixel()[0] > 240 && SurfacePixel()[1] < 3);
+                surfaceGraphics.EndDraw();
+            }
+            surfaceGraphics.BeginDraw(surfaceCamera);
+            var surfaceQueue = new RenderQueue();
+            // Deliberately submit near glass first and the solid background last.
+            surfaceQueue.Add(new BillboardCommand { Position = new Vector3(0, 0, -2), Size = new Vector2(2),
+                Texture = redGlass, Color = Color.White, SurfaceMode = SurfaceMode.Transparent });
+            surfaceQueue.Add(new MeshCommand { Position = new Vector3(0, 0, -4), Rotation = Quaternion.Identity, Scale = Vector3.One,
+                Mesh = Content.LoadMesh("Cube"), Texture = blueGlass, Color = Color.White, SurfaceMode = SurfaceMode.Transparent });
+            surfaceQueue.Add(new QuadCommand { Position = new Vector3(0, 0, -6), Rotation = Quaternion.Identity, Size = new Vector2(6),
+                Texture = Content.GetWhitePixel(), Color = new Color(0, 1, 0), SurfaceMode = SurfaceMode.Opaque });
+            surfaceQueue.Flush(surfaceGraphics);
+            var blended = SurfacePixel();
+            Check(Math.Abs(blended[0] - 64) < 3 && Math.Abs(blended[1] - 95) < 3 && Math.Abs(blended[2] - 96) < 3);
+            Check(gl.GetBoolean(GetPName.DepthWritemask));
+            surfaceGraphics.DrawQuad(new Vector3(0, 0, -3), Quaternion.Identity, new Vector2(3),
+                Content.GetWhitePixel(), Color.Yellow, surfaceMode: SurfaceMode.Opaque);
+            Check(SurfacePixel()[0] > 240 && SurfacePixel()[1] > 240 && SurfacePixel()[2] < 3);
+            surfaceGraphics.EndDraw();
+            surfaceGraphics.BeginDraw(surfaceCamera);
+            surfaceGraphics.DrawQuad(new Vector3(0, 0, -2), Quaternion.Identity, new Vector2(2),
+                blueGlass, Color.White, surfaceMode: SurfaceMode.Cutout, alphaCutoff: 0.7f);
+            Check(SurfacePixel().Take(3).All(channel => channel < 3));
+            surfaceGraphics.DrawQuad(new Vector3(0, 0, -2), Quaternion.Identity, new Vector2(2),
+                blueGlass, Color.White, surfaceMode: SurfaceMode.Cutout, alphaCutoff: 0.3f);
+            Check(SurfacePixel()[2] > 120);
+            surfaceGraphics.EndDraw();
+            gl.Disable(EnableCap.Blend);
+            gl.Disable(EnableCap.DepthTest);
+            gl.DepthMask(false);
+            gl.BlendFuncSeparate(BlendingFactor.One, BlendingFactor.Zero, BlendingFactor.DstAlpha, BlendingFactor.One);
+            gl.BlendEquationSeparate(BlendEquationModeEXT.Max, BlendEquationModeEXT.Min);
+            surfaceGraphics.DrawBillboard(new Vector3(0, 0, -2), Vector2.One, blueGlass, Color.White, surfaceMode: SurfaceMode.Transparent);
+            Check(!gl.IsEnabled(EnableCap.Blend) && !gl.IsEnabled(EnableCap.DepthTest) && !gl.GetBoolean(GetPName.DepthWritemask));
+            Check(gl.GetInteger(GetPName.BlendSrcAlpha) == (int)BlendingFactor.DstAlpha &&
+                gl.GetInteger(GetPName.BlendEquationRgb) == (int)BlendEquationModeEXT.Max);
+            Check(gl.GetError() == GLEnum.NoError);
+            var surfaceBatchWorld = new World();
+            try
+            {
+                var brushes = Enumerable.Range(0, 4).Select(index =>
+                {
+                    var item = surfaceBatchWorld.Spawn<ProjectShockGL.Core.BrushBox>();
+                    item.Transform.Position = new Vector3(index * 2 - 3, 0, -6);
+                    item.Lit = false;
+                    item.SurfaceMode = index < 2 ? SurfaceMode.Opaque : SurfaceMode.Cutout;
+                    return item;
+                }).ToArray();
+                surfaceBatchWorld.Update(0, simulate: false);
+                surfaceGraphics.BeginDraw(surfaceCamera);
+                var batches = new RenderQueue();
+                surfaceBatchWorld.Render(batches, debugOnly: false);
+                batches.Flush(surfaceGraphics);
+                Check(surfaceGraphics.Statistics.DrawCalls == 2);
+                surfaceGraphics.EndDraw();
+                brushes[0].SurfaceMode = SurfaceMode.Transparent;
+                brushes[0].Color = new Color(1, 1, 1, 0.5f);
+                surfaceGraphics.BeginDraw(surfaceCamera);
+                surfaceBatchWorld.Render(batches, debugOnly: false);
+                batches.Flush(surfaceGraphics);
+                Check(surfaceGraphics.Statistics.DrawCalls == 8);
+                surfaceGraphics.EndDraw();
+                var ownedMeshes = brushes.SelectMany(item =>
+                    ((Array)typeof(ProjectShockGL.Core.BrushBox).GetField("_faceBatches",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(item)!)
+                    .Cast<object>().Select(batch => (Mesh)batch.GetType().GetProperty("Mesh")!.GetValue(batch)!)).ToArray();
+                surfaceBatchWorld.Clear();
+                Check(ownedMeshes.All(mesh => mesh.IsDisposed));
+                Console.WriteLine("PASS: Static batches separate Opaque/Cutout while transparent BrushBox faces sort separately and release GPU resources");
+            }
+            finally { surfaceBatchWorld.Clear(); }
+            Console.WriteLine("PASS: Surface modes preserve opaque/cutout pixels, sort transparent meshes and billboards, avoid transparent depth writes and restore GL state");
+        }
+        finally
+        {
+            ProjectShockGL.Environment.Apply(surfaceEnvironment);
+            gl.Enable(EnableCap.DepthTest); gl.Enable(EnableCap.Blend); gl.DepthMask(true);
+            gl.BlendEquation(BlendEquationModeEXT.FuncAdd);
+            gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        }
+    }
     var canvas = new Canvas();
     canvas.Resize(new Vector2(640, 240));
     var font = Content.LoadFont("NotoSans-Regular", 24)!;

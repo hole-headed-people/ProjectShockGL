@@ -6,6 +6,7 @@ out vec4 FragColor;
 
 uniform sampler2D uTexture;
 uniform vec4 uColor;
+uniform int uSurfaceMode = 1;
 uniform float uTime;
 uniform float uAlphaCutoff;
 
@@ -24,7 +25,7 @@ uniform bool uFogEnabled;
 void main()
 {
     vec4 surface = texture(uTexture, vTexCoord) * uColor;
-    if (surface.a < uAlphaCutoff) discard;
+    if (uSurfaceMode == 1 && surface.a < uAlphaCutoff) discard;
     float pulse = 0.5 + 0.5 * sin(uTime * uPulseSpeed);
     vec3 color = mix(surface.rgb, surface.rgb * uPulseColor,
         pulse * clamp(uPulseStrength, 0.0, 1.0));
@@ -34,5 +35,5 @@ void main()
         float fog = clamp((uFogFar - distanceToCamera) / max(uFogFar - uFogNear, 0.0001), 0.0, 1.0);
         color = mix(uFogColor, color, fog);
     }
-    FragColor = vec4(color, surface.a);
+    FragColor = vec4(color, uSurfaceMode == 0 ? 1.0 : surface.a);
 }

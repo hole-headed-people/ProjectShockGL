@@ -17,6 +17,7 @@ public class BillboardComponent : RenderComponent
         var command = new BillboardCommand()
         {
             Mode = Mode,
+            SurfaceMode = SurfaceMode, AlphaCutoff = AlphaCutoff,
             Color = Color,
             Texture = Texture,
             Size = UseParentScale ? new Vector2(parentScale.X, parentScale.Y) * Scale : new Vector2(Scale),

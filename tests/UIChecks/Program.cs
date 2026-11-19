@@ -154,6 +154,47 @@ Run("Duplicating UI branches regenerates IDs and remaps internal Action targets 
     }
     finally { canvas.Destroy(); }
 });
+Run("Disabling a clicked button preserves remaining listeners and Actions but blocks future clicks", () =>
+{
+    var record = UIActionCatalog.GetGlobalMethods().Single(method => method.Name == "Test/Record");
+    var disable = UIActionCatalog.GetWidgetMethods(typeof(Widget)).Single(method => method.Name == "Widget/Set enabled");
+    var buttonData = new WidgetData { Type = "Button", Name = "Next" };
+    buttonData.ClickActions.Add(new UIActionCall { TargetId = buttonData.Id, Method = disable.Id,
+        Parameter = new Newtonsoft.Json.Linq.JValue(false) });
+    buttonData.ClickActions.Add(new UIActionCall { Target = UIActionTarget.Global, Method = record.Id,
+        Parameter = new Newtonsoft.Json.Linq.JValue("asset") });
+    var asset = new UIAsset { Root = new WidgetData { Children = [buttonData] } };
+    var canvas = new Canvas();
+    try
+    {
+        UIActionFixtures.Reset();
+        var screen = asset.Instantiate(canvas);
+        var button = screen.Find<Button>("Next")!;
+        button.Click.AddListener(() => button.IsEnabled = false);
+        button.Click.AddListener(() => UIActionFixtures.Values.Add("code"));
+        button.Click.Invoke();
+        Check(!button.IsEnabled && UIActionFixtures.Values.SequenceEqual(new[] { "code", "asset" }));
+        button.Click.Invoke();
+        Check(UIActionFixtures.Values.Count == 2);
+        button.IsEnabled = true;
+        button.Click.RemoveAllListeners();
+        button.Click.Invoke();
+        Check(!button.IsEnabled && UIActionFixtures.Values.SequenceEqual(new[] { "code", "asset", "asset" }));
+        foreach (var close in new Action[] { () => screen.Visible = false, () => screen.IsEnabled = false, screen.Destroy })
+        {
+            screen.Visible = true;
+            screen.IsEnabled = true;
+            button.IsEnabled = true;
+            button.Click.RemoveAllListeners();
+            button.Click.AddListener(close);
+            button.Click.AddListener(() => throw new Exception("Closed screen must stop dispatch"));
+            button.Click.Invoke();
+            Check(UIActionFixtures.Values.Count == 3);
+        }
+    }
+    finally { canvas.Destroy(); }
+});
+
 Run("UIEvent dispatches a snapshot, removes listeners and propagates callback failures", () =>
 {
     var signal = new UIEvent();

@@ -148,6 +148,23 @@ public class Game : ProjectShockGL.Core.Game
 
     protected virtual void OnCaptureState(GameState state){}
     protected virtual void OnRestoreState(GameState state){}
+    
+    protected virtual PlayerStart? GetPlayerStart()
+    {
+        if (LevelManager.EntryIndex >= 0)
+        {
+            var entry = PlayerStart.GetHighestPriority(LevelManager.EntryIndex);
+
+            if (entry != null)
+            {
+                return entry;
+            }
+
+            Log.PrintWarning($"PlayerStart with Index {LevelManager.EntryIndex} was not found in level '{LevelManager.ActiveLevelName}'. Using the default start.");
+        }
+
+        return PlayerStart.GetHighestPriority();
+    }
 
     private static Type GetGameStateType()
     {
@@ -187,7 +204,7 @@ public class Game : ProjectShockGL.Core.Game
             return;
         }
 
-        var playerStart = World.Find<PlayerStart>();
+        var playerStart = _loadingState == null ? GetPlayerStart() : null;
 
         var playerStartPosition = new Vector3(0f, 0f, 0f);
         var playerStartRotation = Quaternion.Identity;

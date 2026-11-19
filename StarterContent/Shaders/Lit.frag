@@ -9,6 +9,8 @@ out vec4 FragColor;
 
 uniform sampler2D uTexture;
 uniform vec4 uColor;
+uniform float uAlphaCutoff = 0.5;
+uniform int uSurfaceMode = 1;
 uniform bool uForceUnlit;
 
 uniform float uMainLightEnabled;
@@ -37,7 +39,7 @@ void main()
 {
     vec4 texColor = texture(uTexture, vTexCoord);
     
-    if (texColor.a < 0.5) discard;
+    if (uSurfaceMode == 1 && texColor.a < uAlphaCutoff) discard;
     
     vec3 baseColor = texColor.rgb * uColor.rgb;
 
@@ -93,5 +95,5 @@ void main()
         finalColor = mix(uFogColor, finalColor, fogFactor);
     }
 
-    FragColor = vec4(finalColor, texColor.a * uColor.a);
+    FragColor = vec4(finalColor, uSurfaceMode == 0 ? 1.0 : texColor.a * uColor.a);
 }

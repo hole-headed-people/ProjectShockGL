@@ -26,6 +26,7 @@ public class Button : Widget
     public Button()
     {
         Click = new UIEvent(() => _image != null && CanInteract());
+        Click.CanContinue = CanContinueClick;
         Click.InvokeActions = InvokeClickActions;
     }
     
@@ -112,6 +113,25 @@ public class Button : Widget
         }
         
         return Canvas.Visible && Canvas.IsEnabled && !Canvas.IsDestroyed;
+    }
+
+    private bool CanContinueClick()
+    {
+        if (_image == null || IsDestroyed || Canvas.IsDestroyed || !Canvas.Visible || !Canvas.IsEnabled)
+        {
+            return false;
+        }
+
+        for (Widget? widget = this; widget != null; widget = widget.Parent)
+        {
+            // Disabling the clicked button affects future clicks, not the current dispatch.
+            if (widget.IsDestroyed || !widget.Visible || widget != this && !widget.IsEnabled)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private void RefreshColor()
@@ -243,7 +263,7 @@ public class Button : Widget
         
         foreach (var action in ClickActions.Select(action => action.Copy()).ToArray())
         {
-            if (!CanInteract() || _actionRoot.IsDestroyed || !_actionRoot.Visible || !_actionRoot.IsEnabled)
+            if (!CanContinueClick() || _actionRoot == null || _actionRoot.IsDestroyed || !_actionRoot.Visible || !_actionRoot.IsEnabled)
             {
                 break;
             }

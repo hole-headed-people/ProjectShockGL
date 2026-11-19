@@ -19,6 +19,7 @@ public static class InspectorState
         public float? RigidbodyMass { get; set; }
         public bool? BackfaceCulling { get; set; }
         public TransformState Transform { get; set; }
+        public RenderSurfaceData[] RenderSurfaces { get; set; } = [];
         public BrushBoxData? Brush { get; set; }
         public Dictionary<string, JToken> Properties { get; set; } = new();
         public OutputData[] Outputs { get; set; } = [];
@@ -32,7 +33,8 @@ public static class InspectorState
         {
             Name = obj.Name, IsActive = obj.IsActive, Transform = TransformState.Capture(obj.Transform),
             Layer = obj.Layer, CollidesWith = obj.CollidesWith,
-            BackfaceCulling = obj.GetComponent<MeshComponent>() is { IsDestroyed: false } mesh ? mesh.BackfaceCulling : null,
+            RenderSurfaces = RenderSurfaceData.Capture(obj),
+                BackfaceCulling = obj.GetComponent<MeshComponent>() is { IsDestroyed: false } mesh ? mesh.BackfaceCulling : null,
             SimulatePhysics = (obj as Entity)?.Rigidbody?.IsEnabled,
             RigidbodyMass = obj.GetComponent<Rigidbody>() is { IsDestroyed: false } body ? body.Mass : null,
             Brush = obj is BrushBox brush ? new BrushBoxData
@@ -40,7 +42,8 @@ public static class InspectorState
                 Movable = brush.Movable,
                 SimulatePhysics = brush.SimulatePhysics,
                 Size = brush.Size, Texture = brush.TextureName, TextureFormat = brush.TextureFormat,
-                TextureScale = brush.TextureScale, Color = brush.Color, Lit = brush.Lit, Faces = brush.CaptureFaces()
+                TextureScale = brush.TextureScale, Color = brush.Color, Lit = brush.Lit, Faces = brush.CaptureFaces(),
+                    SurfaceMode = brush.SurfaceMode, AlphaCutoff = brush.AlphaCutoff
             } : null,
             Outputs = obj is Entity entity ? entity.Outputs.ToArray() : []
         };
@@ -80,6 +83,8 @@ public static class InspectorState
             brush.TextureFormat = data.TextureFormat;
             brush.TextureScale = data.TextureScale;
             brush.SetFaces(data.Faces);
+            brush.SurfaceMode = data.SurfaceMode;
+            brush.AlphaCutoff = data.AlphaCutoff;
             brush.Color = data.Color;
             brush.Lit = data.Lit;
         }
@@ -122,6 +127,7 @@ public static class InspectorState
             mesh.BackfaceCulling = backfaceCulling;
         }
 
+        RenderSurfaceData.Apply(obj, state.RenderSurfaces);
         obj.Layer = state.Layer;
         obj.CollidesWith = state.CollidesWith;
         obj.SetActive(state.IsActive);

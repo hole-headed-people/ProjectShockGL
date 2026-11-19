@@ -33,7 +33,12 @@ public static class Inspector
         {
             ImGui.TextUnformatted($"Selected objects: {Selection.Targets.Length}");
             ImGui.TextWrapped("Multiple-object editing is not available. Use the scene gizmo to move, rotate or scale the selection.");
-            if (Selection.Details.Length == 0) PrefabTools.DrawSave();
+            
+            if (Selection.Details.Length == 0)
+            {
+                PrefabTools.DrawSave();
+            }
+            
             ImGui.End();
             
             return;
@@ -43,6 +48,7 @@ public static class Inspector
         {
             DetailInspector.Draw(detailTarget);
             ImGui.End();
+            
             return;
         }
 
@@ -159,14 +165,13 @@ public static class Inspector
             Finish("TextureScale");
             
             ImGui.TextUnformatted("Texture scale = repeats per world unit");
-
+            
             if (ImGui.Button("Texture..."))
             {
                 ObjectManipulator.Commit();
                 UndoRedo.CommitPending();
                 BrushTextureWindow.Open = true;
             }
-
             
             if (ImGui.BeginCombo("Texture", $"{brush.TextureName} ({brush.TextureFormat})"))
             {
@@ -403,6 +408,7 @@ public static class Inspector
             }
         }
 
+        DrawSurfaces(obj);
         DrawCollisionLayers(obj);
 
         if (obj is Entity outputEntity)
@@ -754,15 +760,19 @@ public static class Inspector
     {
         var options = property.GetCustomAttribute<EditableAttribute>()!;
         var field = "Property/" + property.Name;
+        
         ImGui.TextUnformatted(property.Name);
 
         for (var index = 0; index < entries.Length; index++)
         {
             ImGui.PushID(index);
+            
             var text = entries[index] ?? "";
             var rowField = $"{field}/{index}";
             var reservedWidth = string.IsNullOrWhiteSpace(options.ContentDirectory) ? 28f : 62f;
+            
             ImGui.SetNextItemWidth(MathF.Max(30f, ImGui.GetContentRegionAvail().X - reservedWidth));
+            
             if (ImGui.InputText("##Entry", ref text, 256))
             {
                 SetEntry(text);
@@ -774,15 +784,18 @@ public static class Inspector
             if (options.ContentDirectory is { Length: > 0 } directory)
             {
                 ImGui.SameLine();
+                
                 if (ImGui.BeginCombo("##Asset", "", ImGuiComboFlags.NoPreview))
                 {
                     var root = Path.Combine(Content.Path, directory);
+                    
                     if (Directory.Exists(root))
                     {
                         foreach (var file in Directory.EnumerateFiles(root, "*.json", SearchOption.AllDirectories)
                                      .Order(StringComparer.OrdinalIgnoreCase))
                         {
                             var name = Path.ChangeExtension(Path.GetRelativePath(root, file), null)!.Replace('\\', '/');
+                            
                             if (ImGui.Selectable(name, name == text))
                             {
                                 SetEntry(name);
@@ -798,6 +811,7 @@ public static class Inspector
             ImGui.SameLine();
             var remove = ImGui.SmallButton("X");
             ImGui.PopID();
+            
             if (remove)
             {
                 property.SetValue(entity, entries.Where((_, entryIndex) => entryIndex != index).ToArray());
@@ -814,6 +828,7 @@ public static class Inspector
         }
 
         ImGui.BeginDisabled(entries.Length >= options.MaxEntries);
+        
         if (ImGui.SmallButton("Add"))
         {
             property.SetValue(entity, entries.Append("").ToArray());
@@ -821,6 +836,46 @@ public static class Inspector
         }
 
         ImGui.EndDisabled();
+    }
+
+    private static void DrawSurfaces(Object obj)
+    {
+        if (obj is BrushBox brush)
+        {
+            DrawSurface("Brush", brush.SurfaceMode, brush.AlphaCutoff,
+                value => brush.SurfaceMode = value, value => brush.AlphaCutoff = value);
+            return;
+        }
+        var components = RenderSurfaceData.Components(obj).ToArray();
+        for (var index = 0; index < components.Length; index++)
+        {
+            var component = components[index];
+            ImGui.PushID("Surface/" + index);
+            ImGui.TextUnformatted(component.GetType().Name);
+            DrawSurface("Surface/" + index, component.SurfaceMode, component.AlphaCutoff,
+                value => component.SurfaceMode = value, value => component.AlphaCutoff = value);
+            ImGui.PopID();
+        }
+    }
+
+    private static void DrawSurface(string field, SurfaceMode mode, float cutoff, Action<SurfaceMode> setMode, Action<float> setCutoff)
+    {
+        var index = (int)mode;
+        if (ImGui.Combo("SurfaceMode", ref index, new[] { "Opaque", "Cutout", "Transparent" }, 3))
+        {
+            setMode((SurfaceMode)index);
+            Changed(field + "/Mode", true);
+            mode = (SurfaceMode)index;
+        }
+        if (mode == SurfaceMode.Cutout)
+        {
+            if (ImGui.DragFloat("AlphaCutoff", ref cutoff, 0.01f, 0, 1))
+            {
+                setCutoff(Math.Clamp(cutoff, 0, 1));
+                Changed(field + "/AlphaCutoff");
+            }
+            Finish(field + "/AlphaCutoff");
+        }
     }
 
     private static void Changed(string field, bool discrete = false)

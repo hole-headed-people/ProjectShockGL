@@ -17,11 +17,14 @@ public class MeshCommand : RenderCommand
     public bool Lit { get; set; }
     public bool IgnoreDepth { get; set; }
 
+    internal override Vector3 SortPosition => Mesh == null ? Position : Vector3.Transform((Mesh.BoundsMin + Mesh.BoundsMax) * 0.5f, Matrix4x4.CreateScale(Scale) * Matrix4x4.CreateFromQuaternion(Rotation) * Matrix4x4.CreateTranslation(Position));
+    internal override bool IsOverlay => IgnoreDepth;
+
     public override void Execute(Graphics graphics)
     {
         if (Mesh != null && Texture != null)
         {
-            graphics.DrawMesh(Mesh, Position, Rotation, Scale, Texture, Color, Lit, IgnoreDepth, Shader, ShaderParameters, BackfaceCulling);
+            graphics.DrawMesh(Mesh, Position, Rotation, Scale, Texture, Color, Lit, IgnoreDepth, Shader, ShaderParameters, BackfaceCulling, SurfaceMode, AlphaCutoff);
         }
     }
 }

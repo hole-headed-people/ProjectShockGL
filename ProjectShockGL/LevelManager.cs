@@ -18,18 +18,25 @@ public static class LevelManager
 
     public static Level? ActiveLevel { get; private set; }
     public static string? ActiveLevelName { get; private set; }
+    public static int EntryIndex { get; private set; } = -1;
     public static bool IsLoading { get; private set; }
     
     private static bool _isChangingLevel;
     
     public static void Load(Level level)
     {
-        Load(level, null, null, null);
+        Load(level, -1);
     }
 
-    private static void Load(Level level, string? name, IReadOnlySet<Guid>? removedObjects, Action<World>? restore)
+    public static void Load(Level level, int entryIndex)
+    {
+        Load(level, null, null, null, entryIndex);
+    }
+
+    private static void Load(Level level, string? name, IReadOnlySet<Guid>? removedObjects, Action<World>? restore, int entryIndex = -1)
     {
         ArgumentNullException.ThrowIfNull(level);
+        if (entryIndex < -1) throw new ArgumentOutOfRangeException(nameof(entryIndex));
         
         EnsureIdle();
         
@@ -90,6 +97,7 @@ public static class LevelManager
             
             ActiveLevel = level;
             ActiveLevelName = name;
+            EntryIndex = entryIndex;
             RefreshLights();
 
             if (previous != null)
@@ -161,6 +169,7 @@ public static class LevelManager
             {
                 ActiveLevel = null;
                 ActiveLevelName = null;
+                EntryIndex = -1;
                 world.KillY = new Level().KillY;
                 world.SaveLevelState = true;
                 Environment.Reset();
@@ -264,6 +273,7 @@ public static class LevelManager
             mesh.BackfaceCulling = backfaceCulling;
         }
 
+        RenderSurfaceData.Apply(obj, placeable.RenderSurfaces);
         obj.Transform.Position = placeable.Position;
         obj.Transform.Rotation = Quaternion.Normalize(placeable.Rotation);
         obj.Transform.Scale = placeable.Scale;
@@ -279,6 +289,8 @@ public static class LevelManager
     {
         var data = placement.Brush ?? new BrushBoxData();
         
+        if (!Enum.IsDefined(data.SurfaceMode) || !float.IsFinite(data.AlphaCutoff) || data.AlphaCutoff < 0 || data.AlphaCutoff > 1)
+            throw new InvalidDataException("Invalid BrushBox surface settings.");
         if (data.Faces == null) throw new InvalidDataException("BrushBox Faces cannot be null.");
         BrushBoxMesh.Build(data.Size, placement.Scale, data.TextureScale, data.Faces);
 
@@ -314,6 +326,8 @@ public static class LevelManager
         brush.TextureFormat = data.TextureFormat;
         brush.TextureScale = data.TextureScale;
         brush.SetFaces(data.Faces);
+        brush.SurfaceMode = data.SurfaceMode;
+        brush.AlphaCutoff = data.AlphaCutoff;
         brush.Color = data.Color;
         brush.Lit = data.Lit;
         
@@ -351,10 +365,16 @@ public static class LevelManager
         Load(name, null, null);
     }
 
-    internal static void Load(string name, IReadOnlySet<Guid>? removedObjects, Action<World>? restore)
+    public static void Load(string name, int entryIndex)
+    {
+        Load(name, null, null, entryIndex);
+    }
+
+    internal static void Load(string name, IReadOnlySet<Guid>? removedObjects, Action<World>? restore, int entryIndex = -1)
     {
         EnsureIdle();
-        
+        if (entryIndex < -1) throw new ArgumentOutOfRangeException(nameof(entryIndex));
+
         var level = Content.LoadLevel(name);
         if (level == null)
         {
@@ -362,7 +382,7 @@ public static class LevelManager
             Log.PrintError(error.Message);
             throw error;
         }
-        Load(level, name, removedObjects, restore);
+        Load(level, name, removedObjects, restore, entryIndex);
     }
 }
 

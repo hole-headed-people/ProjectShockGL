@@ -17,9 +17,13 @@ public class RenderQueue
     
     public void Flush(Graphics graphics)
     {
-        _commands.Sort((a, b) => a.RenderOrder.CompareTo(b.RenderOrder));
+        var ordered = _commands.OrderBy(command => command.RenderOrder)
+            .ThenBy(command => command.IsOverlay ? 2 : command.SurfaceMode == SurfaceMode.Transparent ? 1 : 0)
+            .ThenByDescending(command => command.SurfaceMode == SurfaceMode.Transparent
+                ? System.Numerics.Vector3.DistanceSquared(graphics.CameraPosition, command.SortPosition) : 0)
+            .ToArray();
         
-        foreach (var command in _commands)
+        foreach (var command in ordered)
         {
             command.Execute(graphics);
         }

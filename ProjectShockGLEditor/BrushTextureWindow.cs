@@ -164,7 +164,7 @@ public static class BrushTextureWindow
         }
         
         var open = Open;
-        ImGui.SetNextWindowSize(new Vector2(430, 340), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(430, 460), ImGuiCond.FirstUseEver);
         
         var visible = ImGui.Begin("Texture", ref open);
         
@@ -320,6 +320,32 @@ public static class BrushTextureWindow
         if (ImGui.Button("Reset face"))
         {
             Apply(brush, _face, null, "Reset");
+        }
+
+        ImGui.Separator();
+        settings = Settings(brush, _face);
+        var inheritSurface = settings.SurfaceMode == null && settings.AlphaCutoff == null;
+        if (ImGui.Checkbox("Use brush surface", ref inheritSurface))
+        {
+            Apply(brush, _face, settings with
+            {
+                SurfaceMode = inheritSurface ? null : brush.SurfaceMode,
+                AlphaCutoff = inheritSurface ? null : brush.AlphaCutoff
+            }, "Surface");
+            settings = Settings(brush, _face);
+        }
+        var mode = (int)(settings.SurfaceMode ?? brush.SurfaceMode);
+        if (ImGui.Combo("SurfaceMode", ref mode, new[] { "Opaque", "Cutout", "Transparent" }, 3))
+        {
+            Apply(brush, _face, settings with { SurfaceMode = (SurfaceMode)mode }, "SurfaceMode");
+            settings = Settings(brush, _face);
+        }
+        if ((SurfaceMode)mode == SurfaceMode.Cutout)
+        {
+            var cutoff = settings.AlphaCutoff ?? brush.AlphaCutoff;
+            if (ImGui.DragFloat("AlphaCutoff", ref cutoff, 0.01f, 0, 1))
+                Apply(brush, _face, settings with { AlphaCutoff = Math.Clamp(cutoff, 0, 1) }, "AlphaCutoff", ImGui.IsItemActive());
+            if (ImGui.IsItemDeactivated()) UndoRedo.CommitPending();
         }
     }
 

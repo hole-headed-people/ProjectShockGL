@@ -14,6 +14,8 @@ public enum BrushFace
 
 public sealed record BrushFaceData
 {
+    public Rendering.SurfaceMode? SurfaceMode { get; init; }
+    public float? AlphaCutoff { get; init; }
     public string? Texture { get; init; }
     public TextureFormat? TextureFormat { get; init; }
     public Vector2? TextureScale { get; init; }
@@ -21,6 +23,9 @@ public sealed record BrushFaceData
 
     internal void Validate()
     {
+        if (SurfaceMode is { } mode && !Enum.IsDefined(mode) ||
+            AlphaCutoff is { } cutoff && (!float.IsFinite(cutoff) || cutoff < 0 || cutoff > 1))
+            throw new InvalidDataException("Invalid brush face surface settings.");
         if (TextureFormat is { } format && !Enum.IsDefined(format))
         {
             throw new InvalidDataException("Invalid brush face texture format.");

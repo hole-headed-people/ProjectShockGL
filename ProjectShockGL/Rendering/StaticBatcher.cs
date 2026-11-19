@@ -7,7 +7,7 @@ internal sealed class StaticBatcher
     private readonly Dictionary<BatchKey, Batch> _batches = [];
 
     private readonly record struct BatchKey(Texture Texture, Color Color, bool Lit, bool BackfaceCulling,
-        int RenderOrder, int Segment);
+        int RenderOrder, int Segment, SurfaceMode SurfaceMode, float AlphaCutoff);
     private readonly record struct Source(Mesh Mesh, int Revision, Matrix4x4 Model);
     private sealed record Batch(Mesh Mesh, Source[] Sources);
 
@@ -26,7 +26,7 @@ internal sealed class StaticBatcher
                 continue;
             }
 
-            var key = new BatchKey(mesh.Texture!, mesh.Color, mesh.Lit, mesh.BackfaceCulling, mesh.RenderOrder, segment);
+            var key = new BatchKey(mesh.Texture!, mesh.Color, mesh.Lit, mesh.BackfaceCulling, mesh.RenderOrder, segment, mesh.SurfaceMode, mesh.AlphaCutoff);
             
             if (!groups.TryGetValue(key, out var group))
             {
@@ -74,6 +74,7 @@ internal sealed class StaticBatcher
             {
                 Mesh = batch.Mesh, Texture = key.Texture, Color = key.Color, Lit = key.Lit,
                 BackfaceCulling = key.BackfaceCulling, RenderOrder = key.RenderOrder,
+                SurfaceMode = key.SurfaceMode, AlphaCutoff = key.AlphaCutoff,
                 Position = Vector3.Zero, Rotation = Quaternion.Identity, Scale = Vector3.One
             });
         }
@@ -89,7 +90,7 @@ internal sealed class StaticBatcher
     {
         source = default;
         
-        if (!command.StaticBatchEligible || command.Mesh is not { IsDisposed: false } mesh ||
+        if (command.SurfaceMode == SurfaceMode.Transparent || !command.StaticBatchEligible || command.Mesh is not { IsDisposed: false } mesh ||
             command.Texture is not { IsOpaque: true, Handle: not 0 } ||
             command.Shader != null || command.IgnoreDepth || command.Color.A != 1f ||
             mesh.Vertices.Length == 0 || mesh.Indices.Length == 0)

@@ -15,6 +15,7 @@ public class QuadComponent : RenderComponent
         
         var command = new QuadCommand()
         {
+            SurfaceMode = SurfaceMode, AlphaCutoff = AlphaCutoff,
             Color = Color,
             Position = Owner.Transform.Position + Offset,
             Rotation = Owner.Transform.Rotation,

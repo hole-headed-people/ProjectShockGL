@@ -21,6 +21,9 @@ public class Renderer : IDisposable
     private readonly int _unlitColor;
     private readonly int _unlitUvRect;
     private readonly int _unlitAlphaCutoff;
+    private readonly int _unlitSurfaceMode;
+    private readonly int _litSurfaceMode;
+    private readonly int _litAlphaCutoff;
     private readonly int _unlitCameraPos;
     private readonly int _unlitFogColor;
     private readonly int _unlitFogNear;
@@ -111,6 +114,9 @@ public class Renderer : IDisposable
             _unlitFogEnabled = _gl.GetUniformLocation(_unlitProgram, "uFogEnabled");
 
             _litProgram = CreateShaderProgram("Lit");
+            _unlitSurfaceMode = _gl.GetUniformLocation(_unlitProgram, "uSurfaceMode");
+            _litSurfaceMode = _gl.GetUniformLocation(_litProgram, "uSurfaceMode");
+            _litAlphaCutoff = _gl.GetUniformLocation(_litProgram, "uAlphaCutoff");
             _litProjection = _gl.GetUniformLocation(_litProgram, "uProjection");
             _litView = _gl.GetUniformLocation(_litProgram, "uView");
             _litModel = _gl.GetUniformLocation(_litProgram, "uModel");
@@ -401,9 +407,10 @@ public class Renderer : IDisposable
     }
 
     public void DrawQuadMesh(Texture texture, Matrix4x4 model, Color color, bool lit = false, bool ignoreDepth = false,
-        Vector4? uvRect = null, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
+        Vector4? uvRect = null, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null,
+        SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f)
     {
-        DrawMeshInternal(_quadMesh, texture, model, color, lit, ignoreDepth, uvRect, shader, shaderParameters);
+        DrawMeshInternal(_quadMesh, texture, model, color, lit, ignoreDepth, uvRect, shader, shaderParameters, surfaceMode, alphaCutoff);
     }
 
     internal void DrawLineMesh(Texture texture, Matrix4x4 model, Color color, bool lit = false,
@@ -431,7 +438,8 @@ public class Renderer : IDisposable
     }
 
     public void DrawMesh(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit = false, bool ignoreDepth = false,
-        ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, bool backfaceCulling = true)
+        ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, bool backfaceCulling = true,
+        SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f)
     {
         var cullFace = _gl.IsEnabled(EnableCap.CullFace);
         
@@ -446,7 +454,7 @@ public class Renderer : IDisposable
                 _gl.Disable(EnableCap.CullFace);
             }
 
-            DrawMeshInternal(mesh, texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters);
+            DrawMeshInternal(mesh, texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters, surfaceMode: surfaceMode, alphaCutoff: alphaCutoff);
         }
         finally
         {
@@ -522,7 +530,53 @@ public class Renderer : IDisposable
         }
     }
     private void DrawMeshInternal(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit,
-        bool ignoreDepth = false, Vector4? uvRect = null, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null)
+        bool ignoreDepth = false, Vector4? uvRect = null, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null,
+        SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f)
+    {
+        if (!Enum.IsDefined(surfaceMode) || !float.IsFinite(alphaCutoff) || alphaCutoff < 0 || alphaCutoff > 1)
+            throw new ArgumentOutOfRangeException(nameof(surfaceMode));
+        if (_isUI)
+        {
+            DrawMeshSurface(mesh, texture, model, color, lit, ignoreDepth, uvRect, shader, shaderParameters, surfaceMode, alphaCutoff);
+            return;
+        }
+        var depthWrite = _gl.GetBoolean(GetPName.DepthWritemask);
+        var depthTest = _gl.IsEnabled(EnableCap.DepthTest);
+        var blend = _gl.IsEnabled(EnableCap.Blend);
+        var srcRgb = _gl.GetInteger(GetPName.BlendSrcRgb);
+        var dstRgb = _gl.GetInteger(GetPName.BlendDstRgb);
+        var srcAlpha = _gl.GetInteger(GetPName.BlendSrcAlpha);
+        var dstAlpha = _gl.GetInteger(GetPName.BlendDstAlpha);
+        var equationRgb = _gl.GetInteger(GetPName.BlendEquationRgb);
+        var equationAlpha = _gl.GetInteger(GetPName.BlendEquationAlpha);
+        try
+        {
+            if (!_isUI)
+            {
+                _gl.DepthMask(surfaceMode != SurfaceMode.Transparent);
+                if (surfaceMode == SurfaceMode.Opaque) _gl.Disable(EnableCap.Blend);
+                else
+                {
+                    _gl.Enable(EnableCap.Blend);
+                    _gl.BlendEquation(BlendEquationModeEXT.FuncAdd);
+                    _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                }
+            }
+            DrawMeshSurface(mesh, texture, model, color, lit, ignoreDepth, uvRect, shader, shaderParameters, surfaceMode, alphaCutoff);
+        }
+        finally
+        {
+            _gl.DepthMask(depthWrite);
+            if (depthTest) _gl.Enable(EnableCap.DepthTest); else _gl.Disable(EnableCap.DepthTest);
+            if (blend) _gl.Enable(EnableCap.Blend); else _gl.Disable(EnableCap.Blend);
+            _gl.BlendFuncSeparate((BlendingFactor)srcRgb, (BlendingFactor)dstRgb, (BlendingFactor)srcAlpha, (BlendingFactor)dstAlpha);
+            _gl.BlendEquationSeparate((BlendEquationModeEXT)equationRgb, (BlendEquationModeEXT)equationAlpha);
+        }
+    }
+
+    private void DrawMeshSurface(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit,
+        bool ignoreDepth = false, Vector4? uvRect = null, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null,
+        SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f)
     {
         if (ReferenceEquals(texture, ExcludedTexture)) return;
         if (_frameForceUnlit)
@@ -547,7 +601,7 @@ public class Renderer : IDisposable
         {
             shader.Apply(shaderParameters);
             
-            SetCustomFrameUniforms(shader, uvRect);
+            SetCustomFrameUniforms(shader, uvRect, _isUI ? SurfaceMode.Transparent : surfaceMode, alphaCutoff);
         }
 
         if (!lit && shader == null)
@@ -555,9 +609,14 @@ public class Renderer : IDisposable
             var uv = uvRect ?? new Vector4(0, 0, 1, 1);
 
             _gl.Uniform4(_unlitUvRect, uv.X, uv.Y, uv.Z, uv.W);
-            _gl.Uniform1(_unlitAlphaCutoff, _isUI ? 0f : 0.5f);
+            _gl.Uniform1(_unlitAlphaCutoff, _isUI || surfaceMode != SurfaceMode.Cutout ? 0f : alphaCutoff);
         }
 
+        if (shader == null)
+        {
+            _gl.Uniform1(lit ? _litSurfaceMode : _unlitSurfaceMode, (int)(_isUI ? SurfaceMode.Transparent : surfaceMode));
+            if (lit) _gl.Uniform1(_litAlphaCutoff, surfaceMode == SurfaceMode.Cutout ? alphaCutoff : 0f);
+        }
         unsafe
         {
             _gl.UniformMatrix4(modelLoc, 1, false, (float*)&model);
@@ -586,14 +645,15 @@ public class Renderer : IDisposable
         }
     }
 
-    private void SetCustomFrameUniforms(ShaderProgram shader, Vector4? uvRect)
+    private void SetCustomFrameUniforms(ShaderProgram shader, Vector4? uvRect, SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f)
     {
         shader.Write("uProjection", _frameProjection);
         shader.Write("uView", _frameView);
         shader.Write("uTexture", 0);
         shader.Write("uTime", _frameTime);
         shader.Write("uUvRect", uvRect ?? new Vector4(0, 0, 1, 1));
-        shader.Write("uAlphaCutoff", 0.5f);
+        shader.Write("uSurfaceMode", (int)surfaceMode);
+        shader.Write("uAlphaCutoff", surfaceMode == SurfaceMode.Cutout ? alphaCutoff : 0f);
         shader.Write("uCameraPos", _frameCamera.Transform.Position);
         shader.Write("uFogColor", new Vector3(Environment.FogColor.R, Environment.FogColor.G, Environment.FogColor.B));
         shader.Write("uFogNear", Environment.FogNear);

@@ -76,7 +76,7 @@ public class BrushBox : Object
 
     public IReadOnlyDictionary<BrushFace, BrushFaceData> Faces { get; }
 
-    private sealed record FaceBatch(Mesh Mesh, (string Name, TextureFormat Format) Texture);
+    private sealed record FaceBatch(Mesh Mesh, (string Name, TextureFormat Format) Texture, SurfaceMode SurfaceMode, float AlphaCutoff);
 
     public BrushBox()
     {
@@ -158,6 +158,31 @@ public class BrushBox : Object
         }
     }
 
+    private SurfaceMode _surfaceMode = SurfaceMode.Cutout;
+    private float _alphaCutoff = 0.5f;
+    private SurfaceMode _meshSurfaceMode;
+    private float _meshAlphaCutoff;
+
+    public SurfaceMode SurfaceMode
+    {
+        get => _surfaceMode;
+        set
+        {
+            if (!Enum.IsDefined(value)) throw new ArgumentOutOfRangeException(nameof(value));
+            _surfaceMode = value;
+        }
+    }
+
+    public float AlphaCutoff
+    {
+        get => _alphaCutoff;
+        set
+        {
+            if (!float.IsFinite(value) || value < 0 || value > 1) throw new ArgumentOutOfRangeException(nameof(value));
+            _alphaCutoff = value;
+        }
+    }
+
     public string TextureName { get; set; } = "WhitePixel";
     
     public TextureFormat TextureFormat { get; set; } = TextureFormat.Jpeg;
@@ -196,7 +221,8 @@ public class BrushBox : Object
         var textureKey = (TextureName, TextureFormat);
 
         if (_mesh != null && _meshSize == Size && _meshScale == Transform.Scale &&
-            _meshTextureScale == TextureScale && _meshFacesVersion == _facesVersion && _meshTexture == textureKey)
+            _meshTextureScale == TextureScale && _meshFacesVersion == _facesVersion && _meshTexture == textureKey &&
+            _meshSurfaceMode == SurfaceMode && _meshAlphaCutoff == AlphaCutoff)
         {
             return;
         }
@@ -212,19 +238,26 @@ public class BrushBox : Object
             var groups = Enumerable.Range(0, 6).GroupBy(index =>
             {
                 _faces.TryGetValue((BrushFace)index, out var settings);
-                return BrushFaceData.GetTexture(settings, TextureName, TextureFormat);
+                var mode = settings?.SurfaceMode ?? SurfaceMode;
+                return (Texture: BrushFaceData.GetTexture(settings, TextureName, TextureFormat),
+                    Mode: mode, Cutoff: settings?.AlphaCutoff ?? AlphaCutoff,
+                    Face: mode == SurfaceMode.Transparent ? index : -1);
             }).ToArray();
             
             var batches = groups.Select(group =>
             {
-                var mesh = groups.Length == 1 ? fullMesh : Content.CreateMesh(data.Vertices,
-                    group.SelectMany(index => data.Indices.Skip(index * 6).Take(6)).ToArray());
+                var faces = group.ToArray();
+                var mesh = groups.Length == 1 ? fullMesh : Content.CreateMesh(
+                    faces.SelectMany(index => data.Vertices.Skip(index * 32).Take(32)).ToArray(),
+                    Enumerable.Range(0, faces.Length).SelectMany(index =>
+                        new uint[] { (uint)(index * 4), (uint)(index * 4 + 1), (uint)(index * 4 + 2),
+                            (uint)(index * 4), (uint)(index * 4 + 2), (uint)(index * 4 + 3) }).ToArray());
                 if (groups.Length != 1)
                 {
                     created.Add(mesh);
                 }
                 
-                return new FaceBatch(mesh, group.Key);
+                return new FaceBatch(mesh, group.Key.Texture, group.Key.Mode, group.Key.Cutoff);
             }).ToArray();
 
             ReleaseMeshes();
@@ -238,6 +271,8 @@ public class BrushBox : Object
             _meshFacesVersion = _facesVersion;
             
             _meshTexture = textureKey;
+            _meshSurfaceMode = SurfaceMode;
+            _meshAlphaCutoff = AlphaCutoff;
             
             _failedTextures.Clear();
         }
@@ -310,6 +345,8 @@ public class BrushBox : Object
                     Texture = brush.ResolveTexture(batch.Texture);
                     Color = brush.Color;
                     Lit = brush.Lit;
+                    SurfaceMode = batch.SurfaceMode;
+                    AlphaCutoff = batch.AlphaCutoff;
                     
                     base.Render(queue);
                 }
