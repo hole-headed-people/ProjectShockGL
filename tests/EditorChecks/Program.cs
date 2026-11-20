@@ -12,7 +12,7 @@ using GameObject = ProjectShockGL.Core.Object;
 using Game = ProjectShockGL.Core.Game;
 using Environment = ProjectShockGL.Environment;
 
-var testRoot = Path.Combine(AppContext.BaseDirectory, "EditorCheckData");
+var testRoot = Path.Combine(AppContext.BaseDirectory, "EditorCheckData", Guid.NewGuid().ToString("N"));
 var saveDirectory = Path.Combine(testRoot, $"SaveCheck-{Guid.NewGuid():N}");
 var settingsPath = Path.Combine(AppContext.BaseDirectory, "GameSettings.ini");
 var gameSettings = $"[Game]\nName=EditorChecks\nClass=CheckGame, EditorChecks\nSaveDirectory={saveDirectory}\n[Content]\nCustomPath={testRoot}\n";
@@ -2366,6 +2366,312 @@ Run("Indexed level entrances select PlayerStart before Start, reset between tran
     }
 });
 
+Run("Entity asset documents assign a GUID once, preserve typed parameters and refresh Content without changing map paths", () =>
+{
+    var directory = Path.Combine(testRoot, "Entities");
+    var name = "AssetEditor-" + Guid.NewGuid().ToString("N");
+    var path = Path.Combine(directory, name + ".json");
+    var document = new EntityAssetDocument(directory);
+    Check(document.AssetId == null && !document.IsDirty);
+    document.Class = typeof(CheckEntity).AssemblyQualifiedName!;
+    document.Parameters.Add(new EntityAssetParameter { Key = "Text", Value = "42" });
+    document.Parameters.Add(new EntityAssetParameter { Key = "Count", Kind = EntityParameterKind.Number, Value = "12" });
+    document.Parameters.Add(new EntityAssetParameter { Key = "Amount", Kind = EntityParameterKind.Number, Value = "0.25" });
+    document.Parameters.Add(new EntityAssetParameter { Key = "Enabled", Kind = EntityParameterKind.Boolean, Value = "true" });
+    document.Parameters.Add(new EntityAssetParameter { Key = "List", Kind = EntityParameterKind.Json, Value = "[1, \"hello\", false]" });
+    Check(document.IsDirty && !File.Exists(path));
+    document.Save(path);
+    var id = document.AssetId;
+    Check(id != null && id != Guid.Empty && !document.IsDirty);
+    var json = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(path));
+    Check(json["AssetId"]!.ToObject<Guid>() == id && json["Parameters"]!["Text"]!.Type == Newtonsoft.Json.Linq.JTokenType.String);
+    Check(json["Parameters"]!["Count"]!.Type == Newtonsoft.Json.Linq.JTokenType.Integer &&
+        json["Parameters"]!["Amount"]!.Type == Newtonsoft.Json.Linq.JTokenType.Float &&
+        json["Parameters"]!["Enabled"]!.Type == Newtonsoft.Json.Linq.JTokenType.Boolean &&
+        json["Parameters"]!["List"]!.Type == Newtonsoft.Json.Linq.JTokenType.Array);
+    var cached = Content.LoadEntity(name)!;
+    Check(cached.AssetId == id);
+    document.Class = typeof(Entity).AssemblyQualifiedName!;
+    document.Save();
+    Check(document.AssetId == id && Content.LoadEntity(name)!.Class == document.Class && !ReferenceEquals(cached, Content.LoadEntity(name)));
+    document.New();
+    Check(document.AssetId == null && document.FilePath == null && document.Parameters.Count == 0 && !document.IsDirty);
+    document.Open(path);
+    Check(document.AssetId == id && document.Parameters.Count == 5 && !document.IsDirty);
+    document.Parameters[0].Value = "changed";
+    document.Save();
+    Check(document.AssetId == id && Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(path))["AssetId"]!.ToObject<Guid>() == id);
+    var outsider = Path.Combine(testRoot, "outside-entity.json");
+    Throws(() => document.Save(outsider));
+    Check(!File.Exists(outsider));
+    Throws(() => document.Save(Path.Combine(directory, name + "-copy.json")));
+    var before = File.ReadAllText(path);
+    document.Parameters.Add(new EntityAssetParameter { Key = "Text", Value = "duplicate" });
+    Throws(() => document.Save());
+    Check(File.ReadAllText(path) == before && document.AssetId == id);
+    document.Parameters.RemoveAt(document.Parameters.Count - 1);
+    document.Parameters[1].Value = "not a number";
+    Throws(() => document.Save());
+    Check(File.ReadAllText(path) == before);
+    document.Open(path);
+    var changed = Newtonsoft.Json.Linq.JObject.Parse(before);
+    var otherId = Guid.NewGuid();
+    changed["AssetId"] = otherId;
+    File.WriteAllText(path, changed.ToString());
+    var changedText = File.ReadAllText(path);
+    Throws(() => document.Save());
+    Check(File.ReadAllText(path) == changedText && document.AssetId == id);
+    changed["AssetId"] = "invalid-guid";
+    File.WriteAllText(path, changed.ToString());
+    Throws(() => document.Open(path));
+    Check(document.AssetId == id);
+    File.WriteAllText(path, before);
+    Content.InvalidateEntity(name);
+    var fresh = new EntityAssetDocument(directory) { Class = "Missing.Class, Missing.Assembly" };
+    var failedPath = Path.Combine(directory, name + "-failed.json");
+    Throws(() => fresh.Save(failedPath));
+    Check(fresh.AssetId == null && !File.Exists(failedPath));
+});
+
+Run("Entity asset editor opens legacy files without GUIDs and preserves extra JSON fields", () =>
+{
+    var directory = Path.Combine(testRoot, "Entities");
+    var path = Path.Combine(directory, "LegacyAssetEditor-" + Guid.NewGuid().ToString("N") + ".json");
+    var existing = new Newtonsoft.Json.Linq.JObject
+    {
+        ["Class"] = typeof(CheckEntity).AssemblyQualifiedName,
+        ["Extra"] = new Newtonsoft.Json.Linq.JObject { ["Description"] = "keep me" }
+    };
+    File.WriteAllText(path, existing.ToString());
+    var document = new EntityAssetDocument(directory);
+    document.Open(path);
+    Check(document.AssetId == null && document.Parameters.Count == 0 && !document.IsDirty);
+    document.Save();
+    var id = document.AssetId;
+    document.Save();
+    Check(id != null && document.AssetId == id);
+    var json = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(path));
+    Check(json["Extra"]!["Description"]!.ToObject<string>() == "keep me" && json["AssetId"]!.ToObject<Guid>() == id);
+    var fresh = new EntityAssetDocument(directory) { Class = typeof(Entity).AssemblyQualifiedName! };
+    fresh.Save(path);
+    Check(fresh.AssetId == id);
+});
+
+RunScene("Entity asset GUIDs survive moves in maps, prefabs, duplication and Undo while legacy paths remain supported", () =>
+{
+    var name = "GuidReference-" + Guid.NewGuid().ToString("N");
+    var asset = Path.Combine(testRoot, "Entities", name + ".json");
+    var movedName = "Moved/" + name;
+    var moved = Path.Combine(testRoot, "Entities", movedName + ".json");
+    var map = Path.Combine(testRoot, name + ".map");
+    var prefab = Content.GetPrefabPath(name);
+    var id = Guid.NewGuid();
+    File.WriteAllText(asset, JsonConvert.SerializeObject(new EntityData
+    {
+        AssetId = id, Class = typeof(CheckEntity).AssemblyQualifiedName!
+    }));
+    try
+    {
+        var source = (CheckEntity)SceneObjects.Create(PlaceableType.Entity, name);
+        source.Number = 42;
+        source.Outputs.Add(new OutputData { Event = "Test", TargetName = "Outside", Input = "SetActive", Parameter = "false" });
+        var objectId = source.Guid;
+        EditorLevelManager.SaveCurrentLevel(map);
+        PrefabTools.Save(source, name);
+        Check(!EditorLevelManager.IsDirty);
+        var saved = EditorLevelManager.ReadLevel(map).Placeables.Single();
+        Check(saved.AssetId == id && saved.Guid == objectId && saved.AssetId != saved.Guid && saved.Path == name);
+        Check(Content.LoadPrefabData(name)!.Placeables.Single().AssetId == id);
+        Directory.CreateDirectory(Path.GetDirectoryName(moved)!);
+        File.Move(asset, moved);
+        // Reusing the old path must never override a GUID reference.
+        File.WriteAllText(asset, JsonConvert.SerializeObject(new EntityData
+        {
+            AssetId = Guid.NewGuid(), Class = typeof(Entity).AssemblyQualifiedName!
+        }));
+        EditorLevelManager.OpenLevel(map);
+        var restored = Game.Instance.World.GetAllObjects(true).OfType<CheckEntity>().Single();
+        Check(restored.Guid == objectId && restored.AssetId == id && restored.Path == movedName && restored.Number == 42);
+        Check(restored.Outputs.Single().TargetName == "Outside");
+        var copy = (CheckEntity)SceneObjects.Duplicate(restored);
+        Check(copy.AssetId == id && copy.Guid != objectId && copy.Number == 42);
+        UndoRedo.Undo();
+        UndoRedo.Redo();
+        Check(Selection.Object is CheckEntity { Number: 42 } recreated && recreated.AssetId == id);
+        var instances = Prefab.InstantiateAll(name);
+        Check(instances.Single() is CheckEntity { Number: 42 } && ((Entity)instances.Single()).AssetId == id);
+        var old = new Placeable { Type = PlaceableType.Entity, Path = movedName, Name = "LegacyReference" };
+        Check(LevelManager.CreateObject(Game.Instance.World, old) is CheckEntity);
+        Content.UnloadAll();
+        Check(Content.LoadEntity(name, id)!.Class == typeof(CheckEntity).AssemblyQualifiedName);
+        var guidOnly = new Placeable { Type = PlaceableType.Entity, AssetId = id, Name = "GuidOnly" };
+        Check(LevelManager.CreateObject(Game.Instance.World, guidOnly) is CheckEntity);
+        EditorLevelManager.SaveCurrentLevel(map);
+        Check(EditorLevelManager.ReadLevel(map).Placeables.All(item => item.Type != PlaceableType.Entity ||
+            item.AssetId == id && item.Path == movedName));
+        Check(!EditorLevelManager.IsDirty);
+        File.Delete(moved);
+        Throws(() => Content.LoadEntity(name, id)); // No fallback to the unrelated old-path asset.
+    }
+    finally
+    {
+        EditorLevelManager.NewLevel();
+        if (File.Exists(asset)) File.Delete(asset);
+        if (File.Exists(moved)) File.Delete(moved);
+        if (File.Exists(prefab)) File.Delete(prefab);
+        if (File.Exists(map)) File.Delete(map);
+        Content.InvalidateEntity(name);
+        Content.InvalidateEntity(movedName);
+    }
+});
+
+RunScene("Saving legacy entity references assigns a persistent asset GUID without rewriting parameters or object GUIDs", () =>
+{
+    var name = "LegacyGuid-" + Guid.NewGuid().ToString("N");
+    var asset = Path.Combine(testRoot, "Entities", name + ".json");
+    var map = Path.Combine(testRoot, name + ".map");
+    var prefab = Content.GetPrefabPath(name);
+    var text = JsonConvert.SerializeObject(new
+    {
+        Class = typeof(CheckEntity).AssemblyQualifiedName,
+        Parameters = new { Note = "2020-01-01T00:00:00Z", Value = 17 },
+        Extra = new { Keep = true }
+    });
+    File.WriteAllText(asset, text);
+    try
+    {
+        var source = (Entity)SceneObjects.Create(PlaceableType.Entity, name);
+        var objectId = source.Guid;
+        EditorLevelManager.RefreshDirty();
+        Check(File.ReadAllText(asset) == text && source.AssetId == null);
+        EditorLevelManager.SaveCurrentLevel(map);
+        var json = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(asset));
+        var id = json["AssetId"]!.ToObject<Guid>();
+        Check(id != Guid.Empty && json["Extra"]!["Keep"]!.ToObject<bool>());
+        Check(json["Parameters"]!["Value"]!.ToObject<int>() == 17);
+        using (var reader = new Newtonsoft.Json.JsonTextReader(new StringReader(File.ReadAllText(asset)))
+            { DateParseHandling = Newtonsoft.Json.DateParseHandling.None })
+        {
+            var raw = Newtonsoft.Json.Linq.JObject.Load(reader);
+            Check(raw["Parameters"]!["Note"]!.Type == Newtonsoft.Json.Linq.JTokenType.String &&
+                raw["Parameters"]!["Note"]!.ToObject<string>() == "2020-01-01T00:00:00Z");
+        }
+        Check(source.AssetId == id);
+        Check(EditorLevelManager.ReadLevel(map).Placeables.Single().AssetId == id);
+        Check(EditorLevelManager.ReadLevel(map).Placeables.Single().Guid == objectId);
+        PrefabTools.Save(source, name);
+        Check(Content.LoadPrefabData(name)!.Placeables.Single().AssetId == id);
+        EditorLevelManager.SaveCurrentLevel(map);
+        Check(Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(asset))["AssetId"]!.ToObject<Guid>() == id);
+        var duplicate = Path.Combine(testRoot, "Entities", name + "-duplicate.json");
+        File.Copy(asset, duplicate);
+        try
+        {
+            EntityAssetReferences.Refresh();
+            Throws(() => Content.LoadEntity(name, id));
+            Throws(() => Prefab.InstantiateAll(name));
+        }
+        finally { File.Delete(duplicate); EntityAssetReferences.Refresh(); }
+    }
+    finally
+    {
+        EditorLevelManager.NewLevel();
+        if (File.Exists(asset)) File.Delete(asset);
+        if (File.Exists(map)) File.Delete(map);
+        if (File.Exists(prefab)) File.Delete(prefab);
+        Content.InvalidateEntity(name);
+    }
+});
+
+Run("Fix Asset References updates legacy maps and both prefab formats, backs up exact bytes, and is idempotent", () =>
+{
+    var root = Path.Combine(testRoot, "RepairRuns", Guid.NewGuid().ToString("N"), "Content");
+    foreach (var folder in new[] { "Entities/Logic", "Levels", "Prefabs" }) Directory.CreateDirectory(Path.Combine(root, folder));
+    var existingId = Guid.NewGuid();
+    var asset = Path.Combine(root, "Entities/Logic/Legacy.json");
+    var known = Path.Combine(root, "Entities/Known.json");
+    File.WriteAllText(asset, JsonConvert.SerializeObject(new
+    {
+        Class = typeof(CheckEntity).AssemblyQualifiedName, Parameters = new { Date = "2020-01-01T00:00:00Z" }, Extra = "keep"
+    }));
+    File.WriteAllText(known, JsonConvert.SerializeObject(new EntityData { AssetId = existingId, Class = typeof(CheckEntity).AssemblyQualifiedName! }));
+    var objectId = Guid.NewGuid();
+    var placement = new Newtonsoft.Json.Linq.JObject
+    {
+        ["Type"] = (int)PlaceableType.Entity, ["Name"] = "Lever", ["Path"] = "Logic/Legacy",
+        ["Guid"] = objectId, ["Extra"] = "placement",
+        ["Outputs"] = new Newtonsoft.Json.Linq.JArray(new Newtonsoft.Json.Linq.JObject { ["TargetName"] = "Door", ["Input"] = "SetActive", ["Parameter"] = "true" })
+    };
+    var map = Path.Combine(root, "Levels/Test.map");
+    var multi = Path.Combine(root, "Prefabs/Multi.json");
+    var single = Path.Combine(root, "Prefabs/Single.json");
+    File.WriteAllText(map, new Newtonsoft.Json.Linq.JObject { ["Placeables"] = new Newtonsoft.Json.Linq.JArray(placement.DeepClone()), ["Extra"] = 19 }.ToString());
+    File.WriteAllText(multi, new Newtonsoft.Json.Linq.JObject
+    {
+        ["Placeables"] = new Newtonsoft.Json.Linq.JArray(placement.DeepClone(),
+            new Newtonsoft.Json.Linq.JObject { ["Type"] = (int)PlaceableType.Entity, ["AssetId"] = existingId, ["Path"] = "Outdated", ["Name"] = "Known" })
+    }.ToString());
+    File.WriteAllText(single, placement.ToString());
+    var originals = Directory.GetFiles(root, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
+    var report = AssetReferenceRepair.Run(root);
+    Check(report.Succeeded && report.Errors.Count == 0 && report.BackupDirectory != null);
+    Check(report.Unchanged.Contains("Entities/Known.json") && report.Changes.Count == 5);
+    var id = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(asset))["AssetId"]!.ToObject<Guid>();
+    Check(id != Guid.Empty && id != existingId);
+    foreach (var path in new[] { asset, map, multi, single })
+        Check(File.ReadAllBytes(Path.Combine(report.BackupDirectory!, Path.GetRelativePath(root, path))).SequenceEqual(originals[Path.GetFullPath(path)]));
+    Check(File.ReadAllBytes(known).SequenceEqual(originals[Path.GetFullPath(known)]));
+    var savedMap = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(map));
+    var savedPlacement = savedMap["Placeables"]![0]!;
+    Check(savedPlacement["AssetId"]!.ToObject<Guid>() == id && savedPlacement["Guid"]!.ToObject<Guid>() == objectId);
+    Check(savedPlacement["Extra"]!.ToObject<string>() == "placement" && savedMap["Extra"]!.ToObject<int>() == 19);
+    Check(Newtonsoft.Json.Linq.JToken.DeepEquals(savedPlacement["Outputs"], placement["Outputs"]));
+    Check(Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(multi))["Placeables"]![1]!["Path"]!.ToObject<string>() == "Known");
+    Check(Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(single))["AssetId"]!.ToObject<Guid>() == id);
+    using (var reader = new Newtonsoft.Json.JsonTextReader(new StringReader(File.ReadAllText(asset))) { DateParseHandling = DateParseHandling.None })
+        Check(Newtonsoft.Json.Linq.JObject.Load(reader)["Parameters"]!["Date"]!.Type == Newtonsoft.Json.Linq.JTokenType.String);
+    var after = originals.Keys.ToDictionary(path => path, File.ReadAllBytes);
+    var again = AssetReferenceRepair.Run(root);
+    Check(again.Succeeded && again.Changes.Count == 0 && again.BackupDirectory == null && again.Unchanged.Count == 5);
+    Check(after.All(pair => File.ReadAllBytes(pair.Key).SequenceEqual(pair.Value)));
+});
+
+Run("Fix Asset References writes nothing on bad JSON, missing targets, invalid or duplicate GUIDs, or a blocked backup directory", () =>
+{
+    foreach (var problem in new[] { "json", "missing", "invalid-id", "duplicate-id", "backup" })
+    {
+        var parent = Path.Combine(testRoot, "RepairFailures", Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(parent, "Content");
+        Directory.CreateDirectory(Path.Combine(root, "Entities"));
+        Directory.CreateDirectory(Path.Combine(root, "Levels"));
+        var asset = Path.Combine(root, "Entities/Legacy.json");
+        File.WriteAllText(asset, JsonConvert.SerializeObject(new EntityData { Class = typeof(CheckEntity).AssemblyQualifiedName! }));
+        var id = Guid.NewGuid();
+        var known = new Newtonsoft.Json.Linq.JObject { ["Class"] = typeof(CheckEntity).AssemblyQualifiedName, ["AssetId"] = id };
+        File.WriteAllText(Path.Combine(root, "Entities/Known.json"), known.ToString());
+        if (problem == "json") File.WriteAllText(Path.Combine(root, "Entities/Broken.json"), "{");
+        if (problem == "invalid-id")
+        {
+            known["AssetId"] = "not-a-guid";
+            File.WriteAllText(Path.Combine(root, "Entities/Known.json"), known.ToString());
+        }
+        if (problem == "duplicate-id") File.WriteAllText(Path.Combine(root, "Entities/Copy.json"), known.ToString());
+        if (problem == "backup") File.WriteAllText(Path.Combine(parent, "AssetReferenceBackups"), "blocks directory creation");
+        File.WriteAllText(Path.Combine(root, "Levels/Test.map"), new Newtonsoft.Json.Linq.JObject
+        {
+            ["Placeables"] = new Newtonsoft.Json.Linq.JArray(
+                new Newtonsoft.Json.Linq.JObject { ["Type"] = (int)PlaceableType.Entity, ["Path"] = "Legacy" },
+                new Newtonsoft.Json.Linq.JObject { ["Type"] = (int)PlaceableType.Entity, ["Path"] = problem == "missing" ? "Missing" : "Legacy" })
+        }.ToString());
+        var before = Directory.GetFiles(root, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
+        var report = AssetReferenceRepair.Run(root);
+        Check(!report.Succeeded && report.Errors.Count != 0 && report.Changes.Count == 0);
+        Check(before.All(pair => File.ReadAllBytes(pair.Key).SequenceEqual(pair.Value)));
+        Check(Directory.GetFiles(root, "*", SearchOption.AllDirectories).Length == before.Count);
+        if (problem != "backup") Check(!Directory.Exists(Path.Combine(parent, "AssetReferenceBackups")));
+    }
+});
+
 Run("BrushBox dimensions keep collider and transformed bounds aligned", () =>
 {
     EditorLevelManager.NewLevel();
@@ -3369,7 +3675,8 @@ RunScene("Palette creation uses short unique names while retaining nested asset 
 {
     var folder = Path.Combine(testRoot, "Entities", "Logic");
     Directory.CreateDirectory(folder);
-    File.Copy(Path.Combine(testRoot, "Entities", "Check.json"), Path.Combine(folder, "Check.json"), true);
+    File.WriteAllText(Path.Combine(folder, "Check.json"),
+        JsonConvert.SerializeObject(new EntityData { AssetId = Guid.NewGuid(), Class = typeof(CheckEntity).AssemblyQualifiedName! }));
     var first = (Entity)SceneObjects.Create(PlaceableType.Entity, "Logic/Check");
     var second = (Entity)SceneObjects.Create(PlaceableType.Entity, "Check");
     Check(first.Name == "Check_1" && first.Path == "Logic/Check");
@@ -3787,6 +4094,64 @@ if (args.Contains("--imgui"))
                 Check(DrawBounds(true) == 0);
             }
             finally { UIEditor.Open = previousUI; }
+        });
+        Run("Real entity asset editor draws its draft and confirms unsaved New and close actions", () =>
+        {
+            var flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+            var field = typeof(EntityAssetEditor).GetField("_document", flags)!;
+            var previous = field.GetValue(null);
+            var document = new EntityAssetDocument(Path.Combine(testRoot, "Entities"));
+            field.SetValue(null, document);
+            EntityAssetEditor.Open = true;
+            try
+            {
+                Frame(EntityAssetEditor.Draw);
+                document.Class = typeof(CheckEntity).AssemblyQualifiedName!;
+                document.Parameters.Add(new EntityAssetParameter { Key = "Enabled", Kind = EntityParameterKind.Boolean, Value = "true" });
+                Frame(EntityAssetEditor.Draw);
+                Check(ImGuiNET.ImGui.GetDrawData().TotalVtxCount > 0 && document.IsDirty && document.AssetId == null);
+                Check(!EntityAssetEditor.AllowClose());
+                Frame(EntityAssetEditor.Draw);
+                Check(ImGuiNET.ImGui.IsPopupOpen("Unsaved entity asset", ImGuiNET.ImGuiPopupFlags.AnyPopupId));
+                Frame(() =>
+                {
+                    EntityAssetEditor.Draw();
+                    ImGuiNET.ImGui.Begin("Entity Asset");
+                    if (ImGuiNET.ImGui.BeginPopupModal("Unsaved entity asset"))
+                    {
+                        ImGuiNET.ImGui.CloseCurrentPopup();
+                        ImGuiNET.ImGui.EndPopup();
+                    }
+                    ImGuiNET.ImGui.End();
+                });
+                Check(document.IsDirty);
+                var report = new AssetReferenceRepairReport();
+                report.Errors.Add("Entities/Test.json: missing asset");
+                typeof(EntityAssetEditor).GetField("_repairReport", flags)!.SetValue(null, report);
+                typeof(EntityAssetEditor).GetField("_showRepairReport", flags)!.SetValue(null, true);
+                Frame(EntityAssetEditor.Draw);
+                Check(ImGuiNET.ImGui.IsPopupOpen("Asset References Report", ImGuiNET.ImGuiPopupFlags.AnyPopupId));
+                Check(ImGuiNET.ImGui.GetDrawData().TotalVtxCount > 0);
+                Frame(() =>
+                {
+                    EntityAssetEditor.Draw();
+                    ImGuiNET.ImGui.Begin("Entity Asset");
+                    if (ImGuiNET.ImGui.BeginPopupModal("Asset References Report"))
+                    {
+                        ImGuiNET.ImGui.CloseCurrentPopup();
+                        ImGuiNET.ImGui.EndPopup();
+                    }
+                    ImGuiNET.ImGui.End();
+                });
+            }
+            finally
+            {
+                document.New();
+                typeof(EntityAssetEditor).GetField("_pending", flags)!.SetValue(null, null);
+                typeof(EntityAssetEditor).GetField("_askUnsaved", flags)!.SetValue(null, false);
+                EntityAssetEditor.Open = false;
+                field.SetValue(null, previous);
+            }
         });
         Run("Scene axis indicator follows camera rotation, stays in its corner and does not capture input", () =>
         {

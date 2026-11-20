@@ -64,6 +64,8 @@ public static class EditorLevelManager
             var placeable = new Placeable
             {
                 Guid = obj.Guid,
+                AssetId = obj is Entity placedEntity
+                    ? placedEntity.AssetId ?? Content.LoadEntity(path)?.AssetId : null,
                 Name = obj.Name, Path = path,
                 
                 IsActive = obj.IsActive,
@@ -173,7 +175,7 @@ public static class EditorLevelManager
 
         var duplicate = new Placeable
         {
-            Name = name, Path = snapshot.Path, Type = snapshot.Type,
+            Name = name, AssetId = snapshot.AssetId, Path = snapshot.Path, Type = snapshot.Type,
             IsActive = snapshot.IsActive,
             Layer = snapshot.Layer,
             CollidesWith = snapshot.CollidesWith,
@@ -245,7 +247,12 @@ public static class EditorLevelManager
         level.Validate();
         
         var directory = Path.GetDirectoryName(fullPath)!;
-        var json = Serialize(level);
+        EntityAssetReferences.Refresh();
+        var serializer = JsonSerializer.Create(JsonHelper.GetSettings());
+        var document = Newtonsoft.Json.Linq.JObject.FromObject(level, serializer);
+        document[nameof(Level.Placeables)] = Newtonsoft.Json.Linq.JArray.FromObject(
+            level.Placeables.Select(EntityAssetReferences.Upgrade).ToArray(), serializer);
+        var json = document.ToString(Formatting.Indented);
         var temporary = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
        
         try
@@ -271,7 +278,7 @@ public static class EditorLevelManager
         SaveLevel(level, path);
         CurrentPath = Path.GetFullPath(path);
         
-        _savedState = Serialize(level);
+        _savedState = Serialize(CaptureCurrentLevel());
         
         IsDirty = false;
     }

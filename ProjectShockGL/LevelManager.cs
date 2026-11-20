@@ -48,6 +48,7 @@ public static class LevelManager
         
         try
         {
+            EntityAssetReferences.Refresh();
             Loading?.Invoke(level);
 
             if (level.Placeables == null)
@@ -204,7 +205,7 @@ public static class LevelManager
 
     private static Object CreatePlacement(World world, Placeable? placeable, Guid? guid)
     {
-        if (placeable == null || (placeable.Type != PlaceableType.BrushBox && string.IsNullOrWhiteSpace(placeable.Path)))
+        if (placeable == null || (placeable.Type != PlaceableType.BrushBox && string.IsNullOrWhiteSpace(placeable.Path) && !(placeable.Type == PlaceableType.Entity && placeable.AssetId.HasValue)))
         {
             throw new InvalidDataException("A map object has no asset path.");
         }
@@ -222,7 +223,7 @@ public static class LevelManager
 
         Object? obj = placeable.Type switch
         {
-            PlaceableType.Entity => Entity.Create(placeable.Path, world, guid),
+            PlaceableType.Entity => Entity.Create(placeable.Path, world, guid, placeable.AssetId),
             PlaceableType.Geometry => Geometry.Create(placeable.Path, world, guid),
             PlaceableType.BrushBox => CreateBrush(world, placeable, guid),
             _ => throw new InvalidDataException($"Unknown object type: {placeable.Type}")

@@ -86,6 +86,20 @@ public class Light : Entity
         }
     }
 
+    protected override string GetDebugBillboardName(string defaultName)
+    {
+        var name = Type switch
+        {
+            LightType.Point => "Editor/PointLight",
+            LightType.Spot => "Editor/SpotLight",
+            LightType.Directional => "Editor/DirectionalLight",
+            _ => defaultName
+        };
+
+        return File.Exists(System.IO.Path.Combine(Content.Path, "Textures", name + ".png"))
+            ? name : defaultName;
+    }
+
     internal void OnTypeChanged()
     {
         if (IsDestroyed)
@@ -93,6 +107,8 @@ public class Light : Entity
             return;
         }
         
+        RefreshDebugBillboard();
+
         if (Type is LightType.Point or LightType.Spot)
         {
             if (Main == this)

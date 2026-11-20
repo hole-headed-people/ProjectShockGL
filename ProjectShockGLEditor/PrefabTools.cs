@@ -53,7 +53,8 @@ public static class PrefabTools
         UndoRedo.CommitPending();
         
         var selected = objects.Distinct().ToArray();
-        var placements = EditorLevelManager.CaptureLevel(selected).Placeables;
+        EntityAssetReferences.Refresh();
+        var placements = EditorLevelManager.CaptureLevel(selected).Placeables.Select(EntityAssetReferences.Upgrade).ToArray();
 
         if (placements.Length == 0 || placements.Length != selected.Length)
         {

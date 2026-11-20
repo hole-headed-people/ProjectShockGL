@@ -145,7 +145,7 @@ public static class Prefab
         
         var placement = new Placeable
         {
-            Guid = guid, Name = state?.Name ?? $"{stem}_{suffix}", Type = copy.Type, Path = copy.Path,
+            Guid = guid, AssetId = copy.AssetId, Name = state?.Name ?? $"{stem}_{suffix}", Type = copy.Type, Path = copy.Path,
             Position = position ?? copy.Position, Rotation = rotation ?? copy.Rotation, Scale = state?.Scale ?? copy.Scale,
             IsActive = state?.IsActive ?? copy.IsActive, SimulatePhysics = copy.SimulatePhysics,
             RigidbodyMass = copy.RigidbodyMass,

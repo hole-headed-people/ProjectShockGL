@@ -14,6 +14,8 @@ public class Placeable
 {
     [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
     public Guid? Guid { get; init; }
+    [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+    public Guid? AssetId { get; init; }
     public string Name { get; init; } = "";
     public string Path { get; init; } = string.Empty;
     public PlaceableType Type { get; init; }

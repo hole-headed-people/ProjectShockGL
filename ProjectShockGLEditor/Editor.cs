@@ -211,6 +211,7 @@ public static class Editor
         Inspector.Draw();
         EnvironmentWindow.Draw(ref _showEnvironment);
         UIEditor.Draw();
+        EntityAssetEditor.Draw();
         BrushTextureWindow.Draw(_windowSize, SceneMin, SceneMax);
         
         DrawStatus();
@@ -246,6 +247,11 @@ public static class Editor
 
     private static bool OnWindowClosing()
     {
+        if (!EntityAssetEditor.AllowClose())
+        {
+            _allowClose = false;
+            return false;
+        }
         if (!UIEditor.AllowClose()) return false;
         if (_allowClose)
         {
@@ -523,6 +529,7 @@ public static class Editor
                 UndoRedo.CommitPending();
                 BrushTextureWindow.Open = !BrushTextureWindow.Open;
             }
+            if (ImGui.MenuItem("Entity Asset", "", EntityAssetEditor.Open)) EntityAssetEditor.Toggle();
             if (ImGui.MenuItem("UI Editor", "", UIEditor.Open)) UIEditor.Open = !UIEditor.Open;
 
             if (ImGui.MenuItem("Environment", "", _showEnvironment))

@@ -4,7 +4,10 @@ namespace ProjectShockGL.Core;
 
 public class Entity : Object
 {
+    private Guid? _assetId;
+    
     private BillboardComponent? _debugBillboardComponent;
+    private string? _debugBillboardName;
     private MeshComponent? _debugMeshComponent;
     
     private bool _belowKillY;
@@ -14,6 +17,23 @@ public class Entity : Object
     protected override bool IsSaveableByDefault => true;
     
     public string Path { get; private set; } = "";
+    
+    public Guid? AssetId
+    {
+        get
+        {
+            // A legacy asset can acquire its identity when the editor saves a map or prefab.
+            if (_assetId == null && !string.IsNullOrWhiteSpace(Path))
+            {
+                _assetId = Content.LoadEntity(Path)?.AssetId;
+            }
+
+            return _assetId;
+        }
+        
+        private set => _assetId = value;
+    }
+    
     public List<OutputData> Outputs { get; } = [];
     
     public Rigidbody? Rigidbody => GetComponent<Rigidbody>() is { IsDestroyed: false } body ? body : null;
@@ -55,11 +75,14 @@ public class Entity : Object
             
             _debugBillboardComponent.IsDebug = true;
             _debugBillboardComponent.IgnoreDepth = true;
+            
             _debugBillboardComponent.UseParentScale = false;
+            _debugBillboardComponent.Scale = Settings.GetFloat("Debug", "BillboardScale", 1f);
             
             _debugBillboardComponent.RenderOrder = 1000;
             
-            _debugBillboardComponent.Texture = Content.LoadTexture((string)debugBillboard, TextureFormat.Png);
+            _debugBillboardName = (string)debugBillboard;
+            RefreshDebugBillboard();
         }
 
         if (arguments.TryGetValue("DebugMesh", out var debugMesh))
@@ -77,6 +100,22 @@ public class Entity : Object
         }
     }
     
+    protected virtual string GetDebugBillboardName(string defaultName)
+    {
+        return defaultName;
+    }
+
+    protected void RefreshDebugBillboard()
+    {
+        if (_debugBillboardComponent is not { IsDestroyed: false } || _debugBillboardName == null)
+        {
+            return;
+        }
+
+        _debugBillboardComponent.Texture = Content.LoadTexture(
+            GetDebugBillboardName(_debugBillboardName), TextureFormat.Png);
+    }
+
     public virtual void Kill()
     {
         Destroy();
@@ -94,9 +133,10 @@ public class Entity : Object
         return entity;
     }
 
-    internal static Entity? Create(string name, World? world, Guid? guid)
+    internal static Entity? Create(string name, World? world, Guid? guid, Guid? assetId = null)
     {
-        var data = Content.LoadEntity(name);
+        name = EntityAssetReferences.ResolvePath(name, assetId);
+        var data = Content.LoadEntity(name, assetId);
 
         if (data == null)
         {
@@ -118,6 +158,7 @@ public class Entity : Object
         }
 
         entity.Path = name;
+        entity.AssetId = data.AssetId;
         try
         {
             entity.Load(data.Parameters);

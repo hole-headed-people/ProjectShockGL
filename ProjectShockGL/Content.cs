@@ -451,6 +451,35 @@ public static class Content
         }
     }
 
+    public static void InvalidateLevels()
+    {
+        Levels.Clear();
+    }
+
+    public static void InvalidateEntity(string name)
+    {
+        Entities.Remove(name);
+        EntityAssetReferences.Refresh();
+    }
+
+    public static EntityData? LoadEntity(string name, Guid? assetId)
+    {
+        name = EntityAssetReferences.ResolvePath(name, assetId);
+        var data = LoadEntity(name);
+        if (assetId.HasValue && data?.AssetId != assetId)
+        {
+            InvalidateEntity(name);
+            data = LoadEntity(name);
+        }
+
+        if (assetId.HasValue && data?.AssetId != assetId)
+        {
+            throw new InvalidDataException($"Entity asset '{name}' does not match GUID '{assetId}'.");
+        }
+
+        return data;
+    }
+
     public static EntityData? LoadEntity(string name)
     {
         try
@@ -836,6 +865,7 @@ public static class Content
         Geometries.Clear();
         Details.Clear();
         Entities.Clear();
+        EntityAssetReferences.Refresh();
         Levels.Clear();
         _whiteTexture = null;
 
