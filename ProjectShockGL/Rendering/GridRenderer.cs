@@ -17,12 +17,14 @@ internal sealed class GridRenderer : IDisposable
             uniform mat4 uProjection;
             uniform mat4 uView;
             uniform vec2 gridCenter;
+            uniform vec3 gridU;
+            uniform vec3 gridV;
             uniform float gridRadius;
             out vec3 worldPosition;
             void main()
             {
                 vec2 xz = gridCenter + aPosition.xy * gridRadius * 2.0;
-                worldPosition = vec3(xz.x, 0.0, xz.y);
+                worldPosition = gridU * xz.x + gridV * xz.y;
                 gl_Position = uProjection * uView * vec4(worldPosition, 1.0);
             }
             """);
@@ -31,6 +33,8 @@ internal sealed class GridRenderer : IDisposable
             in vec3 worldPosition;
             out vec4 FragColor;
             uniform vec3 gridCamera;
+            uniform vec3 gridU;
+            uniform vec3 gridV;
             uniform float gridStep;
             uniform float gridFadeStart;
             uniform float gridFadeEnd;
@@ -56,17 +60,18 @@ internal sealed class GridRenderer : IDisposable
             }
             void main()
             {
-                vec2 dx = dFdx(worldPosition.xz);
-                vec2 dy = dFdy(worldPosition.xz);
+                vec2 gridPosition = vec2(dot(worldPosition, gridU), dot(worldPosition, gridV));
+                vec2 dx = dFdx(gridPosition);
+                vec2 dy = dFdy(gridPosition);
                 vec2 footprint = max(vec2(length(vec2(dx.x, dy.x)),
                     length(vec2(dx.y, dy.y))), vec2(0.00001));
-                vec2 coordinate = worldPosition.xz / gridStep;
+                vec2 coordinate = gridPosition / gridStep;
                 float width = 0.04; // Four percent of the cell, independent of grid step.
                 vec2 lines = vec2(
                     periodicLine(coordinate.x, footprint.x / gridStep, width),
                     periodicLine(coordinate.y, footprint.y / gridStep, width));
                 float minor = 1.0 - (1.0 - lines.x) * (1.0 - lines.y);
-                vec2 axis = vec2(axisLine(worldPosition.x, footprint.x, gridStep * 0.02), axisLine(worldPosition.z, footprint.y, gridStep * 0.02));
+                vec2 axis = vec2(axisLine(gridPosition.x, footprint.x, gridStep * 0.02), axisLine(gridPosition.y, footprint.y, gridStep * 0.02));
                 float major = 1.0 - (1.0 - axis.x) * (1.0 - axis.y);
                 float coverage = max(minor, major);
                 float fade = 1.0 - smoothstep(gridFadeStart, gridFadeEnd, distance(worldPosition, gridCamera));
@@ -84,7 +89,7 @@ internal sealed class GridRenderer : IDisposable
     }
 
     internal void Draw(Mesh quad, Camera camera, Matrix4x4 projection, Matrix4x4 view,
-        float step, float radius, float fadeStart, float fadeEnd)
+        float step, float radius, float fadeStart, float fadeEnd, Plane plane = Plane.Xz, bool planarFade = false)
     {
         using var state = new RenderTargetState(_gl);
         var srcRgb = _gl.GetInteger(GetPName.BlendSrcRgb);
@@ -106,7 +111,13 @@ internal sealed class GridRenderer : IDisposable
             _program.Write("uProjection", projection);
             _program.Write("uView", view);
             var position = camera.Transform.Position;
-            _program.Write("gridCenter", new Vector2(MathF.Floor(position.X / step) * step, MathF.Floor(position.Z / step) * step));
+            var u = plane == Plane.Yz ? Vector3.UnitZ : Vector3.UnitX;
+            var v = plane == Plane.Xz ? Vector3.UnitZ : Vector3.UnitY;
+            _program.Write("gridU", u);
+            _program.Write("gridV", v);
+            var center = new Vector2(Vector3.Dot(position, u), Vector3.Dot(position, v));
+            _program.Write("gridCenter", new Vector2(MathF.Floor(center.X / step) * step, MathF.Floor(center.Y / step) * step));
+            if (planarFade) position = u * center.X + v * center.Y;
             _program.Write("gridCamera", position);
             _program.Write("gridRadius", radius);
             _program.Write("gridStep", step);

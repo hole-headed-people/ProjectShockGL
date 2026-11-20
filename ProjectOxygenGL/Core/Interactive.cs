@@ -8,4 +8,10 @@ public abstract class Interactive : Entity
     public bool IsInteractable { get; set; }
     
     public abstract void Interact(Character character);
+    
+    [Input("SetInteractable")]
+    public void SetInteractable(bool isInteractable)
+    {
+        IsInteractable = isInteractable;
+    }
 }

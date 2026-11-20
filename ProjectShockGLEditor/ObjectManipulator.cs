@@ -168,6 +168,7 @@ public static class ObjectManipulator
         for (var i = 0; i < 3; i++)
         {
             var axis = GetAxis(target, i);
+            if (camera.Orthographic && Mode == ManipulationMode.Rotate && MathF.Abs(Vector3.Dot(axis, camera.Transform.Forward)) < 0.001f) continue;
             var color = IsDragging && _dragAxis == i ? 0xFF55FFFF : Colors[i];
             
             if (Mode == ManipulationMode.Rotate)

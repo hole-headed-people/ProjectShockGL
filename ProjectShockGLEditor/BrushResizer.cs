@@ -202,6 +202,8 @@ internal static class BrushResizer
                 continue;
             }
             
+            var axis = Vector3.Transform(Axes[index], brush.Transform.Rotation);
+            if (camera.Orthographic && MathF.Abs(Vector3.Dot(axis, camera.Transform.Forward)) > 0.9999f) continue;
             var local = Axes[index] * brush.Size[index] * .5f * (face % 2 == 0 ? -1 : 1);
             var world = brush.Transform.TransformPoint(local);
 

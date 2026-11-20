@@ -14,8 +14,11 @@ internal static class SceneSelection
         var world = ProjectShockGL.Core.Game.Instance.World;
         var existing = world.GetAllObjects(true).ToHashSet();
         var copies = new List<EditorSelectionTarget>();
+        var originals = previous.Where(target => !target.IsDetail).Select(target => target.Object!).ToArray();
+        var objectIndex = 0;
         try
         {
+            var objectCopies = EditorLevelManager.DuplicateObjects(originals);
             foreach (var target in previous)
             {
                 if (target.Detail is { } source)
@@ -25,11 +28,12 @@ internal static class SceneSelection
                         AssetPath = source.AssetPath, Position = source.Position, Rotation = source.Rotation,
                         Scale = source.Scale, EditorGroups = source.EditorGroups
                     });
+                    SceneFolders.Copy(source.Id, copy.Id, detail: true);
                     copies.Add(EditorSelectionTarget.ForDetail(world, copy.Id));
                 }
                 else
                 {
-                    copies.Add(EditorSelectionTarget.ForObject(EditorLevelManager.DuplicateObject(target.Object!)));
+                    copies.Add(EditorSelectionTarget.ForObject(objectCopies[objectIndex++]));
                 }
             }
             var action = new SelectionSetAction(copies.ToArray(), previous, true);

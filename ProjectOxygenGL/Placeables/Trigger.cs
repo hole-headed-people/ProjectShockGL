@@ -1,4 +1,4 @@
-﻿using ProjectOxygenGL.Core;
+using ProjectOxygenGL.Core;
 using ProjectShockGL;
 using ProjectShockGL.Core;
 using Object = ProjectShockGL.Core.Object;
@@ -10,7 +10,7 @@ public class Trigger : Entity
 {
     [Editable] public bool CanTriggeredByPlayer { get; set; }
     [Editable] public bool CanTriggeredByObject { get; set; }
-    [Editable] public string ObjectName { get; set; } = "";
+    [Editable][ObjectName] public string ObjectName { get; set; } = "";
     
     public override void Create()
     {

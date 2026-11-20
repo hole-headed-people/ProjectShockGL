@@ -162,6 +162,7 @@ public static class Editor
     {
         UIEditor.Render(graphics);
         SceneGrid.Render(graphics);
+        SelectionBounds.Draw(graphics, _windowSize, SceneMin, SceneMax);
     }
 
     private static void OnRender(Graphics graphics)
@@ -186,7 +187,7 @@ public static class Editor
         DrawMenuBar();
         DrawToolbar();
         DrawSceneHints();
-        SelectionBounds.Draw(_windowSize, SceneMin, SceneMax);
+
         SceneAxes.Draw(SceneMin, SceneMax, Camera.Active.Transform.Rotation);
         DrawHierarchy();
         
@@ -222,6 +223,7 @@ public static class Editor
                          _pendingAction == null && _error == null &&
                          !ImGui.IsMouseDown(ImGuiMouseButton.Right) && !ImGui.IsMouseDown(ImGuiMouseButton.Middle);
         
+        if (allowScene) SceneCamera.Zoom(ImGui.GetIO().MouseWheel);
         var owned = !BrushTextureWindow.Open && ObjectManipulator.Draw(_windowSize, SceneMin, SceneMax, allowScene);
 
         if (allowScene && !owned && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
@@ -402,60 +404,7 @@ public static class Editor
         
         if (ImGui.Begin("Scene", PanelFlags))
         {
-            var objects = ProjectShockGL.Core.Game.Instance.World.GetAllObjects(true);
-            
-            for (var i = 0; i < objects.Length; i++)
-            {
-                var obj = objects[i];
-                
-                ImGui.PushID(i);
-                
-                var label = string.IsNullOrEmpty(obj.Name) ? obj.GetType().Name : obj.Name;
-                
-                if (!obj.IsActive)
-                {
-                    label += " (inactive)";
-                }
-
-                if (!obj.IsEditorVisible)
-                {
-                    label += " (hidden)";
-                }
-                
-                if (ImGui.Selectable(label, Selection.Contains(obj)))
-                {
-                    ObjectManipulator.Commit();
-                    if (ImGui.GetIO().KeyCtrl || Input.IsKey(Key.ControlLeft) || Input.IsKey(Key.ControlRight)) Selection.Toggle(obj);
-                    else Selection.Object = obj;
-                }
-                
-                ImGui.PopID();
-            }
-
-            var details = ProjectShockGL.Core.Game.Instance.World.Details;
-            if (details.Count > 0 && ImGui.TreeNode($"Details ({details.Count})"))
-            {
-                for (var i = 0; i < details.Count; i++)
-                {
-                    var detail = details[i];
-                    var target = EditorSelectionTarget.ForDetail(ProjectShockGL.Core.Game.Instance.World, detail.Id);
-                    ImGui.PushID(detail.Id.ToString());
-                    var label = Path.GetFileName(detail.AssetPath) + $" [{i + 1}]" + (target.IsEditorVisible ? "" : " (hidden)");
-                    if (ImGui.Selectable(label, Selection.Contains(target)))
-                    {
-                        if (ImGui.GetIO().KeyCtrl || Input.IsKey(Key.ControlLeft) || Input.IsKey(Key.ControlRight))
-                            Selection.ToggleTarget(target);
-                        else Selection.SetTarget(target);
-                    }
-                    ImGui.PopID();
-                }
-                ImGui.TreePop();
-            }
-
-            if (objects.Length == 0 && details.Count == 0)
-            {
-                ImGui.TextWrapped("Create an object from the Palette below.");
-            }
+            SceneFolders.Draw();
         }
         
         ImGui.End();
@@ -649,6 +598,12 @@ public static class Editor
             
             ImGui.SameLine();
 
+            ImGui.SetNextItemWidth(110);
+            var viewMode = (int)SceneCamera.ViewMode;
+            if (ImGui.Combo("##sceneViewMode", ref viewMode, new[] { "Perspective", "Top", "Front", "Side" }, 4))
+                SceneCamera.SetView((SceneViewMode)viewMode);
+            ImGui.SameLine();
+
             if (ImGui.Button("Camera"))
             {
                 ImGui.OpenPopup("Camera settings");
@@ -680,10 +635,12 @@ public static class Editor
     private static void DrawSceneHints()
     {
         if (UIEditor.Open) return;
-        var draw = ImGui.GetForegroundDrawList();
+        var draw = ImGui.GetBackgroundDrawList();
         var position = SceneMin + new Vector2(10, 10);
         
-        const string text = "Shift: snap | Esc: cancel\nRMB + WASD/QE: camera | F: focus";
+        var text = SceneCamera.ViewMode == SceneViewMode.Perspective
+            ? "Shift: snap | Esc: cancel\nRMB + WASD/QE: camera | F: focus"
+            : "Shift: snap | Esc: cancel\nMMB: pan | Wheel: zoom | F: focus";
         
         var size = ImGui.CalcTextSize(text);
         

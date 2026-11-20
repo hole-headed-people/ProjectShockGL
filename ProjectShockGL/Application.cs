@@ -45,6 +45,8 @@ public static class Application
     private static bool _quitRequested;
     private static bool _closeApproved;
     private static bool _hasUnloaded;
+
+    private static bool _isShowingOverlayStatistics;
     
     public static double Fps { get; private set; }
     public static double FrameTimeMs { get; private set; }
@@ -56,10 +58,14 @@ public static class Application
     
     public static void Run()
     {
-        try { RunWindow(); }
+        try
+        {
+            RunWindow();
+        }
         catch (Exception error)
         {
             Log.PrintError("Application stopped with an error.", error);
+            
             throw;
         }
     }
@@ -67,10 +73,13 @@ public static class Application
     private static void RunWindow()
     {
         _title = Settings.GetString("Game", "Name", "ProjectShockGL");
+        
         var options = CreateWindowOptions();
         
         IsEditor = Settings.IsEditor;
         IsDebug = Settings.GetBool("Application", "IsDebug", false);
+        
+        _isShowingOverlayStatistics = Settings.GetBool("Application", "ShowOverlayStatistics", false);
         
         _window = Window.Create(options);
         
@@ -263,7 +272,8 @@ public static class Application
         AfterRender?.Invoke((float)deltaTime);
         
         RenderTimeMs = System.Diagnostics.Stopwatch.GetElapsedTime(renderStart).TotalMilliseconds;
-        if (IsDebug && !IsEditor)
+        
+        if (_isShowingOverlayStatistics && !IsEditor)
         {
             DebugStatistics.Draw(_graphics, WindowSize);
         }

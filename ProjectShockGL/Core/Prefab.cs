@@ -50,19 +50,24 @@ public static class Prefab
         }
         
         orientation = Quaternion.Normalize(orientation);
+        EntityAssetReferences.Refresh();
+        var prepared = ObjectLinks.Prepare(template.Placeables, world);
+        var objectNames = template.Placeables.Select((source, index) => (source.Name, NewName: prepared[index].Name))
+            .Where(pair => !string.IsNullOrWhiteSpace(pair.Name))
+            .ToDictionary(pair => pair.Name, pair => pair.NewName, StringComparer.Ordinal);
         
         var existing = world.GetAllObjects(true).ToHashSet();
         
         try
         {
-            return template.Placeables.Select((source, index) =>
+            return prepared.Select((source, index) =>
             {
                 var instance = Instantiate(source, world, origin + Vector3.Transform(source.Position, orientation),
-                    Quaternion.Normalize(orientation * source.Rotation));
+                    Quaternion.Normalize(orientation * source.Rotation), null, null, prepared: true);
 
                 if (prefabName != null)
                 {
-                    instance.SpawnSource = new ObjectSpawnSource(prefabName, index);
+                    instance.SpawnSource = new ObjectSpawnSource(prefabName, index) { ObjectNames = objectNames };
                 }
 
                 return instance;
@@ -99,7 +104,8 @@ public static class Prefab
         var source = Content.LoadPrefab(name) ?? throw new FileNotFoundException($"Prefab '{name}' not found.");
         
         var instance = Instantiate(source, world, position, rotation);
-        instance.SpawnSource = new ObjectSpawnSource(name, 0);
+        instance.SpawnSource = new ObjectSpawnSource(name, 0)
+        { ObjectNames = string.IsNullOrWhiteSpace(source.Name) ? null : new Dictionary<string, string> { [source.Name] = instance.Name } };
         return instance;
     }
 
@@ -117,35 +123,30 @@ public static class Prefab
             throw new InvalidDataException($"Prefab '{name}' has no member at index {index}.");
         }
 
-        return Instantiate(template.Placeables[index], world, state.Position, state.Rotation, guid, state);
+        var source = template.Placeables[index];
+        if (state.SpawnSource?.ObjectNames is { } names)
+        {
+            source = ObjectLinks.Remap(source, names);
+        }
+        return Instantiate(source, world, state.Position, state.Rotation, guid, state, prepared: true);
     }
 
     private static Object Instantiate(Placeable template, World world, Vector3? position, Quaternion? rotation,
-        Guid? guid, SavedObjectState? state)
+        Guid? guid, SavedObjectState? state, bool prepared = false)
     {
         ArgumentNullException.ThrowIfNull(template);
         ArgumentNullException.ThrowIfNull(world);
         
         var settings = JsonHelper.GetSettings();
         var copy = JsonConvert.DeserializeObject<Placeable>(JsonConvert.SerializeObject(template, settings), settings)!;
-        var stem = Path.GetFileName(copy.Name.Replace('\\', '/'));
-
-        if (string.IsNullOrWhiteSpace(stem))
+        if (!prepared && state == null)
         {
-            stem = copy.Type.ToString();
+            copy = ObjectLinks.Prepare([copy], world)[0];
         }
-        
-        var names = world.GetAllObjects(true).Where(o => !o.IsDestroyed).Select(o => o.Name).ToHashSet();
-        var suffix = 1;
 
-        while (names.Contains($"{stem}_{suffix}"))
-        {
-            suffix++;
-        }
-        
         var placement = new Placeable
         {
-            Guid = guid, AssetId = copy.AssetId, Name = state?.Name ?? $"{stem}_{suffix}", Type = copy.Type, Path = copy.Path,
+            Guid = guid, AssetId = copy.AssetId, Name = state?.Name ?? copy.Name, Type = copy.Type, Path = copy.Path,
             Position = position ?? copy.Position, Rotation = rotation ?? copy.Rotation, Scale = state?.Scale ?? copy.Scale,
             IsActive = state?.IsActive ?? copy.IsActive, SimulatePhysics = copy.SimulatePhysics,
             RigidbodyMass = copy.RigidbodyMass,

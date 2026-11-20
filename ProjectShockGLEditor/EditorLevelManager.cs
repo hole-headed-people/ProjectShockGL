@@ -121,6 +121,7 @@ public static class EditorLevelManager
             KillY = ProjectShockGL.Core.Game.Instance.World.KillY,
             SaveLevelState = ProjectShockGL.Core.Game.Instance.World.SaveLevelState,
             Groups = SceneGroups.Capture(),
+            Folders = details == null ? [] : SceneFolders.Capture(),
             Details = details?.ToArray() ?? [],
             Placeables = result.ToArray()
         };
@@ -131,67 +132,31 @@ public static class EditorLevelManager
         return JsonConvert.SerializeObject(level, JsonHelper.GetSettings());
     }
 
-    public static Object DuplicateObject(Object source)
+    public static Object DuplicateObject(Object source) => DuplicateObjects([source]).Single();
+
+    public static Object[] DuplicateObjects(IEnumerable<Object> sources)
     {
-        ArgumentNullException.ThrowIfNull(source);
-        
+        var selected = sources.Distinct().ToArray();
         var world = ProjectShockGL.Core.Game.Instance.World;
-        var existing = world.GetAllObjects(includePending: true).ToHashSet();
-
-        if (source.IsDestroyed || !existing.Contains(source))
-        {
+        var existing = world.GetAllObjects(true).ToHashSet();
+        if (selected.Any(obj => obj.IsDestroyed || !existing.Contains(obj)))
             throw new InvalidOperationException("The source object is no longer in the scene.");
-        }
-
-        var placement = CaptureLevel([source]).Placeables.SingleOrDefault()
-            ?? throw new InvalidOperationException("Only placed geometry and entities can be duplicated.");
-        
-        var settings = JsonHelper.GetSettings();
-        var snapshot = JsonConvert.DeserializeObject<Placeable>(
-            JsonConvert.SerializeObject(placement, settings), settings)!;
-        
-        var stem = string.IsNullOrWhiteSpace(source.Name) ? Path.GetFileNameWithoutExtension(snapshot.Path) : source.Name;
-        var separator = stem.LastIndexOf('_');
-        
-        if (separator > 0 && int.TryParse(stem.AsSpan(separator + 1), out _)) stem = stem[..separator];
-        
-        var names = existing.Select(obj => obj.Name).ToHashSet(StringComparer.Ordinal);
-        var suffix = 1;
-
-        while (names.Contains($"{stem}_{suffix}"))
+        var placements = CaptureLevel(selected).Placeables;
+        if (placements.Length != selected.Length) throw new InvalidOperationException("Only placed objects can be duplicated.");
+        var prepared = ObjectLinks.Prepare(placements, world, duplicate: true);
+        try
         {
-            suffix++;
+            var copies = prepared.Select(CreatePlacement).ToArray();
+            for (var index = 0; index < selected.Length; index++)
+                SceneFolders.Copy(selected[index].Guid, copies[index].Guid, detail: false);
+            return copies;
         }
-        
-        var name = $"{stem}_{suffix}";
-        
-        if (!string.IsNullOrEmpty(source.Name))
+        catch (Exception error)
         {
-            foreach (var output in snapshot.Outputs)
-            {
-                if (output.TargetName == source.Name) output.TargetName = name;
-            }
+            RollbackCreated(existing, error);
+            throw;
         }
-
-        var duplicate = new Placeable
-        {
-            Name = name, AssetId = snapshot.AssetId, Path = snapshot.Path, Type = snapshot.Type,
-            IsActive = snapshot.IsActive,
-            Layer = snapshot.Layer,
-            CollidesWith = snapshot.CollidesWith,
-            SimulatePhysics = snapshot.SimulatePhysics,
-            RigidbodyMass = snapshot.RigidbodyMass,
-            RenderSurfaces = snapshot.RenderSurfaces,
-            BackfaceCulling = snapshot.BackfaceCulling,
-            EditorGroups = snapshot.EditorGroups,
-            Brush = snapshot.Brush,
-            Position = snapshot.Position, Rotation = snapshot.Rotation, Scale = snapshot.Scale,
-            Properties = snapshot.Properties, Outputs = snapshot.Outputs
-        };
-        
-        return CreatePlacement(duplicate);
     }
-
     public static Object CreatePlacement(Placeable placement)
     {
         return CreatePlacement(placement, restoreGuid: false);
@@ -297,6 +262,7 @@ public static class EditorLevelManager
         ObjectManipulator.Cancel();
         LevelManager.Load(level);
         SceneGroups.Load(level.Groups);
+        SceneFolders.Load(level.Folders);
         Selection.Object = null;
         UndoRedo.Clear();
         
@@ -312,6 +278,7 @@ public static class EditorLevelManager
         ObjectManipulator.Cancel();
         LevelManager.Load(new Level());
         SceneGroups.Load([]);
+        SceneFolders.Load([]);
         
         Selection.Object = null;
         UndoRedo.Clear();

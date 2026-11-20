@@ -33,9 +33,15 @@ public class Graphics
         Renderer.BeginFrame(camera);
     }
 
-    public void DrawGrid(float step, float radius, float fadeStart, float fadeEnd)
+    public void DrawSelectionBounds(Vector3 min, Vector3 max, Matrix4x4 model,
+        Vector2 logicalSize, Vector2 clipMin, Vector2 clipMax, float thickness = 1.5f)
     {
-        Renderer.DrawGrid(step, radius, fadeStart, fadeEnd);
+        Renderer.DrawSelectionBounds(min, max, model, logicalSize, clipMin, clipMax, thickness);
+    }
+
+    public void DrawGrid(float step, float radius, float fadeStart, float fadeEnd, Plane plane = Plane.Xz, bool planarFade = false)
+    {
+        Renderer.DrawGrid(step, radius, fadeStart, fadeEnd, plane, planarFade);
     }
     public void DrawLine2D(Vector3 from, Vector3 to, Plane plane, Texture texture, Color color, float thickness = 0.05f, bool ignoreDepth = false)
     {

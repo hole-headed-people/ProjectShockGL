@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using ProjectShockGL.Core;
 using ProjectShockGL.Tools;
 using Object = ProjectShockGL.Core.Object;
@@ -19,7 +19,7 @@ public class LinearMovement : Entity
     
     [Editable] public Vector3 Position { get; set; }
 
-    [Editable] public string TargetName { get; set; } = "";
+    [Editable][ObjectName] public string TargetName { get; set; } = "";
 
     private Object? _target;
     

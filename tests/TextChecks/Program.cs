@@ -1871,6 +1871,178 @@ void Render()
             ProjectShockGLEditor.SceneGrid.Step = previousGridStep;
         }
     }
+    using (var viewRenderer = new Renderer(gl, 640, 240))
+    using (var viewCamera = Camera.Create())
+    {
+        var viewGraphics = new Graphics(viewRenderer);
+        var viewEnvironment = ProjectShockGL.Environment.Capture();
+        try
+        {
+            ProjectShockGL.Environment.SkyColorEnabled = false;
+            viewCamera.ClearColor = Color.Black;
+            viewCamera.Orthographic = true;
+            viewCamera.OrthoSize = 8;
+            viewCamera.AspectRatio = 640f / 240;
+            foreach (var plane in new[] { ProjectShockGL.Rendering.Plane.Xz, ProjectShockGL.Rendering.Plane.Xy, ProjectShockGL.Rendering.Plane.Yz })
+            {
+                viewCamera.Transform.Rotation = plane == ProjectShockGL.Rendering.Plane.Xz
+                    ? Quaternion.CreateFromAxisAngle(Vector3.UnitX, -MathF.PI / 2)
+                    : plane == ProjectShockGL.Rendering.Plane.Yz
+                        ? Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI / 2) : Quaternion.Identity;
+                viewCamera.Transform.Position = -viewCamera.Transform.Forward * 500;
+                viewGraphics.BeginDraw(viewCamera);
+                viewGraphics.DrawGrid(1, 500, 50, 500, plane, planarFade: true);
+                var image = new byte[640 * 240 * 4];
+                unsafe { fixed (byte* data = image) gl.ReadPixels(0, 0, 640, 240, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+                Check(image.Where((_, index) => index % 4 == 0).Count(value => value > 5) > 1000);
+                Check(viewGraphics.Statistics.DrawCalls == 1 && gl.GetError() == GLEnum.NoError);
+                viewGraphics.EndDraw();
+            }
+            Console.WriteLine("PASS: Orthographic grid renders in XZ, XY and ZY planes without fading from camera stand-off distance");
+        }
+        finally { ProjectShockGL.Environment.Apply(viewEnvironment); }
+    }
+    var boundsSettingsPath = Path.Combine(AppContext.BaseDirectory, "GameSettings.ini");
+    var boundsSettings = File.ReadAllText(boundsSettingsPath);
+    var boundsEnvironment = ProjectShockGL.Environment.Capture();
+    var boundsPostEnabled = PostProcessSettings.Enabled;
+    var boundsPostShader = PostProcessSettings.Shader;
+    var boundsFlags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+    var boundsParameters = (ShaderParameters)typeof(ShaderParameters).GetMethod("Snapshot", boundsFlags)!.Invoke(PostProcessSettings.Parameters, null)!;
+    try
+    {
+        ProjectShockGL.Environment.IsFogEnabled = false;
+        ProjectShockGL.Environment.SkyColorEnabled = false;
+        PostProcessSettings.Shader = null;
+        PostProcessSettings.Parameters.Set("uVignetteStrength", 1f);
+        foreach (var scale in new[] { 1f, 0.5f, 0.1f })
+        foreach (var effects in new[] { false, true })
+        foreach (var filter in new[] { "Nearest", "Linear" })
+        {
+            File.WriteAllText(boundsSettingsPath, boundsSettings + "\n[Rendering]\nResolutionScale=" +
+                scale.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\nResolutionFilter=" + filter + "\n");
+            Settings.Initialize();
+            PostProcessSettings.Enabled = effects;
+            using var boundsRenderer = new Renderer(gl, 640, 240);
+            var boundsGraphics = new Graphics(boundsRenderer);
+            using var boundsCamera = Camera.Create();
+            boundsCamera.Orthographic = true;
+            boundsCamera.OrthoSize = 6;
+            boundsCamera.AspectRatio = 640f / 240;
+            var model = Matrix4x4.CreateTranslation(0, 0, -5);
+            void BoundsWorld()
+            {
+                boundsGraphics.BeginDraw(boundsCamera);
+                boundsGraphics.BeginWorld();
+                boundsGraphics.DrawMesh(Content.LoadMesh("Cube")!, new Vector3(0, 0, -5), Quaternion.Identity, Vector3.One,
+                    Content.GetWhitePixel(), new Color(0.1f, 0.1f, 0.1f), surfaceMode: SurfaceMode.Opaque);
+                boundsGraphics.DrawQuad(new Vector3(2, 0, -2), Quaternion.Identity, new Vector2(4, 8),
+                    Content.GetWhitePixel(), Color.Black, surfaceMode: SurfaceMode.Opaque);
+                boundsGraphics.EndWorld();
+            }
+            byte[] BoundsImage()
+            {
+                gl.Finish();
+                var result = new byte[640 * 240 * 4];
+                unsafe { fixed (byte* data = result) gl.ReadPixels(0, 0, 640, 240, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+                return result;
+            }
+            int Brightness(byte[] pixels, int x) => Enumerable.Range(x - 3, 7).Max(column => (int)pixels[(120 * 640 + column) * 4]);
+            BoundsWorld();
+            boundsGraphics.DrawSelectionBounds(-Vector3.One, Vector3.One, model, new Vector2(640, 240), Vector2.Zero, new Vector2(640, 240));
+            var image = BoundsImage();
+            Check(Brightness(image, 280) > 230 && Brightness(image, 360) is > 20 and < 150);
+            var stroke = Enumerable.Range(276, 9).Count(column => image[(120 * 640 + column) * 4] > 230);
+            Check(stroke is >= 1 and <= 2);
+            Check(boundsGraphics.Statistics.WorldWidth == Math.Max(1, (int)MathF.Round(640 * scale)));
+            Check(gl.GetBoolean(GetPName.DepthWritemask));
+            Check(gl.GetError() == GLEnum.NoError);
+            boundsGraphics.EndDraw();
+
+            // Clipping uses logical window coordinates even when the framebuffer resolution differs.
+            BoundsWorld();
+            boundsGraphics.DrawSelectionBounds(-Vector3.One, Vector3.One, model, new Vector2(320, 120),
+                Vector2.Zero, new Vector2(160, 120));
+            image = BoundsImage();
+            Check(Brightness(image, 280) > 230 && Brightness(image, 360) < 5);
+            boundsGraphics.EndDraw();
+
+            // Preserve all depth, blend and scissor settings for later debug/UI drawing.
+            BoundsWorld();
+            gl.Disable(EnableCap.DepthTest);
+            gl.DepthFunc(DepthFunction.Gequal);
+            gl.DepthMask(true);
+            gl.Enable(EnableCap.CullFace);
+            gl.Disable(EnableCap.Blend);
+            gl.BlendFuncSeparate(BlendingFactor.One, BlendingFactor.Zero, BlendingFactor.DstAlpha, BlendingFactor.One);
+            gl.BlendEquationSeparate(BlendEquationModeEXT.Max, BlendEquationModeEXT.Min);
+            gl.Enable(EnableCap.ScissorTest);
+            gl.Scissor(10, 20, 600, 200);
+            var depthBefore = new float[1];
+            unsafe { fixed (float* data = depthBefore) gl.ReadPixels(280, 120, 1, 1, PixelFormat.DepthComponent, PixelType.Float, data); }
+            boundsGraphics.DrawSelectionBounds(-Vector3.One, Vector3.One, model, new Vector2(640, 240), Vector2.Zero, new Vector2(640, 240));
+            var depthAfter = new float[1];
+            unsafe { fixed (float* data = depthAfter) gl.ReadPixels(280, 120, 1, 1, PixelFormat.DepthComponent, PixelType.Float, data); }
+            var box = new int[4];
+            gl.GetInteger(GetPName.ScissorBox, box);
+            Check(depthBefore[0] == depthAfter[0] && !gl.IsEnabled(EnableCap.DepthTest) && gl.GetBoolean(GetPName.DepthWritemask));
+            Check(gl.GetInteger(GetPName.DepthFunc) == (int)DepthFunction.Gequal &&
+                !gl.IsEnabled(EnableCap.Blend) && gl.IsEnabled(EnableCap.CullFace) &&
+                gl.GetInteger(GetPName.BlendSrcAlpha) == (int)BlendingFactor.DstAlpha &&
+                gl.GetInteger(GetPName.BlendEquationRgb) == (int)BlendEquationModeEXT.Max &&
+                gl.IsEnabled(EnableCap.ScissorTest) && box.SequenceEqual(new[] { 10, 20, 600, 200 }));
+            gl.Disable(EnableCap.ScissorTest);
+            gl.Enable(EnableCap.DepthTest); gl.DepthFunc(DepthFunction.Less);
+            gl.Enable(EnableCap.Blend); gl.BlendEquation(BlendEquationModeEXT.FuncAdd);
+            gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            boundsGraphics.EndDraw();
+            if (scale == 1 && !effects && filter == "Nearest")
+            {
+                boundsCamera.Orthographic = false;
+                BoundsWorld();
+                boundsGraphics.DrawSelectionBounds(-Vector3.One, Vector3.One, model, new Vector2(640, 240), Vector2.Zero, new Vector2(640, 240));
+                image = BoundsImage();
+                var projection = boundsCamera.GetViewMatrix() * boundsCamera.GetProjectionMatrix();
+                Check(ProjectShockGLEditor.GizmoMath.Project(new Vector3(-1, 0, -4), projection, new Vector2(640, 240), out var left));
+                Check(ProjectShockGLEditor.GizmoMath.Project(new Vector3(1, 0, -4), projection, new Vector2(640, 240), out var right));
+                Check(Brightness(image, (int)left.X) > 230 && Brightness(image, (int)right.X) is > 20 and < 150);
+                boundsGraphics.EndDraw();
+                BoundsWorld();
+                var beforeBehind = BoundsImage();
+                boundsGraphics.DrawSelectionBounds(-Vector3.One, Vector3.One, Matrix4x4.CreateTranslation(0, 0, 5),
+                    new Vector2(640, 240), Vector2.Zero, new Vector2(640, 240));
+                Check(beforeBehind.SequenceEqual(BoundsImage()));
+                boundsGraphics.DrawSelectionBounds(new Vector3(-0.05f, -0.05f, -0.5f), new Vector3(0.05f, 0.05f, 0.5f),
+                    Matrix4x4.CreateTranslation(0, 0, -0.4f), new Vector2(640, 240), Vector2.Zero, new Vector2(640, 240));
+                Check(BoundsImage().Where((_, index) => index % 4 == 0).Any(value => value > 230) && gl.GetError() == GLEnum.NoError);
+                boundsGraphics.EndDraw();
+                boundsRenderer.OnResize(320, 120);
+                boundsGraphics.BeginDraw(boundsCamera);
+                boundsGraphics.BeginWorld();
+                boundsGraphics.EndWorld();
+                boundsGraphics.DrawSelectionBounds(-Vector3.One, Vector3.One, model,
+                    new Vector2(320, 120), Vector2.Zero, new Vector2(320, 120));
+                Check(gl.GetError() == GLEnum.NoError);
+                boundsGraphics.EndDraw();
+            }
+            var owned = typeof(Renderer).GetField("_selectionBounds", boundsFlags)!.GetValue(boundsRenderer)!;
+            var vao = (uint)owned.GetType().GetField("_vao", boundsFlags)!.GetValue(owned)!;
+            var vbo = (uint)owned.GetType().GetField("_vbo", boundsFlags)!.GetValue(owned)!;
+            Check(gl.IsVertexArray(vao) && gl.IsBuffer(vbo));
+            boundsRenderer.Dispose();
+            Check(!gl.IsVertexArray(vao) && !gl.IsBuffer(vbo) && gl.GetError() == GLEnum.NoError);
+        }
+        Console.WriteLine("PASS: Selection bounds keep pixel width, dim occluded edges, preserve world depth and GL state across resolution scales, filters and postprocessing");
+    }
+    finally
+    {
+        File.WriteAllText(boundsSettingsPath, boundsSettings);
+        Settings.Initialize();
+        ProjectShockGL.Environment.Apply(boundsEnvironment);
+        PostProcessSettings.Enabled = boundsPostEnabled;
+        PostProcessSettings.Shader = boundsPostShader;
+        typeof(ShaderParameters).GetMethod("CopyFrom", boundsFlags)!.Invoke(PostProcessSettings.Parameters, [boundsParameters]);
+    }
     var debugDepthWorld = new World();
     var debugFlag = typeof(Application).GetProperty(nameof(Application.IsDebug))!;
     var previousDebugFlag = Application.IsDebug;

@@ -51,6 +51,8 @@ public sealed class SaveData
 
 public sealed record ObjectSpawnSource(string? Path = null, int? PrefabMemberIndex = null, string? ClassName = null)
 {
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, string>? ObjectNames { get; init; }
     internal bool IsValid()
     {
         if (ClassName != null)

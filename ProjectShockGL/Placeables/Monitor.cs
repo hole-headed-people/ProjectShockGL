@@ -12,7 +12,8 @@ public class Monitor : Entity
 
     public MeshComponent Screen { get; private set; } = null!;
 
-    [Editable]
+    [Editable] 
+    [ObjectName] 
     public string CameraName
     {
         get => _cameraName;

@@ -52,8 +52,8 @@ public static class PrefabTools
         ObjectManipulator.Commit();
         UndoRedo.CommitPending();
         
-        var selected = objects.Distinct().ToArray();
         EntityAssetReferences.Refresh();
+        var selected = objects.Distinct().ToArray();
         var placements = EditorLevelManager.CaptureLevel(selected).Placeables.Select(EntityAssetReferences.Upgrade).ToArray();
 
         if (placements.Length == 0 || placements.Length != selected.Length)
@@ -61,6 +61,7 @@ public static class PrefabTools
             throw new InvalidOperationException("Only placed objects can be saved as prefabs.");
         }
         
+        ObjectLinks.ValidateNames(placements);
         var pivot = placements.Aggregate(Vector3.Zero, (sum, p) => sum + p.Position) / placements.Length;
         
         var path = Content.GetPrefabPath(name);
@@ -69,7 +70,9 @@ public static class PrefabTools
         
         foreach (var placement in placements)
         {
-            var member = JObject.FromObject(placement, serializer);
+            var saved = placements.Length == 1 && !string.IsNullOrWhiteSpace(placement.Name)
+                ? ObjectLinks.Remap(placement, new Dictionary<string, string> { [placement.Name] = Path.GetFileName(name.Replace('\\', '/')) }) : placement;
+            var member = JObject.FromObject(saved, serializer);
             member["Position"] = JToken.FromObject(placement.Position - pivot, serializer);
 
             if (placements.Length == 1)

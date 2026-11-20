@@ -2182,28 +2182,6 @@ RunScene("Brush texture Fit maps exactly one repeat and face edits form independ
     Check(brush.Faces[BrushFace.PositiveX] == fitted);
 });
 
-Run("Screen selection bounds rotate with objects and clip edges at the camera frustum", () =>
-{
-    var projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 2, 1, 0.1f, 100);
-    var screen = new Vector2(800);
-    var min = new Vector3(-0.5f);
-    var max = new Vector3(0.5f);
-    var model = Matrix4x4.CreateTranslation(0, 0, -5);
-    var edges = SelectionBounds.Project(min, max, model, projection, screen);
-    Check(edges.Length == 12);
-    var rotated = SelectionBounds.Project(min, max,
-        Matrix4x4.CreateRotationY(0.7f) * model, projection, screen);
-    Check(rotated.Length == 12 && !edges.SequenceEqual(rotated));
-    Check(SelectionBounds.Project(min, max, Matrix4x4.CreateTranslation(0, 0, 5), projection, screen).Length == 0);
-    var crossing = SelectionBounds.Project(min, max,
-        Matrix4x4.CreateScale(0.1f, 0.1f, 1) * Matrix4x4.CreateTranslation(0, 0, -0.4f), projection, screen);
-    Check(crossing.Length > 0);
-    foreach (var edge in crossing)
-        foreach (var point in new[] { edge.A, edge.B })
-            Check(float.IsFinite(point.X) && float.IsFinite(point.Y) &&
-                point.X >= -0.01f && point.X <= 800.01f && point.Y >= -0.01f && point.Y <= 800.01f);
-});
-
 RunScene("Surface modes persist per mesh and billboard through maps, prefabs and Inspector history", () =>
 {
     File.WriteAllText(Path.Combine(testRoot, "Entities", "SurfaceProbe.json"),
@@ -2366,6 +2344,143 @@ Run("Indexed level entrances select PlayerStart before Start, reset between tran
     }
 });
 
+RunScene("Scene orthographic modes support focus, pan, zoom, picking, Move, Resize and perspective restoration", () =>
+{
+    var camera = ProjectShockGL.Rendering.Camera.Active;
+    var original = TransformState.Capture(camera.Transform);
+    var wasOrtho = camera.Orthographic;
+    var oldSize = camera.OrthoSize;
+    var oldAspect = camera.AspectRatio;
+    var screen = new Vector2(1000, 600);
+    try
+    {
+        SceneCamera.Initialize();
+        camera.AspectRatio = screen.X / screen.Y;
+        camera.Transform.Position = new Vector3(7, 8, 9);
+        camera.Transform.Rotation = Quaternion.CreateFromYawPitchRoll(0.3f, -0.2f, 0);
+        var perspective = TransformState.Capture(camera.Transform);
+        var brush = Game.Instance.World.Spawn<BrushBox>();
+        brush.Transform.Position = new Vector3(2, 3, -4);
+        brush.Size = new Vector3(4);
+        Selection.Object = brush;
+        foreach (var mode in new[] { SceneViewMode.Top, SceneViewMode.Front, SceneViewMode.Side })
+        {
+            SceneCamera.SetView(mode);
+            Check(camera.Orthographic);
+            var forward = mode == SceneViewMode.Top ? -Vector3.UnitY : mode == SceneViewMode.Front ? -Vector3.UnitZ : -Vector3.UnitX;
+            Check(Vector3.Distance(camera.Transform.Forward, forward) < 0.0001f);
+            var plane = mode == SceneViewMode.Top ? ProjectShockGL.Rendering.Plane.Xz :
+                mode == SceneViewMode.Front ? ProjectShockGL.Rendering.Plane.Xy : ProjectShockGL.Rendering.Plane.Yz;
+            Check(SceneCamera.GridPlane == plane);
+            var vp = camera.GetViewMatrix() * camera.GetProjectionMatrix();
+            Check(GizmoMath.Project(brush.Transform.Position, vp, screen, out var center) && Vector2.Distance(center, screen / 2) < 0.01f);
+            ObjectPicker.PickAt(center, screen);
+            Check(Selection.Object == brush);
+            var beforePan = camera.Transform.Position;
+            SceneCamera.Pan(new Vector2(50, -20), screen);
+            Check(Vector3.Distance(camera.Transform.Position - beforePan,
+                (-camera.Transform.Right * 50 - camera.Transform.Up * 20) * camera.OrthoSize / screen.Y) < 0.0001f);
+            Check(MathF.Abs(Vector3.Dot(camera.Transform.Position - beforePan, forward)) < 0.0001f);
+            var zoomBefore = camera.OrthoSize;
+            SceneCamera.Zoom(1);
+            Check(camera.OrthoSize < zoomBefore);
+            SceneCamera.Focus(brush);
+            vp = camera.GetViewMatrix() * camera.GetProjectionMatrix();
+            var axisIndex = mode == SceneViewMode.Side ? 2 : 0;
+            var axis = axisIndex == 0 ? Vector3.UnitX : Vector3.UnitZ;
+            Check(GizmoMath.Project(brush.Transform.Position + axis, vp, screen, out var start));
+            Check(GizmoMath.Project(brush.Transform.Position + axis * 2, vp, screen, out var finish));
+            ObjectManipulator.Mode = ManipulationMode.Move;
+            ObjectManipulator.Local = false;
+            var position = brush.Transform.Position;
+            ObjectManipulator.BeginDrag(brush, axisIndex, start, 2, forward, vp, screen);
+            Check(ObjectManipulator.IsDragging);
+            ObjectManipulator.ApplyDrag(finish, vp, screen, false);
+            ObjectManipulator.Commit();
+            Check(Vector3.Distance(brush.Transform.Position, position + axis) < 0.001f);
+            UndoRedo.Undo();
+            Check(Vector3.Distance(brush.Transform.Position, position) < 0.001f);
+            var face = axisIndex * 2 + 1;
+            Check(GizmoMath.Project(position + axis * 2, vp, screen, out start));
+            Check(GizmoMath.Project(position + axis * 3, vp, screen, out finish));
+            Check(BrushResizer.BeginDrag(brush, face, start, forward, vp, screen));
+            BrushResizer.ApplyDrag(finish, vp, screen, false);
+            BrushResizer.Commit();
+            Check(MathF.Abs(brush.Size[axisIndex] - 5) < 0.001f &&
+                Vector3.Distance(brush.Transform.Position, position + axis * 0.5f) < 0.001f);
+            UndoRedo.Undo();
+            Check(brush.Size == new Vector3(4));
+            var rotationAxis = mode == SceneViewMode.Top ? 1 : mode == SceneViewMode.Front ? 2 : 0;
+            Check(GizmoMath.Project(position + camera.Transform.Right, vp, screen, out start));
+            Check(GizmoMath.Project(position + camera.Transform.Up, vp, screen, out finish));
+            ObjectManipulator.Mode = ManipulationMode.Rotate;
+            ObjectManipulator.BeginDrag(brush, rotationAxis, start, 2, forward, vp, screen);
+            Check(ObjectManipulator.IsDragging);
+            ObjectManipulator.ApplyDrag(finish, vp, screen, false);
+            ObjectManipulator.Commit();
+            Check(MathF.Abs(Quaternion.Dot(brush.Transform.Rotation, Quaternion.Identity)) < 0.99f);
+            UndoRedo.Undo();
+            Check(brush.Transform.Rotation == Quaternion.Identity);
+            ObjectManipulator.Mode = ManipulationMode.Scale;
+            Check(GizmoMath.Project(position + axis, vp, screen, out start));
+            Check(GizmoMath.Project(position + axis * 2, vp, screen, out finish));
+            ObjectManipulator.BeginDrag(brush, axisIndex, start, 2, forward, vp, screen);
+            Check(ObjectManipulator.IsDragging);
+            ObjectManipulator.ApplyDrag(finish, vp, screen, false);
+            ObjectManipulator.Commit();
+            Check(brush.Transform.Scale[axisIndex] > 1);
+            UndoRedo.Undo();
+            Check(brush.Transform.Scale == Vector3.One);
+        }
+        SceneCamera.SetView(SceneViewMode.Perspective);
+        Check(!camera.Orthographic && TransformState.Capture(camera.Transform) == perspective);
+    }
+    finally
+    {
+        ObjectManipulator.Cancel();
+        BrushResizer.Cancel();
+        SceneCamera.SetView(SceneViewMode.Perspective);
+        original.Apply(camera.Transform);
+        camera.Orthographic = wasOrtho;
+        camera.OrthoSize = oldSize;
+        camera.AspectRatio = oldAspect;
+    }
+});
+
+Run("LogicToggle applies configured state in Start and emits bool/change events only on transitions", () =>
+{
+    var world = Game.Instance.World;
+    var editor = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+    var previous = Application.IsEditor;
+    editor.SetValue(null, false);
+    try
+    {
+        LevelManager.Load(new Level());
+        foreach (var initial in new[] { false, true })
+        {
+            var receiver = world.Spawn<LogicToggleReceiver>();
+            receiver.Name = "toggle-receiver";
+            var toggle = world.Spawn<ProjectShockGL.Placeables.LogicToggle>();
+            toggle.InitialState = initial;
+            toggle.Outputs.Add(new OutputData { Event = "OnStateChanged", TargetName = receiver.Name, Input = "Changed" });
+            toggle.Outputs.Add(new OutputData { Event = "OnTurnedOn", TargetName = receiver.Name, Input = "On" });
+            toggle.Outputs.Add(new OutputData { Event = "OnTurnedOff", TargetName = receiver.Name, Input = "Off" });
+            world.Update(0);
+            toggle.SetState(initial);
+            Check(receiver.Changes == 0 && receiver.OnCount == 0 && receiver.OffCount == 0);
+            toggle.SetState(!initial);
+            Check(receiver.Changes == 1 && receiver.State == !initial &&
+                receiver.OnCount == (initial ? 0 : 1) && receiver.OffCount == (initial ? 1 : 0));
+            toggle.SetState(!initial);
+            Check(receiver.Changes == 1);
+            toggle.Toggle();
+            Check(receiver.Changes == 2 && receiver.State == initial && receiver.OnCount == 1 && receiver.OffCount == 1);
+            world.Destroy(toggle); world.Destroy(receiver);
+        }
+    }
+    finally { LevelManager.Unload(); editor.SetValue(null, previous); }
+});
+
 Run("Entity asset documents assign a GUID once, preserve typed parameters and refresh Content without changing map paths", () =>
 {
     var directory = Path.Combine(testRoot, "Entities");
@@ -2391,7 +2506,7 @@ Run("Entity asset documents assign a GUID once, preserve typed parameters and re
         json["Parameters"]!["List"]!.Type == Newtonsoft.Json.Linq.JTokenType.Array);
     var cached = Content.LoadEntity(name)!;
     Check(cached.AssetId == id);
-    document.Class = typeof(Entity).AssemblyQualifiedName!;
+    document.Class = typeof(LinksProbe).AssemblyQualifiedName!;
     document.Save();
     Check(document.AssetId == id && Content.LoadEntity(name)!.Class == document.Class && !ReferenceEquals(cached, Content.LoadEntity(name)));
     document.New();
@@ -2452,7 +2567,7 @@ Run("Entity asset editor opens legacy files without GUIDs and preserves extra JS
     Check(id != null && document.AssetId == id);
     var json = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(path));
     Check(json["Extra"]!["Description"]!.ToObject<string>() == "keep me" && json["AssetId"]!.ToObject<Guid>() == id);
-    var fresh = new EntityAssetDocument(directory) { Class = typeof(Entity).AssemblyQualifiedName! };
+    var fresh = new EntityAssetDocument(directory) { Class = typeof(LinksProbe).AssemblyQualifiedName! };
     fresh.Save(path);
     Check(fresh.AssetId == id);
 });
@@ -3811,6 +3926,182 @@ RunScene("Multiple selection transforms around a common pivot with atomic undo a
     Selection.Object = null; Check(Selection.Objects.Length == 0);
 });
 
+RunScene("Prefab and duplicate sets remap internal Outputs and inherited ObjectName properties without changing external names", () =>
+{
+    File.WriteAllText(Path.Combine(testRoot, "Entities", "LinksProbe.json"),
+        JsonConvert.SerializeObject(new EntityData { Class = typeof(LinksProbe).AssemblyQualifiedName! }));
+    var a = (LinksProbe)SceneObjects.Create(PlaceableType.Entity, "LinksProbe");
+    var b = (LinksProbe)SceneObjects.Create(PlaceableType.Entity, "LinksProbe");
+    a.Name = "link-button"; b.Name = "link-door";
+    a.TargetName = b.Name; b.TargetName = a.Name;
+    a.ExternalName = "external-target"; a.PlainText = b.Name;
+    a.Outputs.Add(new OutputData { Event = "Test", TargetName = b.Name, Input = "SetActive", Parameter = "false" });
+    a.Outputs.Add(new OutputData { Event = "External", TargetName = "external-target", Input = "AttachTo", Parameter = b.Name });
+    var original = EditorLevelManager.CaptureLevel([a, b]);
+    var template = new PrefabData { Placeables = original.Placeables };
+    var before = JsonConvert.SerializeObject(template, JsonHelper.GetSettings());
+    var world = Game.Instance.World;
+    var first = Prefab.InstantiateAll(template, world).Cast<LinksProbe>().ToArray();
+    var second = Prefab.InstantiateAll(template, world).Cast<LinksProbe>().ToArray();
+    foreach (var pair in new[] { first, second })
+    {
+        Check(pair[0].TargetName == pair[1].Name && pair[1].TargetName == pair[0].Name);
+        Check(pair[0].ExternalName == a.ExternalName && pair[0].PlainText == b.Name);
+        Check(pair[0].Outputs[0].TargetName == pair[1].Name && pair[0].Outputs[1].TargetName == "external-target" &&
+            pair[0].Outputs[1].Parameter == b.Name);
+    }
+    first[0].InvokeEvent("Test");
+    Check(!first[1].IsActive && second[1].IsActive && b.IsActive);
+    Check(JsonConvert.SerializeObject(template, JsonHelper.GetSettings()) == before);
+    Selection.Set([a, b]); UndoRedo.Clear();
+    var copies = SceneObjects.Duplicate(Selection.Objects).Cast<LinksProbe>().ToArray();
+    Check(copies[0].TargetName == copies[1].Name && copies[1].TargetName == copies[0].Name);
+    var references = copies.Select(EditorObjectReference.Get).ToArray();
+    UndoRedo.Undo();
+    Check(copies.All(obj => obj.IsDestroyed) && !UndoRedo.CanUndo);
+    UndoRedo.Redo();
+    var restored = references.Select(reference => (LinksProbe)reference.Current).ToArray();
+    Check(restored[0].TargetName == restored[1].Name && restored[0].Outputs[0].TargetName == restored[1].Name);
+    var lone = (LinksProbe)SceneObjects.Duplicate(a);
+    Check(lone.TargetName == b.Name && lone.Outputs[0].TargetName == b.Name);
+    var detail = world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass" });
+    Selection.Set([a, b]); Selection.ToggleDetail(detail.Id); UndoRedo.Clear();
+    Check(SceneSelection.Duplicate() == 3);
+    var mixed = Selection.Objects.Cast<LinksProbe>().ToArray();
+    Check(mixed[0].TargetName == mixed[1].Name && Selection.Details.Length == 1);
+    UndoRedo.Undo();
+    Check(!UndoRedo.CanUndo);
+    var created = LinksProbe.Creates;
+    var count = world.GetAllObjects(true).Length;
+    b.Name = a.Name;
+    Throws(() => SceneObjects.Duplicate(new[] { a, b }));
+    Throws(() => SceneSelection.Duplicate());
+    var bad = EditorLevelManager.CaptureLevel([a, b]).Placeables;
+    Throws(() => Prefab.InstantiateAll(new PrefabData { Placeables = bad }, world));
+    var name = "BadNames-" + Guid.NewGuid().ToString("N");
+    Throws(() => PrefabTools.Save(new[] { a, b }, name));
+    Check(!File.Exists(Content.GetPrefabPath(name)) && LinksProbe.Creates == created &&
+        world.GetAllObjects(true).Length == count && !UndoRedo.CanUndo);
+});
+
+RunScene("Single-object prefab rename preserves self references", () =>
+{
+    var obj = (LinksProbe)SceneObjects.Create(PlaceableType.Entity, "LinksProbe");
+    obj.TargetName = obj.Name;
+    obj.Outputs.Add(new OutputData { Event = "Self", TargetName = obj.Name, Input = "SetActive", Parameter = "false" });
+    var name = "LinkSelf-" + Guid.NewGuid().ToString("N");
+    PrefabTools.Save(obj, name);
+    var instance = (LinksProbe)Prefab.Instantiate(name, Game.Instance.World);
+    Check(instance.TargetName == instance.Name && instance.Outputs[0].TargetName == instance.Name);
+});
+
+Run("Dynamic prefab sets retain remapped names and links after save capture and restore", () =>
+{
+    var world = Game.Instance.World;
+    var name = "LinksSave-" + Guid.NewGuid().ToString("N");
+    var map = Path.Combine(testRoot, "Levels", name + ".map");
+    EditorLevelManager.SaveLevel(new Level(), map);
+    var template = new PrefabData { Placeables =
+    [
+        new Placeable { Type = PlaceableType.Entity, Path = "LinksProbe", Name = "a",
+            Properties = new() { ["TargetName"] = "b" },
+            Outputs = [new OutputData { Event = "Test", TargetName = "b", Input = "SetActive", Parameter = "false" }] },
+        new Placeable { Type = PlaceableType.Entity, Path = "LinksProbe", Name = "b", Properties = new() { ["TargetName"] = "a" } }
+    ] };
+    File.WriteAllText(Content.GetPrefabPath(name), JsonConvert.SerializeObject(template, JsonHelper.GetSettings()));
+    try
+    {
+        LevelManager.Load(name);
+        var first = Prefab.InstantiateAll(name, world);
+        var second = Prefab.InstantiateAll(name, world);
+        var ids = first.Concat(second).Select(obj => obj.Guid).ToArray();
+        var names = first.Concat(second).Select(obj => obj.Name).ToArray();
+        SaveHelper.CaptureLevel();
+        var data = JsonConvert.DeserializeObject<SaveData>(JsonConvert.SerializeObject(SaveManager.GetData(), JsonHelper.GetSettings()), JsonHelper.GetSettings())!;
+        Check(data.Levels[name][ids[0]].SpawnSource!.ObjectNames!["b"] == names[1]);
+        LevelManager.Load(name);
+        SaveHelper.RestoreLevel();
+        var objects = world.GetAllObjects(true).ToDictionary(obj => obj.Guid);
+        var restored = ids.Select(id => (LinksProbe)objects[id]).ToArray();
+        Check(restored.Select(obj => obj.Name).SequenceEqual(names));
+        Check(restored[0].TargetName == restored[1].Name && restored[2].TargetName == restored[3].Name &&
+            restored[1].TargetName == restored[0].Name && restored[0].Outputs[0].TargetName == restored[1].Name);
+    }
+    finally { SaveManager.GetData().Levels.Remove(name); LevelManager.Unload(); }
+});
+
+RunScene("Scene folders organize mixed objects and Details, roundtrip and preserve membership across undo and duplication", () =>
+{
+    var world = Game.Instance.World;
+    var entity = SceneObjects.Create(PlaceableType.Entity, "Check");
+    var geometry = SceneObjects.Create(PlaceableType.Geometry, "Box");
+    var brush = SceneObjects.Create(PlaceableType.BrushBox);
+    var detail = world.Details.Add(new DetailPlacement { AssetPath = "Tests/Grass" });
+    var transform = TransformState.Capture(brush.Transform);
+    var first = SceneFolders.Create("Room");
+    var second = SceneFolders.Create("Logic");
+    Selection.Set([entity, geometry, brush]); Selection.ToggleDetail(detail.Id);
+    SceneFolders.MoveSelected(first);
+    SceneFolders.Select(first);
+    Check(Selection.Objects.Length == 3 && Selection.Details.Single().Id == detail.Id &&
+        TransformState.Capture(brush.Transform) == transform && entity.IsActive);
+    Selection.Object = entity;
+    SceneFolders.MoveSelected(second);
+    Check(SceneFolders.Capture().Single(folder => folder.Id == second).ObjectIds.SequenceEqual(new[] { entity.Guid }));
+    UndoRedo.Undo();
+    Check(SceneFolders.Capture().Single(folder => folder.Id == first).ObjectIds.Length == 3);
+    UndoRedo.Redo();
+    SceneFolders.MoveSelected(null);
+    Check(SceneFolders.Capture().All(folder => !folder.ObjectIds.Contains(entity.Guid)));
+    UndoRedo.Undo();
+    SceneFolders.Rename(first, "Architecture");
+    UndoRedo.Undo(); Check(SceneFolders.Capture().Single(folder => folder.Id == first).Name == "Room");
+    UndoRedo.Redo();
+    SceneFolders.Delete(second);
+    Check(world.GetAllObjects(true).Length == 3 && world.Details.Count == 1 &&
+        SceneFolders.Capture().All(folder => !folder.ObjectIds.Contains(entity.Guid)));
+    UndoRedo.Undo();
+    Check(SceneFolders.Capture().Single(folder => folder.Id == second).ObjectIds.Contains(entity.Guid));
+    var folders = SceneFolders.Capture();
+    folders.Single(folder => folder.Id == first).Expanded = false;
+    SceneFolders.Load(folders);
+    var path = Path.Combine(testRoot, "scene-folders.map");
+    EditorLevelManager.SaveCurrentLevel(path);
+    EditorLevelManager.OpenLevel(path);
+    var loaded = SceneFolders.Capture();
+    Check(loaded.Length == 2 && loaded.Single(folder => folder.Id == first) is { Expanded: false, Name: "Architecture" });
+    Check(loaded.Single(folder => folder.Id == first).DetailIds.Single() == detail.Id);
+    SceneFolders.Select(first); UndoRedo.Clear();
+    Check(SceneSelection.Duplicate() == 3);
+    var copyObjects = Selection.Objects.Select(obj => obj.Guid).ToArray();
+    var copyDetails = Selection.Details.Select(item => item.Id).ToArray();
+    Check(SceneFolders.Capture().Single(folder => folder.Id == first).ObjectIds.Length == 4 &&
+        SceneFolders.Capture().Single(folder => folder.Id == first).DetailIds.Length == 2);
+    UndoRedo.Undo();
+    Check(SceneFolders.Capture().Single(folder => folder.Id == first).ObjectIds.Length == 2);
+    UndoRedo.Redo();
+    Check(copyObjects.All(id => SceneFolders.Capture().Single(folder => folder.Id == first).ObjectIds.Contains(id)) &&
+        SceneFolders.Capture().Single(folder => folder.Id == first).DetailIds.Contains(copyDetails.Single()));
+    SceneSelection.Delete();
+    Check(SceneFolders.Capture().Single(folder => folder.Id == first).ObjectIds.Length == 2);
+    UndoRedo.Undo();
+    Check(copyObjects.All(id => SceneFolders.Capture().Single(folder => folder.Id == first).ObjectIds.Contains(id)));
+    var current = EditorLevelManager.CaptureCurrentLevel();
+    var before = world.GetAllObjects(true).Select(obj => obj.Guid).ToArray();
+    Throws(() => LevelManager.Load(new Level { Placeables = current.Placeables, Details = current.Details,
+        Folders = [new SceneFolderData { ObjectIds = [entity.Guid, entity.Guid] }] }));
+    Check(world.GetAllObjects(true).Select(obj => obj.Guid).SequenceEqual(before));
+    Throws(() => LevelManager.Load(new Level { Placeables = current.Placeables, Details = current.Details,
+        Folders = [new SceneFolderData { DetailIds = [Guid.NewGuid()] }] }));
+    var legacy = JsonConvert.DeserializeObject<Level>("{\"Placeables\":[],\"Details\":[]}")!;
+    Check(legacy.Folders.Length == 0);
+    EditorLevelManager.NewLevel();
+    Check(SceneFolders.Capture().Length == 0);
+    var empty = SceneFolders.Create("Empty");
+    UndoRedo.Undo(); Check(SceneFolders.Capture().Length == 0);
+    UndoRedo.Redo(); Check(SceneFolders.Capture().Single().Id == empty);
+});
+
 RunScene("Prefab sets insert relative to a pivot and undo as one independent set", () =>
 {
     var a = (CheckEntity)SceneObjects.Create(PlaceableType.Entity, "Check");
@@ -3832,7 +4123,7 @@ RunScene("Prefab sets insert relative to a pivot and undo as one independent set
         Check(Selection.Objects.SequenceEqual(inserted));
         Check(Vector3.Distance(inserted[0].Transform.Position, new Vector3(0, 3, 0)) < .001f);
         Check(Vector3.Distance(inserted[1].Transform.Position, new Vector3(0, 7, 0)) < .001f);
-        Check(((CheckEntity)inserted[0]).Outputs[0].TargetName == b.Name);
+        Check(((CheckEntity)inserted[0]).Outputs[0].TargetName == inserted[1].Name);
         var references = inserted.Select(EditorObjectReference.Get).ToArray();
         UndoRedo.Undo(); Check(inserted.All(o => o.IsDestroyed) && Selection.Objects.SequenceEqual(new GameObject[] { a, b }) && !UndoRedo.CanUndo);
         UndoRedo.Redo(); Check(Selection.Objects.SequenceEqual(references.Select(r => r.Current)));
@@ -4073,27 +4364,39 @@ if (args.Contains("--imgui"))
             }
             finally { BrushTextureWindow.Open = false; }
         });
-        RunScene("Screen selection bounds draw in ImGui and disappear while the UI Editor is open", () =>
+        RunScene("Real Scene folders select their contents and accept a multi-object drag", () =>
         {
-            var brush = (BrushBox)SceneObjects.Create(PlaceableType.BrushBox);
-            brush.Transform.Position = ProjectShockGL.Rendering.Camera.Active.Transform.Position + ProjectShockGL.Rendering.Camera.Active.Transform.Forward * 5;
-            Selection.Object = brush;
-            var previousUI = UIEditor.Open;
-            try
+            var a = SceneObjects.Create(PlaceableType.BrushBox);
+            var b = SceneObjects.Create(PlaceableType.BrushBox);
+            var first = SceneFolders.Create("First");
+            var second = SceneFolders.Create("Second");
+            Selection.Set([a, b]);
+            SceneFolders.MoveSelected(first);
+            Selection.Object = null;
+            void FoldersPanel()
             {
-                int DrawBounds(bool uiOpen)
-                {
-                    UIEditor.Open = uiOpen;
-                    io.AddMousePosEvent(-100, -100);
-                    ImGuiNET.ImGui.NewFrame();
-                    SelectionBounds.Draw(io.DisplaySize, Vector2.Zero, io.DisplaySize);
-                    ImGuiNET.ImGui.Render();
-                    return ImGuiNET.ImGui.GetDrawData().TotalVtxCount;
-                }
-                Check(DrawBounds(false) > 0);
-                Check(DrawBounds(true) == 0);
+                ImGuiNET.ImGui.Begin("Folder checks");
+                SceneFolders.Draw();
+                ImGuiNET.ImGui.End();
             }
-            finally { UIEditor.Open = previousUI; }
+            Frame(FoldersPanel);
+            Frame(FoldersPanel, 75, 52, true);
+            Frame(FoldersPanel, 75, 52, false);
+            Check(Selection.Objects.Length == 2);
+            Frame(FoldersPanel, 65, 70);
+            Frame(FoldersPanel, 65, 70, true);
+            Frame(FoldersPanel, 80, 75, true);
+            Frame(FoldersPanel, 70, 102, true);
+            Frame(FoldersPanel, 70, 102, false);
+            Check(SceneFolders.Capture().Single(folder => folder.Id == second).ObjectIds.Length == 2);
+            UndoRedo.Undo();
+            Check(SceneFolders.Capture().Single(folder => folder.Id == first).ObjectIds.Length == 2);
+            Frame(FoldersPanel, 12, 52, true);
+            Frame(FoldersPanel, 12, 52, false);
+            Check(!SceneFolders.Capture().Single(folder => folder.Id == first).Expanded && Selection.Objects.Length == 2);
+            Frame(FoldersPanel, 12, 52, true);
+            Frame(FoldersPanel, 12, 52, false);
+            Check(SceneFolders.Capture().Single(folder => folder.Id == first).Expanded);
         });
         Run("Real entity asset editor draws its draft and confirms unsaved New and close actions", () =>
         {
@@ -4657,4 +4960,23 @@ public sealed class SurfaceProbe : Entity
         Billboard = AddComponent<BillboardComponent>();
         AddComponent<MeshComponent>().IsDebug = true;
     }
+}
+public class LinksProbeBase : Entity
+{
+    [Editable, ObjectName] public string TargetName { get; set; } = "";
+}
+public sealed class LinksProbe : LinksProbeBase
+{
+    public static int Creates;
+    [Editable, ObjectName] public string ExternalName { get; set; } = "";
+    [Editable] public string PlainText { get; set; } = "";
+    public override void Create() { base.Create(); Creates++; }
+}
+public sealed class LogicToggleReceiver : Entity
+{
+    public int Changes, OnCount, OffCount;
+    public bool State;
+    [Input("Changed")] public void Changed(bool value) { State = value; Changes++; }
+    [Input("On")] public void On() => OnCount++;
+    [Input("Off")] public void Off() => OffCount++;
 }

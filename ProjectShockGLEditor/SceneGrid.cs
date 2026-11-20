@@ -16,6 +16,6 @@ public static class SceneGrid
         
         var step = float.IsFinite(Step) ? MathF.Max(Step, .01f) : 1;
         
-        graphics.DrawGrid(step, radius: 500, fadeStart: 50, fadeEnd: 500);
+        graphics.DrawGrid(step, radius: 500, fadeStart: 50, fadeEnd: 500, plane: SceneCamera.GridPlane, planarFade: SceneCamera.ViewMode != SceneViewMode.Perspective);
     }
 }

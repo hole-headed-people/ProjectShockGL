@@ -77,6 +77,7 @@ public class Renderer : IDisposable
     
     private PostProcessor? _postProcessor;
     private GridRenderer? _gridRenderer;
+    private SelectionBoundsRenderer? _selectionBounds;
     private int _drawCalls;
     private long _triangles;
     private int _worldDrawCalls;
@@ -407,17 +408,32 @@ public class Renderer : IDisposable
         _gl.UniformMatrix4(_unlitView, 1, false, (float*)&view);
     }
 
-    internal void DrawGrid(float step, float radius, float fadeStart, float fadeEnd)
+    internal void DrawGrid(float step, float radius, float fadeStart, float fadeEnd, Plane plane = Plane.Xz, bool planarFade = false)
     {
         if (_isUI) throw new InvalidOperationException("DrawGrid is a world-space operation.");
         if (!float.IsFinite(step) || step <= 0 || !float.IsFinite(radius) || radius <= 0 ||
             !float.IsFinite(fadeStart) || !float.IsFinite(fadeEnd) || fadeStart < 0 || fadeEnd <= fadeStart)
             throw new ArgumentOutOfRangeException(nameof(step), "Grid dimensions and fade range must be finite and positive.");
         _gridRenderer ??= new GridRenderer(_gl);
-        _gridRenderer.Draw(_quadMesh, _frameCamera, _frameProjection, _frameView, step, radius, fadeStart, fadeEnd);
+        _gridRenderer.Draw(_quadMesh, _frameCamera, _frameProjection, _frameView, step, radius, fadeStart, fadeEnd, plane, planarFade);
         _drawCalls++;
         _triangles += _quadMesh.TriangleCount;
     }
+    public void DrawSelectionBounds(Vector3 min, Vector3 max, Matrix4x4 model,
+        Vector2 logicalSize, Vector2 clipMin, Vector2 clipMax, float thickness = 1.5f)
+    {
+        if (_isUI) throw new InvalidOperationException("Selection bounds must be drawn before UI.");
+        if (!float.IsFinite(thickness) || thickness <= 0) throw new ArgumentOutOfRangeException(nameof(thickness));
+        _selectionBounds ??= new SelectionBoundsRenderer(_gl);
+        var triangles = _selectionBounds.Draw(min, max, model * _frameView * _frameProjection,
+            logicalSize, clipMin, clipMax, thickness);
+        if (triangles > 0)
+        {
+            _drawCalls += 2;
+            _triangles += triangles;
+        }
+    }
+
     public void DrawQuadMesh(Texture texture, Matrix4x4 model, Color color, bool lit = false, bool ignoreDepth = false,
         Vector4? uvRect = null, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null,
         SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f)
@@ -758,7 +774,7 @@ public class Renderer : IDisposable
         
         _unlitProgram = _litProgram = 0;
         
-        Cleanup.Run(() => _postProcessor?.Dispose(), () => _gridRenderer?.Dispose(), _quadMesh.Dispose,
+        Cleanup.Run(() => _postProcessor?.Dispose(), () => _gridRenderer?.Dispose(), () => _selectionBounds?.Dispose(), _quadMesh.Dispose,
             () =>
             {
                 if (unlit != 0)

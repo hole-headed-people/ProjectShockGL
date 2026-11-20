@@ -77,7 +77,7 @@ public static class SceneObjects
         
         try
         {
-            var copies = selected.Select(EditorLevelManager.DuplicateObject).ToArray();
+            var copies = EditorLevelManager.DuplicateObjects(selected);
             var action = new SceneSetAction(copies, previous, true);
             
             UndoRedo.Register(action);
