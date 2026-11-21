@@ -6,10 +6,12 @@ namespace ProjectShockGL.Rendering;
 public class Texture : IDisposable
 {
     private readonly GL _gl;
-
-    public uint Handle { get; private set; }
-
+    
+    private LightmapAlpha? _bakeAlpha;
+    
     internal bool IsOpaque { get; }
+    
+    public uint Handle { get; private set; }
     public int Width { get; private set; }
     public int Height { get; private set; }
 
@@ -21,6 +23,13 @@ public class Texture : IDisposable
         IsOpaque = isOpaque;
         Width = width;
         Height = height;
+    }
+    
+    internal LightmapAlpha? CaptureBakeAlpha()
+    {
+        ObjectDisposedException.ThrowIf(Handle == 0, this);
+        
+        return _bakeAlpha;
     }
 
     public static unsafe Texture Load(GL gl, string path)
@@ -52,7 +61,10 @@ public class Texture : IDisposable
             gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.Repeat);
             gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.Repeat);
 
-            return new Texture(gl, handle, image.Width, image.Height, IsFullyOpaque(image.Data));
+            return new Texture(gl, handle, image.Width, image.Height, IsFullyOpaque(image.Data))
+            {
+                _bakeAlpha = IsFullyOpaque(image.Data) ? null : new LightmapAlpha(image.Width, image.Height, image.Data, true, false)
+            };
         }
         catch
         {
@@ -87,7 +99,10 @@ public class Texture : IDisposable
             gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
             gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
 
-            return new Texture(gl, handle, 1, 1, a == 255);
+            return new Texture(gl, handle, 1, 1, a == 255)
+            {
+                _bakeAlpha = a == 255 ? null : new LightmapAlpha(1, 1, pixel, false, false)
+            };
         }
         catch
         {
@@ -96,6 +111,62 @@ public class Texture : IDisposable
         }
     }
 
+    internal static unsafe Texture FromLinearRgb(GL gl, int size, System.Numerics.Vector3[] pixels)
+    {
+        if (pixels.Length != checked(size * size)) throw new ArgumentException("Lightmap pixels do not match dimensions.");
+        var previous = gl.GetInteger(GetPName.TextureBinding2D);
+        var handle = gl.GenTexture();
+        try
+        {
+            gl.BindTexture(TextureTarget.Texture2D, handle);
+            fixed (System.Numerics.Vector3* data = pixels)
+                gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgb32f, (uint)size, (uint)size, 0,
+                    PixelFormat.Rgb, PixelType.Float, data);
+            gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Linear);
+            gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Linear);
+            gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
+            gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
+            return new Texture(gl, handle, size, size, true);
+        }
+        catch { gl.DeleteTexture(handle); throw; }
+        finally { gl.BindTexture(TextureTarget.Texture2D, (uint)previous); }
+    }
+
+    internal unsafe LightmapAlbedo CaptureBakeAlbedo()
+    {
+        ObjectDisposedException.ThrowIf(Handle == 0, this);
+        if (Width <= 0 || Height <= 0) throw new InvalidOperationException("Allocate the surface texture before capturing lighting.");
+        var previous = _gl.GetInteger(GetPName.TextureBinding2D);
+        var packBuffer = _gl.GetInteger(GetPName.PixelPackBufferBinding);
+        var alignment = _gl.GetInteger(GetPName.PackAlignment);
+        var rowLength = _gl.GetInteger(GetPName.PackRowLength);
+        var skipPixels = _gl.GetInteger(GetPName.PackSkipPixels);
+        var skipRows = _gl.GetInteger(GetPName.PackSkipRows);
+        try
+        {
+            _gl.BindBuffer(BufferTargetARB.PixelPackBuffer,0);
+            _gl.PixelStore(PixelStoreParameter.PackAlignment,1);
+            _gl.PixelStore(PixelStoreParameter.PackRowLength,0);
+            _gl.PixelStore(PixelStoreParameter.PackSkipPixels,0);
+            _gl.PixelStore(PixelStoreParameter.PackSkipRows,0);
+            _gl.BindTexture(TextureTarget.Texture2D,Handle);
+            var repeat = _gl.GetTexParameterI(GLEnum.Texture2D,GLEnum.TextureWrapS) == (int)GLEnum.Repeat;
+            var repeatV = _gl.GetTexParameterI(GLEnum.Texture2D,GLEnum.TextureWrapT) == (int)GLEnum.Repeat;
+            var linear = _gl.GetTexParameterI(GLEnum.Texture2D,GLEnum.TextureMagFilter) == (int)GLEnum.Linear;
+            var pixels = new byte[checked(Width * Height * 4)];
+            fixed(byte* data=pixels) _gl.GetTexImage(TextureTarget.Texture2D,0,PixelFormat.Rgba,PixelType.UnsignedByte,data);
+            return new LightmapAlbedo(Width,Height,pixels,repeat,linear,repeatV);
+        }
+        finally
+        {
+            _gl.PixelStore(PixelStoreParameter.PackAlignment,alignment);
+            _gl.PixelStore(PixelStoreParameter.PackRowLength,rowLength);
+            _gl.PixelStore(PixelStoreParameter.PackSkipPixels,skipPixels);
+            _gl.PixelStore(PixelStoreParameter.PackSkipRows,skipRows);
+            _gl.BindBuffer(BufferTargetARB.PixelPackBuffer,(uint)packBuffer);
+            _gl.BindTexture(TextureTarget.Texture2D,(uint)previous);
+        }
+    }
     internal static Texture CreateRenderTarget(GL gl)
     {
         return new Texture(gl, gl.GenTexture(), 0, 0, true);
@@ -124,6 +195,7 @@ public class Texture : IDisposable
         _gl.DeleteTexture(Handle);
 
         Handle = 0;
+        _bakeAlpha = null;
     }
 
     public static unsafe Texture FromRgba(GL gl, int width, int height, ReadOnlySpan<byte> pixels)
@@ -150,7 +222,10 @@ public class Texture : IDisposable
             gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
             gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
 
-            return new Texture(gl, handle, width, height, IsFullyOpaque(pixels));
+            return new Texture(gl, handle, width, height, IsFullyOpaque(pixels))
+            {
+                _bakeAlpha = IsFullyOpaque(pixels) ? null : new LightmapAlpha(width, height, pixels, false, true)
+            };
         }
         catch
         {

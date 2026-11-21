@@ -227,7 +227,7 @@ public class Renderer : IDisposable
 
         _gl.Uniform1(_litTexture, 0);
 
-        if (Light.Main is { IsActive: true, IsDestroyed: false, IsEditorVisible: true })
+        if (Light.Main is { IsActive: true, IsDestroyed: false, IsEditorVisible: true, Mode: LightMode.Realtime })
         {
             var mainLightDirection = Light.Main.Transform.Forward;
 
@@ -262,7 +262,7 @@ public class Renderer : IDisposable
         var directions = new float[maxPointLights * 3];
         var coneCosines = new float[maxPointLights * 2];
 
-        var activeLights = Light.All.Where(light => light.IsActive && !light.IsDestroyed && light.IsEditorVisible).Take(maxPointLights).ToArray();
+        var activeLights = Light.All.Where(light => light.IsActive && !light.IsDestroyed && light.IsEditorVisible && light.Mode == LightMode.Realtime).Take(maxPointLights).ToArray();
         var count = activeLights.Length;
 
         for (var i = 0; i < count; i++)
@@ -279,10 +279,13 @@ public class Renderer : IDisposable
 
             intensities[i] = light.Intensity;
             radii[i] = light.Radius;
+            
             var direction = light.Transform.Forward;
+            
             directions[i * 3] = direction.X;
             directions[i * 3 + 1] = direction.Y;
             directions[i * 3 + 2] = direction.Z;
+            
             coneCosines[i * 2] = MathF.Cos(light.InnerAngle * MathF.PI / 360f);
             
             coneCosines[i * 2 + 1] = light.Type == LightType.Spot
@@ -410,23 +413,42 @@ public class Renderer : IDisposable
 
     internal void DrawGrid(float step, float radius, float fadeStart, float fadeEnd, Plane plane = Plane.Xz, bool planarFade = false)
     {
-        if (_isUI) throw new InvalidOperationException("DrawGrid is a world-space operation.");
+        if (_isUI)
+        {
+            throw new InvalidOperationException("DrawGrid is a world-space operation.");
+        }
+
         if (!float.IsFinite(step) || step <= 0 || !float.IsFinite(radius) || radius <= 0 ||
             !float.IsFinite(fadeStart) || !float.IsFinite(fadeEnd) || fadeStart < 0 || fadeEnd <= fadeStart)
+        {
             throw new ArgumentOutOfRangeException(nameof(step), "Grid dimensions and fade range must be finite and positive.");
+        }
+        
         _gridRenderer ??= new GridRenderer(_gl);
+        
         _gridRenderer.Draw(_quadMesh, _frameCamera, _frameProjection, _frameView, step, radius, fadeStart, fadeEnd, plane, planarFade);
+        
         _drawCalls++;
         _triangles += _quadMesh.TriangleCount;
     }
     public void DrawSelectionBounds(Vector3 min, Vector3 max, Matrix4x4 model,
         Vector2 logicalSize, Vector2 clipMin, Vector2 clipMax, float thickness = 1.5f)
     {
-        if (_isUI) throw new InvalidOperationException("Selection bounds must be drawn before UI.");
-        if (!float.IsFinite(thickness) || thickness <= 0) throw new ArgumentOutOfRangeException(nameof(thickness));
+        if (_isUI)
+        {
+            throw new InvalidOperationException("Selection bounds must be drawn before UI.");
+        }
+
+        if (!float.IsFinite(thickness) || thickness <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(thickness));
+        }
+        
         _selectionBounds ??= new SelectionBoundsRenderer(_gl);
+        
         var triangles = _selectionBounds.Draw(min, max, model * _frameView * _frameProjection,
             logicalSize, clipMin, clipMax, thickness);
+        
         if (triangles > 0)
         {
             _drawCalls += 2;
@@ -436,9 +458,9 @@ public class Renderer : IDisposable
 
     public void DrawQuadMesh(Texture texture, Matrix4x4 model, Color color, bool lit = false, bool ignoreDepth = false,
         Vector4? uvRect = null, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null,
-        SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f)
+        SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f, bool dynamicAmbient = false)
     {
-        DrawMeshInternal(_quadMesh, texture, model, color, lit, ignoreDepth, uvRect, shader, shaderParameters, surfaceMode, alphaCutoff);
+        DrawMeshInternal(_quadMesh, texture, model, color, lit, ignoreDepth, uvRect, shader, shaderParameters, surfaceMode, alphaCutoff, dynamicAmbient: dynamicAmbient);
     }
 
     internal void DrawLineMesh(Texture texture, Matrix4x4 model, Color color, bool lit = false,
@@ -467,7 +489,7 @@ public class Renderer : IDisposable
 
     public void DrawMesh(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit = false, bool ignoreDepth = false,
         ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, bool backfaceCulling = true,
-        SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f)
+        SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f, Texture? lightmap = null, Vector4? lightmapRect = null, bool dynamicAmbient = false)
     {
         var cullFace = _gl.IsEnabled(EnableCap.CullFace);
         
@@ -482,7 +504,7 @@ public class Renderer : IDisposable
                 _gl.Disable(EnableCap.CullFace);
             }
 
-            DrawMeshInternal(mesh, texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters, surfaceMode: surfaceMode, alphaCutoff: alphaCutoff);
+            DrawMeshInternal(mesh, texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters, surfaceMode: surfaceMode, alphaCutoff: alphaCutoff, lightmap: lightmap, lightmapRect: lightmapRect, dynamicAmbient: dynamicAmbient);
         }
         finally
         {
@@ -497,7 +519,7 @@ public class Renderer : IDisposable
         }
     }
 
-    internal void DrawInstances(InstancedMesh instances, Texture texture, Color color, bool lit, bool backfaceCulling)
+    internal void DrawInstances(InstancedMesh instances, Texture texture, Color color, bool lit, bool backfaceCulling, Texture? lightmap = null)
     {
         if (ReferenceEquals(texture, ExcludedTexture)) return;
         if (_frameForceUnlit)
@@ -527,6 +549,7 @@ public class Renderer : IDisposable
             shader.Apply(null);
             SetCustomFrameUniforms(shader, null);
             shader.Write("uColor", new Vector4(color.R, color.G, color.B, color.A));
+            using var bakedBinding = new LightmapDrawBinding(_gl, shader.Handle, lit ? lightmap : null, new Vector4(1,1,0,0));
             
             _gl.ActiveTexture(TextureUnit.Texture0);
             _gl.BindTexture(TextureTarget.Texture2D, texture.Handle);
@@ -559,30 +582,43 @@ public class Renderer : IDisposable
     }
     private void DrawMeshInternal(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit,
         bool ignoreDepth = false, Vector4? uvRect = null, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null,
-        SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f)
+        SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f, Texture? lightmap = null, Vector4? lightmapRect = null, bool dynamicAmbient = false)
     {
         if (!Enum.IsDefined(surfaceMode) || !float.IsFinite(alphaCutoff) || alphaCutoff < 0 || alphaCutoff > 1)
+        {
             throw new ArgumentOutOfRangeException(nameof(surfaceMode));
+        }
+        
         if (_isUI)
         {
-            DrawMeshSurface(mesh, texture, model, color, lit, ignoreDepth, uvRect, shader, shaderParameters, surfaceMode, alphaCutoff);
+            DrawMeshSurface(mesh, texture, model, color, lit, ignoreDepth, uvRect, shader, shaderParameters, surfaceMode, alphaCutoff, lightmap, lightmapRect, dynamicAmbient);
+            
             return;
         }
+        
         var depthWrite = _gl.GetBoolean(GetPName.DepthWritemask);
+        
         var depthTest = _gl.IsEnabled(EnableCap.DepthTest);
         var blend = _gl.IsEnabled(EnableCap.Blend);
+        
         var srcRgb = _gl.GetInteger(GetPName.BlendSrcRgb);
         var dstRgb = _gl.GetInteger(GetPName.BlendDstRgb);
         var srcAlpha = _gl.GetInteger(GetPName.BlendSrcAlpha);
         var dstAlpha = _gl.GetInteger(GetPName.BlendDstAlpha);
         var equationRgb = _gl.GetInteger(GetPName.BlendEquationRgb);
         var equationAlpha = _gl.GetInteger(GetPName.BlendEquationAlpha);
+        
         try
         {
             if (!_isUI)
             {
                 _gl.DepthMask(surfaceMode != SurfaceMode.Transparent);
-                if (surfaceMode == SurfaceMode.Opaque) _gl.Disable(EnableCap.Blend);
+
+                if (surfaceMode == SurfaceMode.Opaque)
+                {
+                    _gl.Disable(EnableCap.Blend);
+                }
+                
                 else
                 {
                     _gl.Enable(EnableCap.Blend);
@@ -590,13 +626,30 @@ public class Renderer : IDisposable
                     _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
                 }
             }
-            DrawMeshSurface(mesh, texture, model, color, lit, ignoreDepth, uvRect, shader, shaderParameters, surfaceMode, alphaCutoff);
+            DrawMeshSurface(mesh, texture, model, color, lit, ignoreDepth, uvRect, shader, shaderParameters, surfaceMode, alphaCutoff, lightmap, lightmapRect, dynamicAmbient);
         }
         finally
         {
             _gl.DepthMask(depthWrite);
-            if (depthTest) _gl.Enable(EnableCap.DepthTest); else _gl.Disable(EnableCap.DepthTest);
-            if (blend) _gl.Enable(EnableCap.Blend); else _gl.Disable(EnableCap.Blend);
+
+            if (depthTest)
+            {
+                _gl.Enable(EnableCap.DepthTest);
+            }
+            else
+            {
+                _gl.Disable(EnableCap.DepthTest);
+            }
+
+            if (blend)
+            {
+                _gl.Enable(EnableCap.Blend);
+            }
+            else
+            {
+                _gl.Disable(EnableCap.Blend);
+            }
+            
             _gl.BlendFuncSeparate((BlendingFactor)srcRgb, (BlendingFactor)dstRgb, (BlendingFactor)srcAlpha, (BlendingFactor)dstAlpha);
             _gl.BlendEquationSeparate((BlendEquationModeEXT)equationRgb, (BlendEquationModeEXT)equationAlpha);
         }
@@ -604,9 +657,13 @@ public class Renderer : IDisposable
 
     private void DrawMeshSurface(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit,
         bool ignoreDepth = false, Vector4? uvRect = null, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null,
-        SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f)
+        SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f, Texture? lightmap = null, Vector4? lightmapRect = null, bool dynamicAmbient = false)
     {
-        if (ReferenceEquals(texture, ExcludedTexture)) return;
+        if (ReferenceEquals(texture, ExcludedTexture))
+        {
+            return;
+        }
+        
         if (_frameForceUnlit)
         {
             lit = false;
@@ -624,6 +681,7 @@ public class Renderer : IDisposable
         var colorLoc = shader?.Location("uColor") ?? (lit ? _litColor : _unlitColor);
 
         _gl.UseProgram(program);
+
         
         if (shader != null)
         {
@@ -631,6 +689,14 @@ public class Renderer : IDisposable
             
             SetCustomFrameUniforms(shader, uvRect, _isUI ? SurfaceMode.Transparent : surfaceMode, alphaCutoff);
         }
+
+        var ambient = !_frameEnvironmentEnabled ? Color.White :
+            dynamicAmbient && Environment.DynamicAmbientColorEnabled ? Environment.DynamicAmbientColor : Environment.AmbientColor;
+        var ambientLocation = shader?.Location("uAmbientColor") ?? (lit ? _litAmbientColor : -1);
+        if (ambientLocation >= 0) _gl.Uniform3(ambientLocation,ambient.R,ambient.G,ambient.B);
+
+        using var bakedBinding = new LightmapDrawBinding(_gl, program, !_isUI && !_frameForceUnlit && lit ? lightmap : null,
+            lightmapRect ?? new Vector4(1,1,0,0));
 
         if (!lit && shader == null)
         {
@@ -664,6 +730,7 @@ public class Renderer : IDisposable
         }
 
         mesh.Draw();
+        
         _drawCalls++;
         _triangles += mesh.TriangleCount;
 
@@ -694,7 +761,7 @@ public class Renderer : IDisposable
         shader.Write("uAmbientColor", new Vector3(ambient.R, ambient.G, ambient.B));
         
         var main = Light.Main;
-        var mainEnabled = main is { IsActive: true, IsDestroyed: false, IsEditorVisible: true };
+        var mainEnabled = main is { IsActive: true, IsDestroyed: false, IsEditorVisible: true, Mode: LightMode.Realtime };
         
         shader.Write("uMainLightEnabled", mainEnabled ? 1f : 0f);
         shader.Write("uLightDirection", mainEnabled ? main!.Transform.Forward : Vector3.Zero);
@@ -706,7 +773,7 @@ public class Renderer : IDisposable
             return;
         }
         
-        var lights = Light.All.Where(l => l.IsActive && !l.IsDestroyed && l.IsEditorVisible).Take(16).ToArray();
+        var lights = Light.All.Where(l => l.IsActive && !l.IsDestroyed && l.IsEditorVisible && l.Mode == LightMode.Realtime).Take(16).ToArray();
         shader.Write("uPointLightCount", lights.Length);
         
         for (var i = 0; i < lights.Length; i++)

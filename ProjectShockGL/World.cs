@@ -10,6 +10,38 @@ public class World
     private readonly DetailRenderer _detailRenderer = new();
     private readonly RenderQueue _worldCommands = new();
     public bool StaticBatchingEnabled { get; set; } = true;
+    private WorldLightmaps? _lightmaps;
+    public string? LightmapAsset => _lightmaps?.Asset;
+    private LightmapBakeSettings _lightmapSettings = new();
+    public LightmapBakeSettings LightmapSettings
+    {
+        get => _lightmapSettings;
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            value.Validate();
+            _lightmapSettings = value;
+        }
+    }
+
+    public void ApplyLightmap(string? asset)
+    {
+        var next = asset == null ? null : Content.LoadLightmap(asset);
+        var previous = _lightmaps;
+        try
+        {
+            _staticBatches.Clear();
+            _detailRenderer.Clear();
+        }
+        catch
+        {
+            next?.Dispose();
+            throw;
+        }
+        _lightmaps = next;
+        try { previous?.Dispose(); }
+        catch (Exception error) { Log.PrintError("The new lightmap was applied, but previous resources could not be fully released.",error); }
+    }
 
     private readonly List<Object> _objects;
     private readonly Queue<Object> _spawnedObjects;
@@ -150,7 +182,7 @@ public class World
     {
         var batch = StaticBatchingEnabled && !Application.IsEditor && debugOnly != true;
         if (!batch && debugOnly != true) _staticBatches.Clear();
-        var target = batch ? _worldCommands : queue;
+        var target = _worldCommands;
         try
         {
             foreach (var obj in _objects)
@@ -161,12 +193,14 @@ public class World
                 }
             }
 
+            if (debugOnly != true) _lightmaps?.Apply(_worldCommands.Commands);
             if (batch) _staticBatches.Submit(_worldCommands.Commands, queue);
-            if (debugOnly != true) _detailRenderer.Submit(Details, queue);
+            else foreach (var command in _worldCommands.Commands) queue.Add(command);
+            if (debugOnly != true) _detailRenderer.Submit(Details, queue, _lightmaps);
         }
         finally
         {
-            if (batch) _worldCommands.Clear();
+            _worldCommands.Clear();
         }
     }
     public void DebugRender(DebugDraw draw)
@@ -370,6 +404,10 @@ public class World
         try { _detailRenderer.Clear(); }
         catch (Exception error) { errors.Add(error); }
 
+        try { _lightmaps?.Dispose(); }
+        catch (Exception error) { errors.Add(error); }
+        _lightmaps = null;
+
         foreach (var obj in objects)
         {
             obj.OwningWorld = null;
@@ -452,6 +490,11 @@ public class World
         return list.ToArray();
     }
     
+    public Rendering.LightmapGeometry PrepareLightmapGeometry(LightmapPreparationOptions? options = null)
+    {
+        return LightmapGeometry.Prepare(this, options);
+    }
+
     public Object[] GetAllObjects(bool includePending = false)
     {
         if (includePending)
@@ -482,6 +525,9 @@ public class World
         
         Clear();
         Details.TakeFrom(replacement.Details);
+        _lightmapSettings = replacement.LightmapSettings;
+        _lightmaps = replacement._lightmaps;
+        replacement._lightmaps = null;
         
         replacement._objects.Clear();
         replacement._spawnedObjects.Clear();

@@ -5,6 +5,10 @@ namespace ProjectShockGL.Rendering;
 public class MeshCommand : RenderCommand
 {
     internal bool StaticBatchEligible { get; set; }
+    internal LightmapSurfaceId LightmapSurface { get; set; }
+    public Texture? LightmapTexture { get; set; }
+    public int LightmapPage { get; set; } = -1;
+    public Vector4 LightmapScaleOffset { get; set; } = new(1, 1, 0, 0);
     public Mesh? Mesh { get; set; }
     public Vector3 Position { get; set; }
     public Quaternion Rotation { get; set; }
@@ -24,7 +28,7 @@ public class MeshCommand : RenderCommand
     {
         if (Mesh != null && Texture != null)
         {
-            graphics.DrawMesh(Mesh, Position, Rotation, Scale, Texture, Color, Lit, IgnoreDepth, Shader, ShaderParameters, BackfaceCulling, SurfaceMode, AlphaCutoff);
+            graphics.DrawMesh(Mesh, Position, Rotation, Scale, Texture, Color, Lit, IgnoreDepth, Shader, ShaderParameters, BackfaceCulling, SurfaceMode, AlphaCutoff, LightmapTexture, LightmapScaleOffset, UseDynamicAmbient);
         }
     }
 }

@@ -21,9 +21,9 @@ public class Graphics
         Renderer = renderer;
     }
 
-    internal void DrawInstances(InstancedMesh instances, Texture texture, Color color, bool lit, bool backfaceCulling)
+    internal void DrawInstances(InstancedMesh instances, Texture texture, Color color, bool lit, bool backfaceCulling, Texture? lightmap = null)
     {
-        Renderer.DrawInstances(instances, texture, color, lit, backfaceCulling);
+        Renderer.DrawInstances(instances, texture, color, lit, backfaceCulling, lightmap);
     }
 
     public void BeginDraw(Camera camera)
@@ -167,28 +167,28 @@ public class Graphics
         }
     }
 
-    public void DrawQuad(Vector3 position, Quaternion rotation, Vector2 size, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f)
+    public void DrawQuad(Vector3 position, Quaternion rotation, Vector2 size, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f, bool dynamicAmbient = false)
     {
         var model = Matrix4x4.CreateScale(size.X, size.Y, 1f)
                     * Matrix4x4.CreateFromQuaternion(rotation)
                     * Matrix4x4.CreateTranslation(position);
 
-        Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters, surfaceMode: surfaceMode, alphaCutoff: alphaCutoff);
+        Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters, surfaceMode: surfaceMode, alphaCutoff: alphaCutoff, dynamicAmbient: dynamicAmbient);
     }
 
-    public void DrawMesh(Mesh mesh, Vector3 position, Quaternion rotation, Vector3 scale, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, bool backfaceCulling = true, SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f)
+    public void DrawMesh(Mesh mesh, Vector3 position, Quaternion rotation, Vector3 scale, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, bool backfaceCulling = true, SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f, Texture? lightmap = null, Vector4? lightmapRect = null, bool dynamicAmbient = false)
     {
         var model = Matrix4x4.CreateScale(scale)
                   * Matrix4x4.CreateFromQuaternion(rotation)
                   * Matrix4x4.CreateTranslation(position);
 
-        Renderer.DrawMesh(mesh, texture, model, color, lit, ignoreDepth, shader, shaderParameters, backfaceCulling, surfaceMode, alphaCutoff);
+        Renderer.DrawMesh(mesh, texture, model, color, lit, ignoreDepth, shader, shaderParameters, backfaceCulling, surfaceMode, alphaCutoff, lightmap, lightmapRect, dynamicAmbient);
     }
 
-    public void DrawBillboard(Vector3 position, Vector2 size, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, BillboardMode mode = BillboardMode.ViewAligned, SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f)
+    public void DrawBillboard(Vector3 position, Vector2 size, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, BillboardMode mode = BillboardMode.ViewAligned, SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f, bool dynamicAmbient = false)
     {
         var model = CreateBillboardModel(_camera, position, size, mode);
-        Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters, surfaceMode: surfaceMode, alphaCutoff: alphaCutoff);
+        Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters, surfaceMode: surfaceMode, alphaCutoff: alphaCutoff, dynamicAmbient: dynamicAmbient);
     }
 
     internal static Matrix4x4 CreateBillboardModel(Camera camera, Vector3 position, Vector2 size, BillboardMode mode)

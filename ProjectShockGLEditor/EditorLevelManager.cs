@@ -120,6 +120,8 @@ public static class EditorLevelManager
             Environment = ProjectShockGL.Environment.Capture(),
             KillY = ProjectShockGL.Core.Game.Instance.World.KillY,
             SaveLevelState = ProjectShockGL.Core.Game.Instance.World.SaveLevelState,
+            Lightmap = details == null ? null : ProjectShockGL.Core.Game.Instance.World.LightmapAsset,
+            LightmapSettings = details == null ? new() : ProjectShockGL.Core.Game.Instance.World.LightmapSettings,
             Groups = SceneGroups.Capture(),
             Folders = details == null ? [] : SceneFolders.Capture(),
             Details = details?.ToArray() ?? [],
@@ -139,21 +141,36 @@ public static class EditorLevelManager
         var selected = sources.Distinct().ToArray();
         var world = ProjectShockGL.Core.Game.Instance.World;
         var existing = world.GetAllObjects(true).ToHashSet();
+
         if (selected.Any(obj => obj.IsDestroyed || !existing.Contains(obj)))
+        {
             throw new InvalidOperationException("The source object is no longer in the scene.");
+        }
+        
         var placements = CaptureLevel(selected).Placeables;
-        if (placements.Length != selected.Length) throw new InvalidOperationException("Only placed objects can be duplicated.");
+
+        if (placements.Length != selected.Length)
+        {
+            throw new InvalidOperationException("Only placed objects can be duplicated.");
+        }
+        
         var prepared = ObjectLinks.Prepare(placements, world, duplicate: true);
+        
         try
         {
             var copies = prepared.Select(CreatePlacement).ToArray();
+
             for (var index = 0; index < selected.Length; index++)
+            {
                 SceneFolders.Copy(selected[index].Guid, copies[index].Guid, detail: false);
+            }
+            
             return copies;
         }
         catch (Exception error)
         {
             RollbackCreated(existing, error);
+            
             throw;
         }
     }
@@ -212,11 +229,15 @@ public static class EditorLevelManager
         level.Validate();
         
         var directory = Path.GetDirectoryName(fullPath)!;
+        
         EntityAssetReferences.Refresh();
+        
         var serializer = JsonSerializer.Create(JsonHelper.GetSettings());
+        
         var document = Newtonsoft.Json.Linq.JObject.FromObject(level, serializer);
         document[nameof(Level.Placeables)] = Newtonsoft.Json.Linq.JArray.FromObject(
             level.Placeables.Select(EntityAssetReferences.Upgrade).ToArray(), serializer);
+        
         var json = document.ToString(Formatting.Indented);
         var temporary = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
        

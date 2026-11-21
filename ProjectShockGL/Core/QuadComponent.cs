@@ -15,6 +15,7 @@ public class QuadComponent : RenderComponent
         
         var command = new QuadCommand()
         {
+            UseDynamicAmbient = !Owner.IsStatic && !IsDebug,
             SurfaceMode = SurfaceMode, AlphaCutoff = AlphaCutoff,
             Color = Color,
             Position = Owner.Transform.Position + Offset,

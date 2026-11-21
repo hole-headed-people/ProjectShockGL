@@ -16,12 +16,12 @@ public static class LevelManager
     public static event Action<Level>? Unloading;
     public static event Action<Level>? Unloaded;
 
+    private static bool _isChangingLevel;
+    
     public static Level? ActiveLevel { get; private set; }
     public static string? ActiveLevelName { get; private set; }
     public static int EntryIndex { get; private set; } = -1;
     public static bool IsLoading { get; private set; }
-    
-    private static bool _isChangingLevel;
     
     public static void Load(Level level)
     {
@@ -36,7 +36,11 @@ public static class LevelManager
     private static void Load(Level level, string? name, IReadOnlySet<Guid>? removedObjects, Action<World>? restore, int entryIndex = -1)
     {
         ArgumentNullException.ThrowIfNull(level);
-        if (entryIndex < -1) throw new ArgumentOutOfRangeException(nameof(entryIndex));
+
+        if (entryIndex < -1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(entryIndex));
+        }
         
         EnsureIdle();
         
@@ -76,6 +80,8 @@ public static class LevelManager
                 staged.Details.Add(detail);
             }
             staged.Details.Seal();
+            staged.LightmapSettings = level.LightmapSettings ?? new Rendering.LightmapBakeSettings();
+            staged.ApplyLightmap(level.Lightmap);
 
             if (removedObjects != null)
             {
@@ -94,11 +100,13 @@ public static class LevelManager
             Game.Instance.World.ReplaceWith(staged);
             Game.Instance.World.KillY = level.KillY;
             Game.Instance.World.SaveLevelState = level.SaveLevelState;
+            
             Environment.Apply(environment);
             
             ActiveLevel = level;
             ActiveLevelName = name;
             EntryIndex = entryIndex;
+            
             RefreshLights();
 
             if (previous != null)
@@ -170,9 +178,12 @@ public static class LevelManager
             {
                 ActiveLevel = null;
                 ActiveLevelName = null;
+                
                 EntryIndex = -1;
+                
                 world.KillY = new Level().KillY;
                 world.SaveLevelState = true;
+                
                 Environment.Reset();
             }
             
@@ -275,11 +286,14 @@ public static class LevelManager
         }
 
         RenderSurfaceData.Apply(obj, placeable.RenderSurfaces);
+        
         obj.Transform.Position = placeable.Position;
         obj.Transform.Rotation = Quaternion.Normalize(placeable.Rotation);
         obj.Transform.Scale = placeable.Scale;
+        
         obj.Layer = placeable.Layer ?? obj.Layer;
         obj.CollidesWith = placeable.CollidesWith ?? obj.CollidesWith;
+        
         obj.SetActive(placeable.IsActive);
         obj.CompletePlacement();
         
@@ -289,10 +303,18 @@ public static class LevelManager
     private static BrushBox CreateBrush(World world, Placeable placement, Guid? guid)
     {
         var data = placement.Brush ?? new BrushBoxData();
-        
-        if (!Enum.IsDefined(data.SurfaceMode) || !float.IsFinite(data.AlphaCutoff) || data.AlphaCutoff < 0 || data.AlphaCutoff > 1)
+
+        if (!Enum.IsDefined(data.SurfaceMode) || !float.IsFinite(data.AlphaCutoff) || data.AlphaCutoff < 0 ||
+            data.AlphaCutoff > 1)
+        {
             throw new InvalidDataException("Invalid BrushBox surface settings.");
-        if (data.Faces == null) throw new InvalidDataException("BrushBox Faces cannot be null.");
+        }
+
+        if (data.Faces == null)
+        {
+            throw new InvalidDataException("BrushBox Faces cannot be null.");
+        }
+        
         BrushBoxMesh.Build(data.Size, placement.Scale, data.TextureScale, data.Faces);
 
         if (!Enum.IsDefined(data.TextureFormat) || !float.IsFinite(data.Color.R) || !float.IsFinite(data.Color.G) ||
@@ -304,31 +326,46 @@ public static class LevelManager
         var textures = Enumerable.Range(0, 6).Select(index =>
         {
             data.Faces.TryGetValue((BrushFace)index, out var face);
+            
             return BrushFaceData.GetTexture(face, data.Texture, data.TextureFormat);
         }).Distinct();
+        
         foreach (var texture in textures)
         {
-            if (texture.Name == "WhitePixel") continue;
+            if (texture.Name == "WhitePixel")
+            {
+                continue;
+            }
+            
             var extension = texture.Format == TextureFormat.Png ? ".png" : ".jpg";
             var path = Path.Combine(Content.Path, "Textures", texture.Name + extension);
+            
             if (!File.Exists(path))
             {
                 throw new FileNotFoundException("BrushBox face texture was not found.", path);
             }
+            
             using var stream = File.OpenRead(path);
+            
             StbImageSharp.ImageResult.FromStream(stream, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
         }
+        
         var brush = world.Spawn<BrushBox>(guid);
         
         brush.Size = data.Size;
         brush.Movable = data.Movable;
+        
         brush.SimulatePhysics = data.SimulatePhysics;
+        
         brush.TextureName = data.Texture;
         brush.TextureFormat = data.TextureFormat;
         brush.TextureScale = data.TextureScale;
+        
         brush.SetFaces(data.Faces);
+        
         brush.SurfaceMode = data.SurfaceMode;
         brush.AlphaCutoff = data.AlphaCutoff;
+        
         brush.Color = data.Color;
         brush.Lit = data.Lit;
         
@@ -374,15 +411,23 @@ public static class LevelManager
     internal static void Load(string name, IReadOnlySet<Guid>? removedObjects, Action<World>? restore, int entryIndex = -1)
     {
         EnsureIdle();
-        if (entryIndex < -1) throw new ArgumentOutOfRangeException(nameof(entryIndex));
+
+        if (entryIndex < -1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(entryIndex));
+        }
 
         var level = Content.LoadLevel(name);
+        
         if (level == null)
         {
             var error = new FileNotFoundException($"Cannot load level '{name}'.");
+            
             Log.PrintError(error.Message);
+            
             throw error;
         }
+        
         Load(level, name, removedObjects, restore, entryIndex);
     }
 }

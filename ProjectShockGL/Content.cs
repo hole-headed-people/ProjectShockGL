@@ -18,6 +18,7 @@ public enum TextureFormat
 public static class Content
 {
     private static bool _isInitialized;
+    
     private static GL _gl = null!;
     
     public static string Path { get; private set; } = null!;
@@ -185,6 +186,7 @@ public static class Content
             }
         
             var font = Font.Load(_gl, path, pixelHeight);
+            
             Fonts[(name, pixelHeight)] = font;
         
             return font;
@@ -451,6 +453,16 @@ public static class Content
         }
     }
 
+    public static string SaveLightmap(string name, DirectLightBakeResult result)
+    {
+        return LightmapStorage.Save(name, result);
+    }
+
+    internal static WorldLightmaps LoadLightmap(string name)
+    {
+        return new WorldLightmaps(_gl, name);
+    }
+
     public static void InvalidateLevels()
     {
         Levels.Clear();
@@ -465,10 +477,13 @@ public static class Content
     public static EntityData? LoadEntity(string name, Guid? assetId)
     {
         name = EntityAssetReferences.ResolvePath(name, assetId);
+        
         var data = LoadEntity(name);
+        
         if (assetId.HasValue && data?.AssetId != assetId)
         {
             InvalidateEntity(name);
+            
             data = LoadEntity(name);
         }
 
@@ -582,6 +597,7 @@ public static class Content
         catch (Exception error)
         {
             Log.PrintError($"LoadLevel failed for '{name}'.", error);
+            
             throw;
         }
     }
@@ -639,6 +655,7 @@ public static class Content
             if (!File.Exists(path))
             {
                 Log.PrintWarning($"Resource not found: {path}");
+                
                 return null;
             }
         
@@ -854,7 +871,11 @@ public static class Content
             resources.Add(_whiteTexture);
         }
 
-        if (_quadMesh != null) resources.Add(_quadMesh);
+        if (_quadMesh != null)
+        {
+            resources.Add(_quadMesh);
+        }
+        
         _quadMesh = null;
 
         Fonts.Clear();
@@ -865,8 +886,11 @@ public static class Content
         Geometries.Clear();
         Details.Clear();
         Entities.Clear();
+        
         EntityAssetReferences.Refresh();
+        
         Levels.Clear();
+        
         _whiteTexture = null;
 
         Cleanup.Run(resources.Distinct().Select<IDisposable, Action>(resource => resource.Dispose).ToArray());

@@ -1,4 +1,3 @@
-using System.Numerics;
 using DebugColor = ProjectShockGL.Rendering.Color;
 using ProjectShockGL.Rendering;
 using ProjectShockGL.Tools;
@@ -12,9 +11,16 @@ public enum LightType
     Spot
 }
 
+public enum LightMode
+{
+    Realtime,
+    Baked
+}
+
 public class Light : Entity
 {
     private LightType _type = LightType.Point;
+    private LightMode _mode = LightMode.Realtime;
     
     private float _innerAngle = 30f;
     private float _outerAngle = 45f;
@@ -33,6 +39,28 @@ public class Light : Entity
             }
             
             _type = value;
+            
+            OnTypeChanged();
+        }
+    }
+    
+    [Editable]
+    public LightMode Mode
+    {
+        get => _mode;
+        set
+        {
+            if (!Enum.IsDefined(value))
+            {
+                throw new ArgumentOutOfRangeException(nameof(Mode));
+            }
+
+            if (_mode == value)
+            {
+                return;
+            }
+
+            _mode = value;
             
             OnTypeChanged();
         }
@@ -96,6 +124,11 @@ public class Light : Entity
             _ => defaultName
         };
 
+        if (_mode == LightMode.Baked)
+        {
+            name += "Baked";
+        }
+
         return File.Exists(System.IO.Path.Combine(Content.Path, "Textures", name + ".png"))
             ? name : defaultName;
     }
@@ -125,13 +158,25 @@ public class Light : Entity
         {
             All.Remove(this);
 
+            if (Mode == LightMode.Baked)
+            {
+                if (Main == this)
+                {
+                    Main = OwningWorld?.GetAllObjects(true).OfType<Light>().FirstOrDefault(light =>
+                        light != this && !light.IsDestroyed && light.Type == LightType.Directional &&
+                        light.Mode == LightMode.Realtime);
+                }
+
+                return;
+            }
+
             if (Main == null)
             {
                 Main = this;
             }
             else if (Main != this)
             {
-                Console.WriteLine($"Warning: multiple directional lights, Main is already {Main.Name}");
+                Log.PrintWarning($"Multiple directional lights, Main is already {Main.Name}");
             }
         }
     }

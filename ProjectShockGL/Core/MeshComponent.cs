@@ -21,7 +21,10 @@ public class MeshComponent : RenderComponent
         
         var command = new MeshCommand
         {
+            LightmapSurface = new LightmapSurfaceId(Owner.Guid,
+                Owner is BrushBox ? 0 : Owner.GetRenderComponents().OfType<MeshComponent>().TakeWhile(component => component != this).Count(), false),
             StaticBatchEligible = Owner.IsStatic && (Owner is Geometry or BrushBox) && !IsDebug,
+            UseDynamicAmbient = !Owner.IsStatic && !IsDebug,
             SurfaceMode = SurfaceMode, AlphaCutoff = AlphaCutoff,
             Color = Color,
             Mesh = Mesh,

@@ -2,6 +2,9 @@
 #define MAX_POINT_LIGHTS 16
 
 in vec2 vTexCoord;
+in vec2 vLightmapUV;
+uniform sampler2D uLightmap;
+uniform bool uLightmapEnabled = false;
 in vec3 vNormal;
 in vec3 vWorldPos;
 
@@ -46,7 +49,7 @@ void main()
     vec3 N = normalize(vNormal);
     if (!gl_FrontFacing) N = -N;
     
-    vec3 ambient = uAmbientColor * baseColor;
+    vec3 ambient = (uLightmapEnabled ? texture(uLightmap, vLightmapUV).rgb : uAmbientColor) * baseColor;
     vec3 finalColor = ambient;
     
     if(uMainLightEnabled > 0.5){

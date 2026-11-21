@@ -21,7 +21,7 @@ public class QuadCommand : RenderCommand
     {
         if (Texture != null)
         {
-            graphics.DrawQuad(Position, Rotation, Size, Texture, Color, Lit, IgnoreDepth, Shader, ShaderParameters, SurfaceMode, AlphaCutoff);
+            graphics.DrawQuad(Position, Rotation, Size, Texture, Color, Lit, IgnoreDepth, Shader, ShaderParameters, SurfaceMode, AlphaCutoff, UseDynamicAmbient);
         }
     }
 }

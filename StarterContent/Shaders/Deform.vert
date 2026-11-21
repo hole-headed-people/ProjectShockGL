@@ -14,11 +14,13 @@ uniform float uSpeed = 2.0;
 uniform float uFrequency = 3.0;
 
 out vec2 vTexCoord;
+out vec2 vLightmapUV;
 out vec3 vWorldPos;
 out vec3 vNormal;
 
 void main()
 {
+    vLightmapUV = vec2(0.0);
     vec3 position = aPosition;
     
     float phase = position.y * uFrequency + uTime * uSpeed;

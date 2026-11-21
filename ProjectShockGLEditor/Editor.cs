@@ -44,6 +44,7 @@ public static class Editor
         target.IsDetail || target.Object is ProjectShockGL.Core.Geometry or ProjectShockGL.Core.Entity or ProjectShockGL.Core.BrushBox);
     public static void Initialize()
     {
+        LightmapBakeWindow.Initialize();
         Application.LoadGl += OnLoad;
         Application.Load += EditorLevelManager.Initialize;
         Application.Load += SceneCamera.Initialize;
@@ -175,6 +176,7 @@ public static class Editor
 
     private static void OnAfterRender(float deltaTime)
     {
+        LightmapBakeWindow.Update();
         if (_windowSize.X < 400 || _windowSize.Y < 200)
         {
             ObjectManipulator.Cancel();
@@ -211,6 +213,7 @@ public static class Editor
         
         Inspector.Draw();
         EnvironmentWindow.Draw(ref _showEnvironment);
+        LightmapBakeWindow.Draw();
         UIEditor.Draw();
         EntityAssetEditor.Draw();
         BrushTextureWindow.Draw(_windowSize, SceneMin, SceneMax);
@@ -243,6 +246,7 @@ public static class Editor
     private static void OnUnload()
     {
         ObjectManipulator.Cancel();
+        LightmapBakeWindow.Dispose();
         UIEditor.Dispose();
         _imGui.Dispose();
     }
@@ -481,6 +485,7 @@ public static class Editor
             if (ImGui.MenuItem("Entity Asset", "", EntityAssetEditor.Open)) EntityAssetEditor.Toggle();
             if (ImGui.MenuItem("UI Editor", "", UIEditor.Open)) UIEditor.Open = !UIEditor.Open;
 
+            if (ImGui.MenuItem("Bake Lighting", "", LightmapBakeWindow.Open)) LightmapBakeWindow.Open = !LightmapBakeWindow.Open;
             if (ImGui.MenuItem("Environment", "", _showEnvironment))
             {
                 _showEnvironment = !_showEnvironment;

@@ -7,6 +7,8 @@ public sealed class EnvironmentData
     public bool SkyColorEnabled { get; init; }
     public Color SkyColor { get; init; } = Color.Black;
     public Color AmbientColor { get; init; } = Color.White;
+    public bool DynamicAmbientColorEnabled { get; init; }
+    public Color DynamicAmbientColor { get; init; } = Color.White;
     public bool IsFogEnabled { get; init; }
     public Color FogColor { get; init; } = Color.Gray;
     public float FogNear { get; init; } = 1f;
@@ -14,7 +16,7 @@ public sealed class EnvironmentData
 
     public void Validate()
     {
-        if (!Finite(SkyColor) || !Finite(AmbientColor) || !Finite(FogColor))
+        if (!Finite(SkyColor) || !Finite(AmbientColor) || !Finite(DynamicAmbientColor) || !Finite(FogColor))
         {
             throw new InvalidDataException("Environment colors must contain finite values.");
         }

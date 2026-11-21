@@ -21,7 +21,7 @@ public class BillboardCommand : RenderCommand
     {
         if (Texture != null)
         {
-            graphics.DrawBillboard(Position, Size, Texture, Color, Lit, IgnoreDepth, Shader, ShaderParameters, Mode, SurfaceMode, AlphaCutoff);
+            graphics.DrawBillboard(Position, Size, Texture, Color, Lit, IgnoreDepth, Shader, ShaderParameters, Mode, SurfaceMode, AlphaCutoff, UseDynamicAmbient);
         }
     }
 }

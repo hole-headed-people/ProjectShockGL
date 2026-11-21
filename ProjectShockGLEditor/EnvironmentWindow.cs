@@ -68,6 +68,23 @@ public static class EnvironmentWindow
             }
 
             Finish("Ambient");
+
+            var dynamicEnabled = Environment.DynamicAmbientColorEnabled;
+            if (ImGui.Checkbox("Separate dynamic ambient", ref dynamicEnabled))
+            {
+                Environment.DynamicAmbientColorEnabled = dynamicEnabled;
+                Changed("DynamicAmbientEnabled", true);
+            }
+
+            ImGui.BeginDisabled(!dynamicEnabled);
+            var dynamicAmbient = ToVector(Environment.DynamicAmbientColor);
+            if (ImGui.ColorEdit3("Dynamic ambient color", ref dynamicAmbient))
+            {
+                Environment.DynamicAmbientColor = new Color(dynamicAmbient.X,dynamicAmbient.Y,dynamicAmbient.Z,Environment.DynamicAmbientColor.A);
+                Changed("DynamicAmbientColor");
+            }
+            Finish("DynamicAmbientColor");
+            ImGui.EndDisabled();
             
             ImGui.Separator();
             var fog = Environment.IsFogEnabled;

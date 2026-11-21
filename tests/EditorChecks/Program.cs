@@ -2787,6 +2787,469 @@ Run("Fix Asset References writes nothing on bad JSON, missing targets, invalid o
     }
 });
 
+Run("Lightmap UVs preserve texture coordinates, isolate brush faces and triangle charts, and reject degenerate meshes", () =>
+{
+    var data = ProjectShockGL.Rendering.BrushBoxMesh.Build(new Vector3(2, 3, 4), new Vector3(2, 1, -1), 3);
+    var mesh = ProjectShockGL.Rendering.LightmapUvMesh.GenerateBrush(new Vector3(2, 3, 4), new Vector3(2, 1, -1), 3);
+    Check(mesh.ChartCount == 6 && mesh.Vertices.Span.SequenceEqual(data.Vertices) && mesh.Indices.Span.SequenceEqual(data.Indices));
+    var uv = mesh.LightmapUv.ToArray();
+    Check(uv.All(point => point.X > 0 && point.Y > 0 && point.X < 1 && point.Y < 1));
+    var rectangles = Enumerable.Range(0, 6).Select(index =>
+    {
+        var corners = uv.Skip(index * 4).Take(4).ToArray();
+        return (Min: corners.Aggregate(Vector2.Min), Max: corners.Aggregate(Vector2.Max));
+    }).ToArray();
+    for (var a = 0; a < rectangles.Length; a++)
+        for (var b = a + 1; b < rectangles.Length; b++)
+            Check(rectangles[a].Max.X < rectangles[b].Min.X || rectangles[b].Max.X < rectangles[a].Min.X ||
+                rectangles[a].Max.Y < rectangles[b].Min.Y || rectangles[b].Max.Y < rectangles[a].Min.Y);
+    var general = ProjectShockGL.Rendering.LightmapUvMesh.Generate(data.Vertices, data.Indices);
+    Check(general.ChartCount == 12 && general.Vertices.Length == 36 * 8);
+    for (var i = 0; i < data.Indices.Length; i++)
+        Check(general.Vertices.Span.Slice(i * 8, 8).SequenceEqual(data.Vertices.AsSpan((int)data.Indices[i] * 8, 8)));
+    Check(ProjectShockGL.Rendering.LightmapUvMesh.Generate(data.Vertices, data.Indices).LightmapUv.Span.SequenceEqual(general.LightmapUv.Span));
+    Throws(() => ProjectShockGL.Rendering.LightmapUvMesh.Generate([], []));
+    Throws(() => ProjectShockGL.Rendering.LightmapUvMesh.Generate(data.Vertices, [999, 0, 1]));
+    Throws(() => ProjectShockGL.Rendering.LightmapUvMesh.Generate(data.Vertices, [0, 0, 0]));
+    Throws(() => ProjectShockGL.Rendering.LightmapUvMesh.Generate(data.Vertices, data.Indices, 8, 4));
+});
+
+Run("World lightmap preparation includes hidden static brushes and ignores movable objects without modifying the world", () =>
+{
+    var world = new World();
+    try
+    {
+        var brush = world.Spawn<BrushBox>();
+        brush.Size = new Vector3(2, 3, 4);
+        brush.Transform.Position = new Vector3(4, 2, -1);
+        brush.Transform.Scale = new Vector3(2, 1, 3);
+        brush.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, .6f);
+        brush.EditorGroups.Add("LightmapHidden");
+        brush.SetFace(BrushFace.PositiveX, new BrushFaceData { SurfaceMode = ProjectShockGL.Rendering.SurfaceMode.Transparent });
+        var other = world.Spawn<BrushBox>();
+        var movable = world.Spawn<BrushBox>(); movable.Movable = true;
+        var entity = world.Spawn<CheckEntity>();
+        World.HiddenEditorGroups.Add("LightmapHidden");
+        var snapshot = world.PrepareLightmapGeometry(new ProjectShockGL.Rendering.LightmapPreparationOptions { AtlasSize = 128, SurfaceSize = 128 });
+        Check(snapshot.Surfaces.Count == 2 && snapshot.PageCount == 2);
+        Check(snapshot.Surfaces.Select(surface => surface.Page).Distinct().Count() == 2);
+        var prepared = snapshot.Surfaces.Single(surface => surface.Id.ObjectId == brush.Guid);
+        Check(prepared.Id.SurfaceIndex == 0 && !prepared.Id.IsDetail && prepared.Mesh.ChartCount == 6);
+        Check(!prepared.Materials[0].ReceivesLight && prepared.Materials[1].ReceivesLight);
+        var corner = prepared.WorldTriangles()[0].A;
+        var local = new Vector3(prepared.Mesh.Vertices.Span[0], prepared.Mesh.Vertices.Span[1], prepared.Mesh.Vertices.Span[2]);
+        Check(Vector3.Distance(corner.Position, brush.Transform.TransformPoint(local)) < .0001f);
+        Check(MathF.Abs(corner.Normal.Length() - 1) < .0001f);
+        brush.Transform.Position += Vector3.One;
+        Check(prepared.WorldTriangles()[0].A.Position == corner.Position);
+        Check(!snapshot.Surfaces.Any(surface => surface.Id.ObjectId == movable.Guid || surface.Id.ObjectId == entity.Guid));
+        Check(world.GetAllObjects(true).Length == 4 && snapshot.DetailGroups().Length == 0);
+    }
+    finally { World.HiddenEditorGroups.Remove("LightmapHidden"); world.Clear(); }
+});
+
+Run("Baked direct lighting matches Lit attenuation, Spot cones and Directional light, ignores Realtime lights and snapshots state", () =>
+{
+    var ambient = Environment.AmbientColor;
+    var world = new World();
+    try
+    {
+        Environment.AmbientColor = new Color(.1f, .2f, .3f);
+        var point = world.Spawn<Light>(); point.Mode = LightMode.Baked;
+        point.Transform.Position = new Vector3(0, 5, 0); point.Radius = 10; point.Intensity = 2; point.Color = Color.Red;
+        var realtime = world.Spawn<Light>(); realtime.Transform.Position = point.Transform.Position; realtime.Intensity = 1000;
+        var inactive = world.Spawn<Light>(); inactive.Mode = LightMode.Baked; inactive.SetActive(false);
+        var captured = ProjectShockGL.Rendering.DirectLightBaker.Capture(world);
+        Check(captured.Lights.Count == 1);
+        var value = ProjectShockGL.Rendering.DirectLightBaker.Sample(captured, Vector3.Zero, Vector3.UnitY);
+        Check(Vector3.Distance(value, new Vector3(1.1f, .2f, .3f)) < .0001f);
+        point.Intensity = 50;
+        Check(ProjectShockGL.Rendering.DirectLightBaker.Sample(captured, Vector3.Zero, Vector3.UnitY) == value);
+        point.Mode = LightMode.Realtime;
+        var directional = world.Spawn<Light>(); directional.Mode = LightMode.Baked; directional.Type = LightType.Directional;
+        directional.Color = Color.Green; directional.Intensity = .4f;
+        directional.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitX, -MathF.PI / 2);
+        var directionInput = ProjectShockGL.Rendering.DirectLightBaker.Capture(world);
+        Check(Vector3.Distance(ProjectShockGL.Rendering.DirectLightBaker.Sample(directionInput, Vector3.Zero, Vector3.UnitY),
+            new Vector3(.1f, .6f, .3f)) < .0001f);
+        directional.Mode = LightMode.Realtime;
+        var spot = world.Spawn<Light>(); spot.Mode = LightMode.Baked; spot.Type = LightType.Spot;
+        spot.Transform.Position = new Vector3(0, 0, 5); spot.Radius = 10; spot.Intensity = 2; spot.Color = Color.Red;
+        spot.InnerAngle = 20; spot.OuterAngle = 40;
+        var spotInput = ProjectShockGL.Rendering.DirectLightBaker.Capture(world);
+        Check(Vector3.Distance(ProjectShockGL.Rendering.DirectLightBaker.Sample(spotInput, Vector3.Zero, Vector3.UnitZ),
+            new Vector3(1.1f, .2f, .3f)) < .0001f);
+        Check(Vector3.Distance(ProjectShockGL.Rendering.DirectLightBaker.Sample(spotInput, new Vector3(5, 0, 0), Vector3.Normalize(new Vector3(-5, 0, 5))),
+            new Vector3(.1f, .2f, .3f)) < .0001f);
+        spot.Mode = LightMode.Realtime;
+        for (var i = 0; i < 20; i++)
+        {
+            var light = world.Spawn<Light>(); light.Mode = LightMode.Baked; light.Transform.Position = new Vector3(0, 5, 0);
+        }
+        Check(ProjectShockGL.Rendering.DirectLightBaker.Capture(world).Lights.Count == 20);
+        world.Clear();
+        Check(ProjectShockGL.Rendering.DirectLightBaker.Sample(captured, Vector3.Zero, Vector3.UnitY) == value);
+    }
+    finally { world.Clear(); Environment.AmbientColor = ambient; }
+});
+
+Run("Baked shadows use static triangles, preserve Ambient, stop at Point lights and retain the captured geometry", () =>
+{
+    var ambient = Environment.AmbientColor;
+    var world = new World();
+    try
+    {
+        Environment.AmbientColor = new Color(.05f, .05f, .05f);
+        var wall = world.Spawn<BrushBox>(); wall.Size = new Vector3(4, .2f, 4); wall.Transform.Position = new Vector3(0, 2, 0);
+        var point = world.Spawn<Light>(); point.Mode = LightMode.Baked; point.Transform.Position = new Vector3(0, 5, 0);
+        point.Intensity = 2; point.Radius = 10;
+        var geometry = world.PrepareLightmapGeometry(new ProjectShockGL.Rendering.LightmapPreparationOptions { AtlasSize = 64, SurfaceSize = 32, Padding = 1 });
+        var captured = ProjectShockGL.Rendering.DirectLightBaker.Capture(world, geometry);
+        Check(Vector3.Distance(ProjectShockGL.Rendering.DirectLightBaker.Sample(captured, Vector3.Zero, Vector3.UnitY), new Vector3(.05f)) < .0001f);
+        Check(ProjectShockGL.Rendering.DirectLightBaker.Sample(captured, new Vector3(6, 0, 0), Vector3.UnitY).X > .05f);
+        wall.Transform.Position = new Vector3(0, 7, 0);
+        var after = ProjectShockGL.Rendering.DirectLightBaker.Capture(world,
+            world.PrepareLightmapGeometry(new ProjectShockGL.Rendering.LightmapPreparationOptions { AtlasSize = 64, SurfaceSize = 32, Padding = 1 }));
+        Check(MathF.Abs(ProjectShockGL.Rendering.DirectLightBaker.Sample(after, Vector3.Zero, Vector3.UnitY).X - 1.05f) < .0001f);
+        Check(MathF.Abs(ProjectShockGL.Rendering.DirectLightBaker.Sample(captured, Vector3.Zero, Vector3.UnitY).X - .05f) < .0001f);
+        wall.SurfaceMode = ProjectShockGL.Rendering.SurfaceMode.Transparent;
+        wall.Transform.Position = new Vector3(0, 2, 0);
+        var transparent = ProjectShockGL.Rendering.DirectLightBaker.Capture(world,
+            world.PrepareLightmapGeometry(new ProjectShockGL.Rendering.LightmapPreparationOptions { AtlasSize = 64, SurfaceSize = 32, Padding = 1 }));
+        Check(MathF.Abs(ProjectShockGL.Rendering.DirectLightBaker.Sample(transparent, Vector3.Zero, Vector3.UnitY).X - 1.05f) < .0001f);
+    }
+    finally { world.Clear(); Environment.AmbientColor = ambient; }
+});
+
+Run("Direct baker rasterizes HDR atlas texels with real shadows, supports cancellation and produces repeatable results", () =>
+{
+    var ambient = Environment.AmbientColor;
+    var world = new World();
+    try
+    {
+        Environment.AmbientColor = new Color(.05f, .05f, .05f);
+        var floor = world.Spawn<BrushBox>(); floor.Size = new Vector3(8, .2f, 8); floor.Transform.Position = new Vector3(0, -.1f, 0);
+        var blocker = world.Spawn<BrushBox>(); blocker.Size = new Vector3(2, .2f, 2); blocker.Transform.Position = new Vector3(0, 2, 0);
+        var point = world.Spawn<Light>(); point.Mode = LightMode.Baked; point.Transform.Position = new Vector3(0, 4, 0);
+        point.Intensity = 4; point.Radius = 10;
+        var geometry = world.PrepareLightmapGeometry(new ProjectShockGL.Rendering.LightmapPreparationOptions { AtlasSize = 128, SurfaceSize = 64, Padding = 1 });
+        var input = ProjectShockGL.Rendering.DirectLightBaker.Capture(world, geometry);
+        var result = ProjectShockGL.Rendering.DirectLightBaker.Bake(input);
+        Check(result.Pages.Count == 1 && result.ShadowRays > 0 && result.TriangleTests > 0);
+        Check(result.Pages[0].Coverage.Span.Contains((byte)1));
+        Check(result.Pages[0].Pixels.ToArray().Any(value => value.X > 1)); // Linear HDR, no albedo or clamping.
+        var shadowed = 0; var lit = 0;
+        foreach (var triangle in geometry.WorldTriangles().Where(triangle => triangle.Surface.ObjectId == floor.Guid && triangle.A.Normal.Y > .99f))
+        {
+            var a = triangle.A.LightmapUV * 128;
+            var b = triangle.B.LightmapUV * 128;
+            var c = triangle.C.LightmapUV * 128;
+            static float Cross(Vector2 u, Vector2 v) => u.X * v.Y - u.Y * v.X;
+            var area = Cross(b - a, c - a);
+            for (var y = 0; y < 128; y++) for (var x = 0; x < 128; x++)
+            {
+                var p = new Vector2(x + .5f, y + .5f);
+                var wb = Cross(p - a, c - a) / area;
+                var wc = Cross(b - a, p - a) / area;
+                var wa = 1 - wb - wc;
+                if (wa <= .0001f || wb <= .0001f || wc <= .0001f) continue;
+                var position = triangle.A.Position * wa + triangle.B.Position * wb + triangle.C.Position * wc;
+                var value = result.Pages[triangle.Page].Pixels.Span[y * 128 + x].X;
+                if (MathF.Abs(position.X) < 1.5f && MathF.Abs(position.Z) < 1.5f) { Check(MathF.Abs(value - .05f) < .0001f); shadowed++; }
+                if (MathF.Abs(position.X) > 3 || MathF.Abs(position.Z) > 3) { Check(value > .05f); lit++; }
+            }
+        }
+        Check(shadowed > 0 && lit > 0);
+        var again = ProjectShockGL.Rendering.DirectLightBaker.Bake(input);
+        Check(result.Pages[0].Pixels.Span.SequenceEqual(again.Pages[0].Pixels.Span));
+        using var cancel = new CancellationTokenSource(); cancel.Cancel();
+        Throws(() => ProjectShockGL.Rendering.DirectLightBaker.Bake(input, cancellationToken: cancel.Token));
+        using var midCancel = new CancellationTokenSource();
+        Throws(() => ProjectShockGL.Rendering.DirectLightBaker.Bake(input, cancellationToken: midCancel.Token,
+            progress: new LightmapCheckProgress(_ => midCancel.Cancel())));
+        Check(result.Pages[0].Pixels.Span.SequenceEqual(again.Pages[0].Pixels.Span));
+    }
+    finally { world.Clear(); Environment.AmbientColor = ambient; }
+});
+
+Run("Lightmap BVH agrees with individual-triangle visibility and prunes distant geometry", () =>
+{
+    var world = new World();
+    try
+    {
+        for (var i = 0; i < 16; i++)
+        {
+            var brush = world.Spawn<BrushBox>();
+            brush.Transform.Position = new Vector3((i % 4) * 4, 2, (i / 4) * 4);
+        }
+        var geometry = world.PrepareLightmapGeometry(new ProjectShockGL.Rendering.LightmapPreparationOptions { AtlasSize = 128, SurfaceSize = 32, Padding = 1 });
+        var triangles = geometry.WorldTriangles();
+        var alpha = new ProjectShockGL.Rendering.LightmapAlpha?[triangles.Length];
+        var tree = new ProjectShockGL.Rendering.LightmapOcclusion(triangles, alpha);
+        var random = new System.Random(31);
+        for (var i = 0; i < 80; i++)
+        {
+            var origin = new Vector3((float)random.NextDouble() * 18 - 3, 0, (float)random.NextDouble() * 18 - 3);
+            var direction = i % 2 == 0 ? Vector3.UnitY : Vector3.Normalize(new Vector3(6, 10, 6) - origin);
+            var distance = i % 3 == 0 ? float.PositiveInfinity : 20;
+            var expected = triangles.Any(triangle => new ProjectShockGL.Rendering.LightmapOcclusion([triangle], [null])
+                .Blocked(origin, direction, distance, -1, .00001f));
+            Check(tree.Blocked(origin, direction, distance, -1, .00001f) == expected);
+        }
+        Check(tree.TriangleTests < triangles.Length * 80 / 2);
+    }
+    finally { world.Clear(); }
+});
+
+Run("Lightmap packages preserve HDR pixels, UV templates, identities and map references without replacing earlier bakes", () =>
+{
+    var world = new World();
+    var ambient = Environment.AmbientColor;
+    string? first = null; string? second = null;
+    var map = Path.Combine(testRoot, "BakedReference.map");
+    try
+    {
+        Environment.AmbientColor = new Color(2, .3f, .1f);
+        var brush = world.Spawn<BrushBox>();
+        var geometry = world.PrepareLightmapGeometry(new ProjectShockGL.Rendering.LightmapPreparationOptions { AtlasSize = 64, SurfaceSize = 32, Padding = 1 });
+        var result = ProjectShockGL.Rendering.DirectLightBaker.Bake(ProjectShockGL.Rendering.DirectLightBaker.Capture(world, geometry));
+        first = Content.SaveLightmap("Checks/Room", result);
+        second = Content.SaveLightmap("Checks/Room", result);
+        Check(first != second);
+        var stored = ProjectShockGL.Rendering.LightmapStorage.Read(first);
+        Check(stored.Size == 64 && stored.Pages.Length == 1 && stored.Surfaces.Single().Id.ObjectId == brush.Guid);
+        Check(stored.Templates.Single().LightmapUv.Span.SequenceEqual(geometry.Surfaces.Single().Mesh.LightmapUv.Span));
+        var pixels = result.Pages[0].Pixels.Span;
+        var coverage = result.Pages[0].Coverage.Span;
+        for (var i = 0; i < pixels.Length; i++)
+            if (coverage[i] == 1) Check(stored.Pages[0][i] == pixels[i] && stored.Pages[0][i].X == 2);
+        var level = new Level { Lightmap = first, Placeables = EditorLevelManager.CaptureLevel([brush]).Placeables };
+        EditorLevelManager.SaveLevel(level,map);
+        Check(EditorLevelManager.ReadLevel(map).Lightmap == first);
+        Check(JsonConvert.DeserializeObject<Level>("{}")!.Lightmap == null);
+        Throws(() => Content.SaveLightmap("../Outside", result));
+        var path = ProjectShockGL.Rendering.LightmapStorage.GetPath(first);
+        var before = File.ReadAllBytes(path);
+        var broken = ProjectShockGL.Rendering.LightmapStorage.GetPath(first + "-broken");
+        File.WriteAllBytes(broken, before.Take(20).ToArray());
+        try { Throws(() => ProjectShockGL.Rendering.LightmapStorage.Read(first + "-broken")); }
+        finally { File.Delete(broken); }
+        Check(File.ReadAllBytes(path).SequenceEqual(before));
+        var oldWorld = Game.Instance.World.GetAllObjects(true);
+        Throws(() => LevelManager.Load(new Level { Lightmap = "Checks/Missing" }));
+        Check(Game.Instance.World.GetAllObjects(true).SequenceEqual(oldWorld));
+    }
+    finally
+    {
+        world.Clear(); Environment.AmbientColor = ambient;
+        foreach (var asset in new[] { first, second }.OfType<string>())
+        {
+            var path = ProjectShockGL.Rendering.LightmapStorage.GetPath(asset);
+            if (File.Exists(path)) File.Delete(path);
+        }
+        if (File.Exists(map)) File.Delete(map);
+    }
+});
+
+Run("One-bounce GI transfers surface tint into a directly unlit ceiling, stops at occluders and never reflects Ambient", () =>
+{
+    var world = new World();
+    var ambient = Environment.AmbientColor;
+    try
+    {
+        Environment.AmbientColor = Color.Black;
+        var floor = world.Spawn<BrushBox>();
+        floor.Size = new Vector3(8,.1f,8); floor.Transform.Position = new Vector3(0,-.05f,0); floor.Color = Color.Red;
+        var ceiling = world.Spawn<BrushBox>();
+        ceiling.Size = new Vector3(8,.1f,8); ceiling.Transform.Position = new Vector3(0,2.05f,0);
+        var lamp = world.Spawn<Light>(); lamp.Mode = LightMode.Baked; lamp.Type = LightType.Spot;
+        lamp.Transform.Position = new Vector3(0,1.5f,0);
+        lamp.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitX,-MathF.PI/2);
+        lamp.InnerAngle = 90; lamp.OuterAngle = 120; lamp.Radius = 10; lamp.Intensity = 2;
+        ProjectShockGL.Rendering.DirectLightBakeInput Capture() => ProjectShockGL.Rendering.DirectLightBaker.Capture(world,
+            world.PrepareLightmapGeometry(new ProjectShockGL.Rendering.LightmapPreparationOptions {AtlasSize=64,SurfaceSize=32,Padding=1}));
+        var input = Capture();
+        var options = new ProjectShockGL.Rendering.DirectLightBakeOptions {IndirectSamples=128};
+        var p = new Vector3(0,2,0);
+        Check(ProjectShockGL.Rendering.DirectLightBaker.Sample(input,p,-Vector3.UnitY).Length()<.0001f);
+        var red = ProjectShockGL.Rendering.DirectLightBaker.SampleWithIndirect(input,p,-Vector3.UnitY,options);
+        Check(red.X>.1f && red.Y<.0001f && red.Z<.0001f);
+        floor.Color = Color.Blue;
+        var blue = ProjectShockGL.Rendering.DirectLightBaker.SampleWithIndirect(Capture(),p,-Vector3.UnitY,options);
+        Check(blue.Z>.1f && blue.X<.0001f && blue.Y<.0001f);
+        Check(ProjectShockGL.Rendering.DirectLightBaker.SampleWithIndirect(input,p,-Vector3.UnitY,options)==red);
+        floor.Color=Color.Black;
+        Check(ProjectShockGL.Rendering.DirectLightBaker.SampleWithIndirect(Capture(),p,-Vector3.UnitY,options).Length()<.0001f);
+        floor.Color=Color.Red; floor.Lit=false;
+        Check(ProjectShockGL.Rendering.DirectLightBaker.SampleWithIndirect(Capture(),p,-Vector3.UnitY,options).Length()<.0001f);
+        floor.Lit=true;
+        var blocker=world.Spawn<BrushBox>();
+        blocker.Size=new Vector3(8,.1f,8);blocker.Transform.Position=new Vector3(0,1,0);blocker.Lit=false;
+        Check(ProjectShockGL.Rendering.DirectLightBaker.SampleWithIndirect(Capture(),p,-Vector3.UnitY,options).Length()<.0001f);
+        world.Destroy(blocker);
+        lamp.Mode=LightMode.Realtime;
+        Environment.AmbientColor=new Color(.4f,.4f,.4f);
+        var noBaked=Capture();
+        Check(Vector3.Distance(ProjectShockGL.Rendering.DirectLightBaker.SampleWithIndirect(noBaked,p,-Vector3.UnitY,options),
+            new Vector3(.4f))<.0001f);
+    }
+    finally {world.Clear();Environment.AmbientColor=ambient;}
+});
+
+Run("GI bakes are deterministic, persist in existing HDR packages and can be disabled independently of direct light", () =>
+{
+    var world=new World();
+    var ambient=Environment.AmbientColor;
+    string? asset=null;
+    try
+    {
+        Environment.AmbientColor=Color.Black;
+        var floor=world.Spawn<BrushBox>();floor.Size=new Vector3(8,.1f,8);
+        floor.Transform.Position=new Vector3(0,-.05f,0);floor.Color=Color.Red;
+        var ceiling=world.Spawn<BrushBox>();ceiling.Size=new Vector3(8,.1f,8);
+        ceiling.Transform.Position=new Vector3(0,2.05f,0);
+        var lamp=world.Spawn<Light>();lamp.Mode=LightMode.Baked;lamp.Type=LightType.Spot;
+        lamp.Transform.Position=new Vector3(0,1.5f,0);lamp.Transform.Rotation=Quaternion.CreateFromAxisAngle(Vector3.UnitX,-MathF.PI/2);
+        lamp.InnerAngle=90;lamp.OuterAngle=120;lamp.Radius=10;lamp.Intensity=2;
+        var input=ProjectShockGL.Rendering.DirectLightBaker.Capture(world,world.PrepareLightmapGeometry(
+            new ProjectShockGL.Rendering.LightmapPreparationOptions {AtlasSize=64,SurfaceSize=32,Padding=1}));
+        var options=new ProjectShockGL.Rendering.DirectLightBakeOptions {IndirectSamples=32};
+        var direct=ProjectShockGL.Rendering.DirectLightBaker.Bake(input);
+        var result=ProjectShockGL.Rendering.DirectLightBaker.Bake(input,options);
+        var again=ProjectShockGL.Rendering.DirectLightBaker.Bake(input,options);
+        Check(result.IndirectRays>0 && direct.IndirectRays==0);
+        var unfiltered=ProjectShockGL.Rendering.DirectLightBaker.Bake(input,
+            new ProjectShockGL.Rendering.DirectLightBakeOptions {IndirectSamples=32,IndirectFilterRadius=0});
+        Check(unfiltered.IndirectRays==result.IndirectRays);
+        Check(result.Pages[0].Coverage.Span.SequenceEqual(unfiltered.Pages[0].Coverage.Span));
+        for(var i=0;i<result.Pages[0].Pixels.Length;i++)
+        {
+            // A red bounce may change only red. Filtering must not smear white direct lighting into GI.
+            Check(result.Pages[0].Pixels.Span[i].Y==direct.Pages[0].Pixels.Span[i].Y);
+            Check(result.Pages[0].Pixels.Span[i].Z==direct.Pages[0].Pixels.Span[i].Z);
+        }
+        Check(result.Pages[0].Pixels.Span.SequenceEqual(again.Pages[0].Pixels.Span));
+        Check(!result.Pages[0].Pixels.Span.SequenceEqual(direct.Pages[0].Pixels.Span));
+        var disabled=ProjectShockGL.Rendering.DirectLightBaker.Bake(input,new ProjectShockGL.Rendering.DirectLightBakeOptions
+            {IndirectSamples=32,IndirectStrength=0});
+        Check(disabled.IndirectRays==0 && disabled.Pages[0].Pixels.Span.SequenceEqual(direct.Pages[0].Pixels.Span));
+        asset=Content.SaveLightmap("Checks/Indirect",result);
+        var stored=ProjectShockGL.Rendering.LightmapStorage.Read(asset);
+        for(var i=0;i<result.Pages[0].Pixels.Length;i++)
+            if(result.Pages[0].Coverage.Span[i]!=0)Check(stored.Pages[0][i]==result.Pages[0].Pixels.Span[i]);
+        Throws(()=>ProjectShockGL.Rendering.DirectLightBaker.Bake(input,new ProjectShockGL.Rendering.DirectLightBakeOptions {IndirectSamples=-1}));
+        Throws(()=>ProjectShockGL.Rendering.DirectLightBaker.Bake(input,new ProjectShockGL.Rendering.DirectLightBakeOptions {IndirectSamples=5000}));
+        Throws(()=>ProjectShockGL.Rendering.DirectLightBaker.Bake(input,new ProjectShockGL.Rendering.DirectLightBakeOptions {IndirectStrength=float.NaN}));
+        Throws(()=>ProjectShockGL.Rendering.DirectLightBaker.Bake(input,new ProjectShockGL.Rendering.DirectLightBakeOptions {IndirectFilterRadius=3}));
+        using var cancellation=new CancellationTokenSource();
+        Throws(()=>ProjectShockGL.Rendering.DirectLightBaker.Bake(input,options,cancellation.Token,
+            new LightmapCheckProgress(_=>cancellation.Cancel())));
+        Check(result.Pages[0].Pixels.Span.SequenceEqual(again.Pages[0].Pixels.Span));
+    }
+    finally
+    {
+        world.Clear();Environment.AmbientColor=ambient;
+        if(asset!=null)File.Delete(ProjectShockGL.Rendering.LightmapStorage.GetPath(asset));
+    }
+});
+
+RunScene("Lighting bake settings roundtrip in maps and old maps get safe defaults", () =>
+{
+    var world=Game.Instance.World;
+    world.Spawn<BrushBox>();
+    var settings=new ProjectShockGL.Rendering.LightmapBakeSettings
+    {
+        AtlasSize=256,SurfaceSize=64,Padding=3,SamplesPerTexel=4,RayBias=.002f,
+        IndirectEnabled=false,IndirectSamples=32,IndirectStrength=.5f,IndirectFilterRadius=2
+    };
+    world.LightmapSettings=settings;
+    var path=Path.Combine(testRoot,"BakeSettings.map");
+    try
+    {
+        EditorLevelManager.SaveCurrentLevel(path);
+        Check(EditorLevelManager.ReadLevel(path).LightmapSettings==settings);
+        world.LightmapSettings=new();
+        EditorLevelManager.OpenLevel(path);
+        Check(world.LightmapSettings==settings && world.LightmapSettings.CreateBakeOptions().IndirectSamples==0);
+        var before=world.GetAllObjects(true);
+        Throws(()=>LevelManager.Load(new Level {LightmapSettings=new ProjectShockGL.Rendering.LightmapBakeSettings {AtlasSize=16,SurfaceSize=128}}));
+        Check(world.GetAllObjects(true).SequenceEqual(before));
+        LevelManager.Load(JsonConvert.DeserializeObject<Level>("{}")!);
+        Check(world.LightmapSettings==new ProjectShockGL.Rendering.LightmapBakeSettings());
+    }
+    finally {if(File.Exists(path))File.Delete(path);}
+});
+
+Run("Lighting bake sessions cancel, reject changed snapshots and report worker errors without publishing", () =>
+{
+    var world=new World();
+    var ambient=Environment.AmbientColor;
+    var options=new ProjectShockGL.Rendering.LightmapBakeSettings {AtlasSize=64,SurfaceSize=32,Padding=1,IndirectEnabled=false};
+    void Finish(LightmapBakeSession session)
+    {
+        var deadline=System.Diagnostics.Stopwatch.StartNew();
+        while(session.IsBusy && deadline.Elapsed<TimeSpan.FromSeconds(10)) {session.Poll();Thread.Yield();}
+        Check(!session.IsBusy);
+    }
+    try
+    {
+        world.Spawn<BrushBox>();
+        using var session=new LightmapBakeSession();
+        session.Start(world,options,"Checks/Cancelled");
+        Check(session.IsBusy);
+        session.Cancel();Finish(session);
+        Check(session.State==LightmapBakeState.Cancelled && world.LightmapAsset==null && session.PublishedAsset==null);
+        var signature="original";
+        session.Start(world,options,"Checks/Discarded",signature:()=>signature);
+        signature="edited";Finish(session);
+        Check(session.State==LightmapBakeState.Discarded && world.LightmapAsset==null);
+        session.Start(world,options,"Checks/ChangedLevel",isCurrent:()=>false);
+        Finish(session);
+        Check(session.State==LightmapBakeState.Discarded && world.LightmapAsset==null);
+        var light=world.Spawn<Light>();light.Mode=LightMode.Baked;light.Transform.Position=new Vector3(0,3,0);
+        light.Intensity=float.MaxValue;light.Color=new Color(float.MaxValue,1,1);light.Radius=10;
+        session.Start(world,options,"Checks/Fault");
+        Finish(session);
+        Check(session.State==LightmapBakeState.Failed && session.Error!.Contains("overflow",StringComparison.OrdinalIgnoreCase));
+        Check(world.LightmapAsset==null);
+        light.Destroy();
+        session.Start(world,options with {SurfaceSize=100},"Checks/Invalid");
+        Check(!session.IsBusy && session.State==LightmapBakeState.Failed);
+        using var disposed=new LightmapBakeSession();
+        disposed.Start(world,options,"Checks/Disposed");
+        disposed.Dispose();
+        Check(!disposed.IsBusy && !disposed.Poll() && world.LightmapAsset==null);
+    }
+    finally {world.Clear();Environment.AmbientColor=ambient;}
+});
+
+RunScene("Dynamic ambient settings roundtrip in maps, preserve legacy defaults and never enter baked lighting", () =>
+{
+    var before=Environment.Capture();
+    var path=Path.Combine(testRoot,"DynamicAmbient.map");
+    try
+    {
+        Environment.AmbientColor=new Color(.1f,0,0);
+        Environment.DynamicAmbientColorEnabled=true;
+        Environment.DynamicAmbientColor=new Color(0,.6f,.2f);
+        Game.Instance.World.Spawn<BrushBox>();
+        var input=ProjectShockGL.Rendering.DirectLightBaker.Capture(Game.Instance.World,Game.Instance.World.PrepareLightmapGeometry(
+            new ProjectShockGL.Rendering.LightmapPreparationOptions{AtlasSize=64,SurfaceSize=32,Padding=1}));
+        Check(input.Ambient==new Vector3(.1f,0,0));
+        EditorLevelManager.SaveCurrentLevel(path);
+        Environment.Reset();
+        EditorLevelManager.OpenLevel(path);
+        Check(Environment.DynamicAmbientColorEnabled && Environment.DynamicAmbientColor.Equals(new Color(0,.6f,.2f)));
+        Check(Environment.AmbientColor.Equals(new Color(.1f,0,0)));
+        var legacy=JsonConvert.DeserializeObject<EnvironmentData>("{\"AmbientColor\":[0.2,0.3,0.4,1]}",JsonHelper.GetSettings())!;
+        Check(!legacy.DynamicAmbientColorEnabled);
+        Environment.Apply(legacy);
+        Check(!Environment.DynamicAmbientColorEnabled && Environment.AmbientColor.Equals(new Color(.2f,.3f,.4f)));
+        Throws(()=>new EnvironmentData{DynamicAmbientColor=new Color(float.NaN,0,0)}.Validate());
+    }
+    finally {Environment.Apply(before);if(File.Exists(path))File.Delete(path);}
+});
+
 Run("BrushBox dimensions keep collider and transformed bounds aligned", () =>
 {
     EditorLevelManager.NewLevel();
@@ -3182,6 +3645,62 @@ Run("Spotlight map roundtrip and duplication preserve full cone angles and orien
     Check(copy.Type == LightType.Spot && copy.InnerAngle == 20 && copy.OuterAngle == 55);
     copy.InnerAngle = 35;
     Check(loaded.InnerAngle == 20);
+});
+
+RunScene("Light modes default to Realtime and survive maps, prefabs, duplication and inspector Undo/Redo", () =>
+{
+    var light = (Light)SceneObjects.Create(PlaceableType.Entity, "Light");
+    Check(light.Mode == LightMode.Realtime);
+    Check(EditableProperties.Get(typeof(Light)).Any(property => property.Name == nameof(Light.Mode)));
+    light.Type = LightType.Spot;
+    RecordInspector(light, "Mode", () => light.Mode = LightMode.Baked);
+    Check(light.Mode == LightMode.Baked);
+    UndoRedo.Undo();
+    Check(light.Mode == LightMode.Realtime);
+    UndoRedo.Redo();
+    Check(light.Mode == LightMode.Baked);
+    Throws(() => light.Mode = (LightMode)99);
+    Check(light.Mode == LightMode.Baked);
+
+    var path = Path.Combine(testRoot, "LightMode.map");
+    var prefabName = "LightMode-" + Guid.NewGuid().ToString("N");
+    try
+    {
+        EditorLevelManager.SaveCurrentLevel(path);
+        EditorLevelManager.OpenLevel(path);
+        var loaded = Game.Instance.World.Find<Light>()!;
+        Check(loaded.Mode == LightMode.Baked && loaded.Type == LightType.Spot);
+        var copy = (Light)EditorLevelManager.DuplicateObject(loaded);
+        Check(copy.Mode == LightMode.Baked);
+        PrefabTools.Save(loaded, prefabName);
+        var instance = (Light)Prefab.Instantiate(prefabName);
+        Check(instance.Mode == LightMode.Baked && instance.Type == LightType.Spot);
+
+        var legacy = EditorLevelManager.CaptureLevel([loaded]);
+        legacy.Placeables[0].Properties.Remove(nameof(Light.Mode));
+        LevelManager.Load(legacy);
+        Check(Game.Instance.World.Find<Light>()!.Mode == LightMode.Realtime);
+    }
+    finally
+    {
+        if (File.Exists(path)) File.Delete(path);
+        if (File.Exists(Content.GetPrefabPath(prefabName))) File.Delete(Content.GetPrefabPath(prefabName));
+    }
+});
+
+RunScene("Baked directional lights do not reserve the Realtime directional slot", () =>
+{
+    var baked = Game.Instance.World.Spawn<Light>();
+    baked.Mode = LightMode.Baked;
+    baked.Type = LightType.Directional;
+    Check(Light.Main == null);
+    var realtime = Game.Instance.World.Spawn<Light>();
+    realtime.Type = LightType.Directional;
+    Check(Light.Main == realtime);
+    realtime.Mode = LightMode.Baked;
+    Check(Light.Main == null);
+    baked.Mode = LightMode.Realtime;
+    Check(Light.Main == baked);
 });
 
 Run("Spotlight angle constraints, type transitions and destruction keep registries consistent", () =>
@@ -4456,6 +4975,29 @@ if (args.Contains("--imgui"))
                 field.SetValue(null, previous);
             }
         });
+        Run("Bake Lighting window draws quality controls without changing settings and cancels on level transitions", () =>
+        {
+            var world=Game.Instance.World;
+            var settings=world.LightmapSettings;
+            try
+            {
+                LightmapBakeWindow.Open=true;
+                Frame(LightmapBakeWindow.Draw);
+                Check(ImGuiNET.ImGui.GetDrawData().TotalVtxCount>0 && world.LightmapSettings==settings);
+                world.Spawn<BrushBox>();
+                world.LightmapSettings=new ProjectShockGL.Rendering.LightmapBakeSettings{AtlasSize=64,SurfaceSize=32,Padding=1,IndirectEnabled=false};
+                var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static;
+                typeof(LightmapBakeWindow).GetMethod("Begin",flags)!.Invoke(null,[world]);
+                var session=(LightmapBakeSession)typeof(LightmapBakeWindow).GetField("_session",flags)!.GetValue(null)!;
+                Check(session.IsBusy);
+                LightmapBakeWindow.Open=false;
+                LevelManager.Load(new Level());
+                var clock=System.Diagnostics.Stopwatch.StartNew();
+                while(session.IsBusy && clock.Elapsed<TimeSpan.FromSeconds(10)){LightmapBakeWindow.Update();Thread.Yield();}
+                Check(!session.IsBusy && session.State==LightmapBakeState.Cancelled && world.LightmapAsset==null);
+            }
+            finally {LightmapBakeWindow.Dispose();world.LightmapSettings=settings;}
+        });
         Run("Scene axis indicator follows camera rotation, stays in its corner and does not capture input", () =>
         {
             var previousUI = UIEditor.Open;
@@ -4765,7 +5307,7 @@ static void RecordInspector(GameObject obj, string field, Action change, bool ed
 
 static bool SameEnvironment(EnvironmentData a, EnvironmentData b) =>
     a.SkyColorEnabled == b.SkyColorEnabled && a.SkyColor.Equals(b.SkyColor) &&
-    a.AmbientColor.Equals(b.AmbientColor) && a.IsFogEnabled == b.IsFogEnabled &&
+    a.AmbientColor.Equals(b.AmbientColor) && a.DynamicAmbientColorEnabled==b.DynamicAmbientColorEnabled && a.DynamicAmbientColor.Equals(b.DynamicAmbientColor) && a.IsFogEnabled == b.IsFogEnabled &&
     a.FogColor.Equals(b.FogColor) && a.FogNear == b.FogNear && a.FogFar == b.FogFar;
 
 static void Run(string name, Action action) { action(); Console.WriteLine($"PASS: {name}"); }
@@ -4979,4 +5521,9 @@ public sealed class LogicToggleReceiver : Entity
     [Input("Changed")] public void Changed(bool value) { State = value; Changes++; }
     [Input("On")] public void On() => OnCount++;
     [Input("Off")] public void Off() => OffCount++;
+}
+public sealed class LightmapCheckProgress(Action<ProjectShockGL.Rendering.LightmapBakeProgress> action)
+    : IProgress<ProjectShockGL.Rendering.LightmapBakeProgress>
+{
+    public void Report(ProjectShockGL.Rendering.LightmapBakeProgress value) => action(value);
 }

@@ -6,8 +6,10 @@ namespace ProjectShockGL.Rendering;
 public sealed class ShaderProgram : IDisposable
 {
     private readonly GL _gl;
+    
     private readonly Dictionary<string, int> _locations = new(StringComparer.Ordinal);
     private readonly Dictionary<string, object> _defaults = new(StringComparer.Ordinal);
+    
     private readonly Dictionary<string, (UniformType Type, int Size)> _uniforms = new(StringComparer.Ordinal);
     public uint Handle { get; private set; }
 
@@ -206,7 +208,7 @@ public sealed class ShaderProgram : IDisposable
                    "uProjection" or "uView" or "uModel" or "uTexture" or "uColor" or "uUvRect" or
                    "uSurfaceMode" or "uAlphaCutoff" or "uCameraPos" or "uTime" or "uFogColor" or "uFogNear" or "uFogFar" or
                    "uFogEnabled" or "uForceUnlit" or "uScreenSize" or "uTexelSize" or "uAmbientColor" or "uMainLightEnabled" or
-                   "uLightDirection" or "uLightColor" or "uLightIntensity" or "uPointLightCount" ||
+                   "uLightDirection" or "uLightColor" or "uLightIntensity" or "uPointLightCount" or "uLightmap" or "uLightmapEnabled" or "uLightmapScaleOffset" ||
                name.StartsWith("uPointLight", StringComparison.Ordinal);
     }
 

@@ -8,6 +8,8 @@ public static class Environment
     public static Color SkyColor { get; set; } = Color.Black;
 
     public static Color AmbientColor { get; set; } = Color.White;
+    public static bool DynamicAmbientColorEnabled { get; set; }
+    public static Color DynamicAmbientColor { get; set; } = Color.White;
 
     public static bool IsFogEnabled { get; set; } = false;
     public static Color FogColor { get; set; } = Color.Gray;
@@ -20,6 +22,8 @@ public static class Environment
         SkyColorEnabled = SkyColorEnabled,
         SkyColor = SkyColor,
         AmbientColor = AmbientColor,
+        DynamicAmbientColorEnabled = DynamicAmbientColorEnabled,
+        DynamicAmbientColor = DynamicAmbientColor,
         IsFogEnabled = IsFogEnabled,
         FogColor = FogColor,
         FogNear = FogNear,
@@ -35,6 +39,8 @@ public static class Environment
         SkyColorEnabled = data.SkyColorEnabled;
         SkyColor = data.SkyColor;
         AmbientColor = data.AmbientColor;
+        DynamicAmbientColorEnabled = data.DynamicAmbientColorEnabled;
+        DynamicAmbientColor = data.DynamicAmbientColor;
         IsFogEnabled = data.IsFogEnabled;
         FogColor = data.FogColor;
         FogNear = data.FogNear;

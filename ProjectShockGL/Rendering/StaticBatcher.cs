@@ -7,8 +7,8 @@ internal sealed class StaticBatcher
     private readonly Dictionary<BatchKey, Batch> _batches = [];
 
     private readonly record struct BatchKey(Texture Texture, Color Color, bool Lit, bool BackfaceCulling,
-        int RenderOrder, int Segment, SurfaceMode SurfaceMode, float AlphaCutoff);
-    private readonly record struct Source(Mesh Mesh, int Revision, Matrix4x4 Model);
+        int RenderOrder, int Segment, SurfaceMode SurfaceMode, float AlphaCutoff, int LightmapPage, Texture? Lightmap);
+    private readonly record struct Source(Mesh Mesh, int Revision, Matrix4x4 Model, Vector4 LightmapScaleOffset);
     private sealed record Batch(Mesh Mesh, Source[] Sources);
 
     internal void Submit(IReadOnlyList<RenderCommand> commands, RenderQueue target)
@@ -26,7 +26,7 @@ internal sealed class StaticBatcher
                 continue;
             }
 
-            var key = new BatchKey(mesh.Texture!, mesh.Color, mesh.Lit, mesh.BackfaceCulling, mesh.RenderOrder, segment, mesh.SurfaceMode, mesh.AlphaCutoff);
+            var key = new BatchKey(mesh.Texture!, mesh.Color, mesh.Lit, mesh.BackfaceCulling, mesh.RenderOrder, segment, mesh.SurfaceMode, mesh.AlphaCutoff, mesh.LightmapPage, mesh.LightmapTexture);
             
             if (!groups.TryGetValue(key, out var group))
             {
@@ -72,7 +72,7 @@ internal sealed class StaticBatcher
 
             target.Add(new MeshCommand
             {
-                Mesh = batch.Mesh, Texture = key.Texture, Color = key.Color, Lit = key.Lit,
+                LightmapTexture = key.Lightmap, LightmapPage = key.LightmapPage, Mesh = batch.Mesh, Texture = key.Texture, Color = key.Color, Lit = key.Lit,
                 BackfaceCulling = key.BackfaceCulling, RenderOrder = key.RenderOrder,
                 SurfaceMode = key.SurfaceMode, AlphaCutoff = key.AlphaCutoff,
                 Position = Vector3.Zero, Rotation = Quaternion.Identity, Scale = Vector3.One
@@ -98,6 +98,11 @@ internal sealed class StaticBatcher
             return false;
         }
 
+        if (command.LightmapPage >= 0 && mesh.LightmapUv.Length == 0)
+        {
+            return false;
+        }
+
         var model = Matrix4x4.CreateScale(command.Scale) *
                     Matrix4x4.CreateFromQuaternion(command.Rotation) *
                     Matrix4x4.CreateTranslation(command.Position);
@@ -108,7 +113,7 @@ internal sealed class StaticBatcher
             return false;
         }
 
-        source = new Source(mesh, mesh.Revision, model);
+        source = new Source(mesh, mesh.Revision, model, command.LightmapScaleOffset);
         
         return true;
     }
@@ -118,6 +123,8 @@ internal sealed class StaticBatcher
         var vertices = new float[sources.Sum(source => source.Mesh.Vertices.Length)];
         var indices = new uint[sources.Sum(source => source.Mesh.Indices.Length)];
         
+        var lightmapUv = sources.Any(source => source.Mesh.LightmapUv.Length > 0)
+            ? new Vector2[vertices.Length / 8] : null;
         var vertexOffset = 0;
         var indexOffset = 0;
 
@@ -143,6 +150,14 @@ internal sealed class StaticBatcher
                 vertices[output + 5] = normal.Z;
                 vertices[output + 6] = input[i + 6];
                 vertices[output + 7] = input[i + 7];
+                
+                if (lightmapUv != null && source.Mesh.LightmapUv.Length > 0)
+                {
+                    var uv = source.Mesh.LightmapUv.Span[i / 8];
+                    var rect = source.LightmapScaleOffset;
+                    
+                    lightmapUv[output / 8] = uv * new Vector2(rect.X, rect.Y) + new Vector2(rect.Z, rect.W);
+                }
             }
 
             foreach (var index in source.Mesh.Indices.Span)
@@ -153,7 +168,7 @@ internal sealed class StaticBatcher
             vertexOffset += input.Length;
         }
 
-        return sources[0].Mesh.CreateCombined(vertices, indices);
+        return sources[0].Mesh.CreateCombined(vertices, indices, lightmapUv);
     }
 
     internal void Clear()

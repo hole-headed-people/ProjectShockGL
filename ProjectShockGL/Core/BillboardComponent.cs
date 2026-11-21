@@ -17,6 +17,7 @@ public class BillboardComponent : RenderComponent
         var command = new BillboardCommand()
         {
             Mode = Mode,
+            UseDynamicAmbient = !Owner.IsStatic && !IsDebug,
             SurfaceMode = SurfaceMode, AlphaCutoff = AlphaCutoff,
             Color = Color,
             Texture = Texture,
