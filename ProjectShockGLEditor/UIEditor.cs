@@ -649,9 +649,10 @@ public static class UIEditor
             return null;
         }
         
-        for (var i = data.Children.Count - 1; i >= 0; i--)
+        var children = data.Children.OrderBy(child => child.SortOrder).ToArray();
+        for (var i = children.Length - 1; i >= 0; i--)
         {
-            var hit = Pick(data.Children[i], position);
+            var hit = Pick(children[i], position);
             
             if (hit != null)
             {
@@ -923,6 +924,13 @@ public static class UIEditor
             Changed();
         }
         
+        var sortOrder = data.SortOrder;
+        if (ImGui.InputInt("Sort order", ref sortOrder))
+        {
+            data.SortOrder = sortOrder;
+            Changed();
+        }
+
         var fillCanvas = data == _asset.Root || data.FillCanvas;
         ImGui.BeginDisabled(data == _asset.Root);
         if (ImGui.Checkbox("Fill Canvas", ref fillCanvas))
@@ -1076,8 +1084,115 @@ public static class UIEditor
                 
                 break;
         }
+        DrawEditableProperties(data);
     }
 
+    private static void DrawEditableProperties(WidgetData data)
+    {
+        var properties = WidgetData.GetAdditionalEditableProperties(data.GetWidgetType()).ToArray();
+        if (properties.Length == 0) return;
+
+        ImGui.Separator();
+        ImGui.TextUnformatted("Properties");
+        var defaults = Activator.CreateInstance(data.GetWidgetType())!;
+        var serializer = JsonSerializer.Create(JsonHelper.GetSettings());
+        foreach (var property in properties)
+        {
+            ImGui.PushID("Editable/" + property.Name);
+            try
+            {
+                var type = property.PropertyType;
+                var value = data.Properties.TryGetValue(property.Name, out var token)
+                    ? token.ToObject(type, serializer) : property.GetValue(defaults);
+                object? edited = value;
+                var changed = false;
+                if (type == typeof(string))
+                {
+                    var field = (string?)value ?? "";
+                    changed = ImGui.InputText(property.Name, ref field, 16384, ImGuiInputTextFlags.NoUndoRedo);
+                    edited = field;
+                }
+                else if (type == typeof(bool))
+                {
+                    var field = (bool)value!;
+                    changed = ImGui.Checkbox(property.Name, ref field);
+                    edited = field;
+                }
+                else if (type == typeof(int))
+                {
+                    var field = (int)value!;
+                    changed = ImGui.InputInt(property.Name, ref field);
+                    edited = field;
+                }
+                else if (type == typeof(float))
+                {
+                    var field = (float)value!;
+                    changed = ImGui.InputFloat(property.Name, ref field) && float.IsFinite(field);
+                    edited = field;
+                }
+                else if (type == typeof(double))
+                {
+                    var field = (double)value!;
+                    changed = ImGui.InputDouble(property.Name, ref field) && double.IsFinite(field);
+                    edited = field;
+                }
+                else if (type == typeof(Vector2))
+                {
+                    var field = (Vector2)value!;
+                    changed = ImGui.DragFloat2(property.Name, ref field, .1f) && float.IsFinite(field.X) && float.IsFinite(field.Y);
+                    edited = field;
+                }
+                else if (type == typeof(Vector3))
+                {
+                    var field = (Vector3)value!;
+                    changed = ImGui.DragFloat3(property.Name, ref field, .1f) && float.IsFinite(field.X) && float.IsFinite(field.Y) && float.IsFinite(field.Z);
+                    edited = field;
+                }
+                else if (type == typeof(Vector4) || type == typeof(Color))
+                {
+                    var field = value is Color color ? new Vector4(color.R, color.G, color.B, color.A) : (Vector4)value!;
+                    changed = type == typeof(Color) ? ImGui.ColorEdit4(property.Name, ref field) : ImGui.DragFloat4(property.Name, ref field, .1f);
+                    changed &= float.IsFinite(field.X) && float.IsFinite(field.Y) && float.IsFinite(field.Z) && float.IsFinite(field.W);
+                    edited = type == typeof(Color) ? (object)new Color(field.X, field.Y, field.Z, field.W) : field;
+                }
+                else if (type.IsEnum)
+                {
+                    if (ImGui.BeginCombo(property.Name, value?.ToString() ?? ""))
+                    {
+                        foreach (var item in Enum.GetValues(type))
+                        {
+                            if (ImGui.Selectable(item.ToString(), Equals(item, value)))
+                            {
+                                edited = item;
+                                changed = true;
+                            }
+                        }
+                        ImGui.EndCombo();
+                    }
+                }
+                else
+                {
+                    ImGui.TextDisabled(property.Name + ": unsupported type " + type.Name);
+                }
+
+                if (changed)
+                {
+                    property.SetValue(defaults, edited);
+                    data.Properties[property.Name] = property.GetValue(defaults) is { } actual
+                        ? JToken.FromObject(actual, serializer) : JValue.CreateNull();
+                    Changed();
+                }
+            }
+            catch (Exception error)
+            {
+                ImGui.TextWrapped(property.Name + ": " + error.GetBaseException().Message);
+            }
+            finally
+            {
+                ImGui.PopID();
+            }
+        }
+    }
     private static void DrawClickActions(WidgetData data)
     {
         ImGui.Separator();

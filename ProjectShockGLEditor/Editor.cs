@@ -44,6 +44,7 @@ public static class Editor
         target.IsDetail || target.Object is ProjectShockGL.Core.Geometry or ProjectShockGL.Core.Entity or ProjectShockGL.Core.BrushBox);
     public static void Initialize()
     {
+        ProjectShockGL.UI.UIActionCatalog.RegisterAssembly(typeof(ProjectOxygenGL.Core.Game).Assembly);
         LightmapBakeWindow.Initialize();
         Application.LoadGl += OnLoad;
         Application.Load += EditorLevelManager.Initialize;
@@ -485,7 +486,7 @@ public static class Editor
                 UndoRedo.CommitPending();
                 BrushTextureWindow.Open = !BrushTextureWindow.Open;
             }
-            if (ImGui.MenuItem("Entity Asset", "", EntityAssetEditor.Open)) EntityAssetEditor.Toggle();
+            if (ImGui.MenuItem("Entity Asset Editor", "", EntityAssetEditor.Open)) EntityAssetEditor.Toggle();
             if (ImGui.MenuItem("Particle Editor", "", ParticleEditor.Open)) ParticleEditor.Toggle();
             if (ImGui.MenuItem("UI Editor", "", UIEditor.Open)) UIEditor.Open = !UIEditor.Open;
 

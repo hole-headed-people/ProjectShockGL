@@ -15,7 +15,7 @@ using Environment = ProjectShockGL.Environment;
 var testRoot = Path.Combine(AppContext.BaseDirectory, "EditorCheckData", Guid.NewGuid().ToString("N"));
 var saveDirectory = Path.Combine(testRoot, $"SaveCheck-{Guid.NewGuid():N}");
 var settingsPath = Path.Combine(AppContext.BaseDirectory, "GameSettings.ini");
-var gameSettings = $"[Game]\nName=EditorChecks\nClass=CheckGame, EditorChecks\nSaveDirectory={saveDirectory}\n[Content]\nCustomPath={testRoot}\n";
+var gameSettings = $"[Game]\nName=EditorChecks\nClass=CheckGame, EditorChecks\nSaveDirectory={saveDirectory}\n[Content]\nCustomPath={testRoot}\n[Localization]\nTables=TextChecks\nLanguage=en\n";
 Directory.CreateDirectory(Path.Combine(testRoot, "Entities"));
 Directory.CreateDirectory(Path.Combine(testRoot, "Geometry"));
 File.WriteAllText(settingsPath, gameSettings);
@@ -35,6 +35,9 @@ foreach (var (cameraAssetName, cameraAssetType) in new[] { ("Camera", typeof(Cam
     File.WriteAllText(Path.Combine(testRoot, "Entities", cameraAssetName + ".json"),
         JsonConvert.SerializeObject(new EntityData { Class = cameraAssetType.AssemblyQualifiedName! }));
 }
+Directory.CreateDirectory(Path.Combine(testRoot, "Localization"));
+File.WriteAllText(Path.Combine(testRoot, "Localization", "TextChecks.json"),
+    """{"Languages":{"en":{"Translations":{"Next":["Next"],"Prev":["Previous"]}},"ru":{"Translations":{"Next":["Следующий"],"Prev":["Предыдущий"]}}}}""");
 Settings.Initialize();
 Content.Initialize(null!); // Fixture assets deliberately contain no GPU resources.
 Game.Initialize();
@@ -553,6 +556,112 @@ Run("Stopping particles before Start prevents autoplay and editor updates do not
     world.Update(.5f);
     Check(particles.ParticleCount == 5);
     world.Clear();
+});
+Run("UI action assembly registration refreshes cached globals without duplicates and preserves external actions", () =>
+{
+    var before = ProjectShockGL.UI.UIActionCatalog.GetGlobalMethods();
+    ProjectShockGL.UI.UIActionCatalog.RegisterAssembly(typeof(ProjectOxygenGL.Core.Game).Assembly);
+    var after = ProjectShockGL.UI.UIActionCatalog.GetGlobalMethods();
+    Check(!ReferenceEquals(before, after));
+    Check(after.Any(method => method.Name == "Game/SetPaused"));
+    Check(after.Any(method => method.Name == "Game/UnPause"));
+    ProjectShockGL.UI.UIActionCatalog.RegisterAssembly(typeof(ProjectOxygenGL.Core.Game).Assembly);
+    ProjectShockGL.UI.UIActionCatalog.RegisterAssembly(typeof(RegisteredActionCheck).Assembly);
+    var methods = ProjectShockGL.UI.UIActionCatalog.GetGlobalMethods();
+    var action = methods.Single(method => method.Name == "Check/Registered action");
+    Check(methods.Select(method => method.Id).Distinct().Count() == methods.Count);
+    RegisteredActionCheck.Value = 0;
+    action.Invoke(null, new Newtonsoft.Json.Linq.JValue(42));
+    Check(RegisteredActionCheck.Value == 42);
+    try
+    {
+        ProjectShockGL.UI.UIActionCatalog.RegisterAssembly(null!);
+        throw new Exception("Null registration was accepted.");
+    }
+    catch (ArgumentNullException) { }
+});
+Run("Text localization works after Add and JSON, follows language changes and releases event handlers", () =>
+{
+    ProjectShockGL.Localization.LocalizationManager.Initialize();
+    var manager = typeof(ProjectShockGL.Localization.LocalizationManager);
+    var languageEvent = manager.GetField("LanguageChanged", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+    int Listeners(ProjectShockGL.UI.Text text) => ((Delegate?)languageEvent.GetValue(null))?.GetInvocationList().Count(d => ReferenceEquals(d.Target, text)) ?? 0;
+    var canvas = new ProjectShockGL.UI.Canvas();
+    try
+    {
+        var text = canvas.Add<ProjectShockGL.UI.Text>();
+        text.Localize = true;
+        text.Key = "Next";
+        text.Table = "TextChecks";
+        Check(text.Content == "Next" && Listeners(text) == 1);
+        text.Key = "Prev";
+        Check(text.Content == "Previous" && Listeners(text) == 1);
+        ProjectShockGL.Localization.LocalizationManager.SetLanguage("ru");
+        Check(text.Content == "Предыдущий");
+        text.Localize = false;
+        text.Content = "Manual";
+        Check(Listeners(text) == 0);
+        ProjectShockGL.Localization.LocalizationManager.SetLanguage("en");
+        Check(text.Content == "Manual");
+        text.Localize = true;
+        Check(text.Content == "Previous" && Listeners(text) == 1);
+        text.Table = "Missing";
+        Check(text.Content == "Prev");
+        text.Table = "TextChecks";
+        Check(text.Content == "Previous");
+
+        var json = """{"Root":{"Type":"Text","Properties":{"Localize":true,"Key":"Next","Table":"TextChecks","Content":"Fallback"}}}""";
+        var asset = JsonConvert.DeserializeObject<ProjectShockGL.UI.UIAsset>(json, JsonHelper.GetSettings())!;
+        var loaded = (ProjectShockGL.UI.Text)asset.Instantiate(canvas);
+        Check(loaded.Content == "Next" && Listeners(loaded) == 1);
+        ProjectShockGL.Localization.LocalizationManager.SetLanguage("ru");
+        Check(loaded.Content == "Следующий");
+        var captured = ProjectShockGL.UI.UIAsset.Capture(loaded);
+        var copy = (ProjectShockGL.UI.Text)JsonConvert.DeserializeObject<ProjectShockGL.UI.UIAsset>(
+            JsonConvert.SerializeObject(captured, JsonHelper.GetSettings()), JsonHelper.GetSettings())!.Instantiate(canvas);
+        Check(copy.Content == "Следующий");
+        loaded.Destroy();
+        Check(Listeners(loaded) == 0);
+        loaded.Localize = false;
+        loaded.Localize = true;
+        Check(Listeners(loaded) == 0);
+        text.Destroy();
+        Check(Listeners(text) == 0);
+
+        var editorFlag = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+        var wasEditor = Application.IsEditor;
+        try
+        {
+            editorFlag.SetValue(null, true);
+            var preview = (ProjectShockGL.UI.Text)asset.Instantiate(canvas);
+            Check(preview.Content == "Fallback" && Listeners(preview) == 0);
+            ProjectShockGL.Localization.LocalizationManager.SetLanguage("en");
+            Check(preview.Content == "Fallback");
+            preview.Destroy();
+        }
+        finally { editorFlag.SetValue(null, wasEditor); }
+    }
+    finally
+    {
+        canvas.Destroy();
+        ProjectShockGL.Localization.LocalizationManager.SetLanguage("en");
+    }
+});
+Run("Editable widget properties include inherited values, roundtrip JSON and exclude existing fields and unsafe accessors", () =>
+{
+    var names = ProjectShockGL.UI.WidgetData.GetAdditionalEditableProperties(typeof(EditableWidgetCheck)).Select(p => p.Name).ToArray();
+    Check(names.Contains("Amount") && names.Contains("Caption") && names.Contains("Tint"));
+    Check(!names.Contains("Name") && !names.Contains("Content") && !names.Contains("Hidden") && !names.Contains("Global") && !names.Contains("Item"));
+    var source = new EditableWidgetCheck { Amount = 2.5f, Caption = "Привет", Tint = Color.Red, Content = "Body" };
+    var data = ProjectShockGL.UI.WidgetData.CaptureProperties(source);
+    var json = JsonConvert.SerializeObject(data, JsonHelper.GetSettings());
+    var loaded = JsonConvert.DeserializeObject<Newtonsoft.Json.Linq.JObject>(json, JsonHelper.GetSettings())!;
+    var target = new EditableWidgetCheck();
+    ProjectShockGL.UI.WidgetData.ApplyProperties(target, loaded);
+    Check(target.Amount == 2.5f && target.Caption == "Привет" && target.Tint.R == 1 && target.Content == "Body");
+    Check(data.Properties().Count(p => p.Name == "Content") == 1);
+    ProjectShockGL.UI.WidgetData.ApplyProperties(target, new Newtonsoft.Json.Linq.JObject());
+    Check(target.Amount == 2.5f);
 });
 Run("Object.World refers to its actual owner during Create and supports local spawn/find/destroy", () =>
 {
@@ -2701,33 +2810,33 @@ RunScene("Surface modes persist per mesh and billboard through maps, prefabs and
     File.WriteAllText(Path.Combine(testRoot, "Entities", "SurfaceProbe.json"),
         JsonConvert.SerializeObject(new EntityData { Class = typeof(SurfaceProbe).AssemblyQualifiedName! }));
     var entity = (SurfaceProbe)SceneObjects.Create(PlaceableType.Entity, "SurfaceProbe");
-    Check(entity.First.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Cutout && entity.First.AlphaCutoff == 0.5f);
+    Check(entity.First.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Opaque && entity.First.AlphaCutoff == 0.5f);
     UndoRedo.Clear();
     RecordInspector(entity, "Surface settings", () =>
     {
         entity.First.SurfaceMode = ProjectShockGL.Rendering.SurfaceMode.Transparent;
-        entity.Second.SurfaceMode = ProjectShockGL.Rendering.SurfaceMode.Opaque;
+        entity.Second.SurfaceMode = ProjectShockGL.Rendering.SurfaceMode.Cutout;
         entity.Billboard.AlphaCutoff = 0.8f;
     });
     UndoRedo.Undo();
-    Check(entity.First.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Cutout && entity.Billboard.AlphaCutoff == 0.5f);
+    Check(entity.First.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Opaque && entity.Billboard.AlphaCutoff == 0.5f);
     UndoRedo.Redo();
     var snapshot = EditorLevelManager.CaptureLevel([entity]).Placeables.Single();
     Check(snapshot.RenderSurfaces.Length == 3);
     var template = JsonConvert.DeserializeObject<Placeable>(JsonConvert.SerializeObject(snapshot, JsonHelper.GetSettings()), JsonHelper.GetSettings())!;
     var instance = (SurfaceProbe)Prefab.Instantiate(template, Game.Instance.World);
     Check(instance.First.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Transparent &&
-        instance.Second.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Opaque && instance.Billboard.AlphaCutoff == 0.8f);
+        instance.Second.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Cutout && instance.Billboard.AlphaCutoff == 0.8f);
     var path = Path.Combine(testRoot, "surfaces.map");
     EditorLevelManager.SaveCurrentLevel(path);
     EditorLevelManager.OpenLevel(path);
     var loaded = Game.Instance.World.Find<SurfaceProbe>()!;
-    Check(loaded.First.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Transparent && loaded.Billboard.AlphaCutoff == 0.8f);
+    Check(loaded.First.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Transparent && loaded.Second.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Cutout && loaded.Billboard.AlphaCutoff == 0.8f);
     Throws(() => loaded.First.AlphaCutoff = float.NaN);
     Throws(() => loaded.Billboard.SurfaceMode = (ProjectShockGL.Rendering.SurfaceMode)999);
     var legacy = (SurfaceProbe)LevelManager.CreateObject(Game.Instance.World,
         new Placeable { Type = PlaceableType.Entity, Path = "SurfaceProbe" });
-    Check(legacy.First.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Cutout && legacy.First.AlphaCutoff == 0.5f);
+    Check(legacy.First.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Opaque && legacy.First.AlphaCutoff == 0.5f);
 });
 
 RunScene("Brush surface defaults and face overrides survive map, prefab and undo independently", () =>
@@ -3086,6 +3195,43 @@ Run("Entity asset editor opens legacy files without GUIDs and preserves extra JS
     Check(fresh.AssetId == id);
 });
 
+Run("Entity Asset Save As copies current parameters and extra fields with a fresh GUID without changing the source", () =>
+{
+    var directory = Path.Combine(testRoot, "Entities", "SaveAs-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(directory);
+    var source = Path.Combine(directory, "Source.json");
+    var copy = Path.Combine(directory, "Copy.json");
+    var sourceId = Guid.NewGuid();
+    var original = new Newtonsoft.Json.Linq.JObject
+    {
+        ["AssetId"] = sourceId,
+        ["Class"] = typeof(CheckEntity).AssemblyQualifiedName,
+        ["Parameters"] = new Newtonsoft.Json.Linq.JObject { ["Number"] = 1 },
+        ["Extra"] = new Newtonsoft.Json.Linq.JObject { ["Note"] = "keep" }
+    }.ToString();
+    File.WriteAllText(source, original);
+    var doc = new EntityAssetDocument(directory);
+    doc.Open(source);
+    doc.Parameters.Single().Value = "42";
+    doc.SaveAs(copy);
+    var copyId = doc.AssetId;
+    Check(copyId.HasValue && copyId != sourceId && copyId != Guid.Empty);
+    Check(doc.FilePath == copy && !doc.IsDirty && File.ReadAllText(source) == original);
+    var output = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(copy));
+    Check(output["Parameters"]!["Number"]!.ToObject<int>() == 42 && output["Extra"]!["Note"]!.ToObject<string>() == "keep");
+    doc.Save();
+    Check(doc.AssetId == copyId);
+    Throws(() => doc.SaveAs(source));
+    Throws(() => doc.SaveAs(copy));
+    Check(doc.AssetId == copyId && doc.FilePath == copy && File.ReadAllText(source) == original);
+    doc.Class = "Missing.Type, Missing";
+    var failed = Path.Combine(directory, "Failed.json");
+    Throws(() => doc.SaveAs(failed));
+    Check(!File.Exists(failed) && doc.AssetId == copyId && doc.FilePath == copy && doc.IsDirty);
+    var fresh = new EntityAssetDocument(directory) { Class = typeof(CheckEntity).AssemblyQualifiedName! };
+    fresh.SaveAs(Path.Combine(directory, "Fresh.json"));
+    Check(fresh.AssetId.HasValue && fresh.AssetId != copyId && !fresh.IsDirty);
+});
 RunScene("Entity asset GUIDs survive moves in maps, prefabs, duplication and Undo while legacy paths remain supported", () =>
 {
     var name = "GuidReference-" + Guid.NewGuid().ToString("N");
@@ -5452,7 +5598,7 @@ if (args.Contains("--imgui"))
                 Frame(() =>
                 {
                     EntityAssetEditor.Draw();
-                    ImGuiNET.ImGui.Begin("Entity Asset");
+                    ImGuiNET.ImGui.Begin("Entity Asset Editor");
                     if (ImGuiNET.ImGui.BeginPopupModal("Unsaved entity asset"))
                     {
                         ImGuiNET.ImGui.CloseCurrentPopup();
@@ -5471,7 +5617,7 @@ if (args.Contains("--imgui"))
                 Frame(() =>
                 {
                     EntityAssetEditor.Draw();
-                    ImGuiNET.ImGui.Begin("Entity Asset");
+                    ImGuiNET.ImGui.Begin("Entity Asset Editor");
                     if (ImGuiNET.ImGui.BeginPopupModal("Asset References Report"))
                     {
                         ImGuiNET.ImGui.CloseCurrentPopup();
@@ -6040,4 +6186,25 @@ public sealed class LightmapCheckProgress(Action<ProjectShockGL.Rendering.Lightm
     : IProgress<ProjectShockGL.Rendering.LightmapBakeProgress>
 {
     public void Report(ProjectShockGL.Rendering.LightmapBakeProgress value) => action(value);
+}
+public class EditableWidgetBaseCheck : ProjectShockGL.UI.Text
+{
+    [Editable] public string Caption { get; set; } = "Default";
+    [Editable] public new string Content { get; set; } = "";
+}
+
+public sealed class EditableWidgetCheck : EditableWidgetBaseCheck
+{
+    [Editable] public float Amount { get; set; } = 1;
+    [Editable] public Color Tint { get; set; } = Color.White;
+    [Editable] public new string Name { get; set; } = "";
+    [Editable] public int Hidden { get; private set; }
+    [Editable] public static int Global { get; set; }
+    [Editable] public string this[int index] { get => ""; set { } }
+}
+public static class RegisteredActionCheck
+{
+    public static int Value;
+    [ProjectShockGL.UI.UIAction("Check/Registered action")]
+    public static void SetValue(int value) => Value = value;
 }

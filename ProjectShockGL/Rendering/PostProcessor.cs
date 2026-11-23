@@ -166,7 +166,7 @@ internal sealed class PostProcessor : IDisposable
         }
     }
 
-    public void End(float time)
+    public void End(float time, float unscaledTime)
     {
         if (!_capturing)
         {
@@ -217,6 +217,7 @@ internal sealed class PostProcessor : IDisposable
             
             _shader.Write("uTexture", 0);
             _shader.Write("uTime", time);
+            _shader.Write("uUnscaledTime", unscaledTime);
             _shader.Write("uScreenSize", new Vector2(_width, _height));
             _shader.Write("uTexelSize", new Vector2(1f / _width, 1f / _height));
             

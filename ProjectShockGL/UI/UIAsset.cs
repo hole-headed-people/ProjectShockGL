@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Reflection;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using ProjectShockGL.Rendering;
@@ -87,6 +88,7 @@ public sealed class WidgetData
     public bool IsEnabled { get; set; } = true;
     public bool HitTestVisible { get; set; } = true;
     public bool FillCanvas { get; set; }
+    public int SortOrder { get; set; }
     public JObject Properties { get; set; } = new();
     public string? Texture { get; set; }
     public TextureFormat TextureFormat { get; set; }
@@ -132,14 +134,48 @@ public sealed class WidgetData
             }
         }
     }
-    private static string[] PropertyNames(Widget widget) => widget switch
+    private static string[] PropertyNames(Type type) => type switch
     {
-        Image => ["Color", "DrawMode", "Border", "BorderScale", "FillCenter", "EdgeMode", "CenterMode"],
-        Text => ["Content", "Color", "WordWrap", "ClipToRect", "HorizontalAlignment", "VerticalAlignment"],
-        Button => ["NormalColor", "HoverColor", "PressedColor", "DisabledColor"],
-        TextScrollView => ["WheelStep"],
+        var t when typeof(Image).IsAssignableFrom(t) => ["Color", "DrawMode", "Border", "BorderScale", "FillCenter", "EdgeMode", "CenterMode"],
+        var t when typeof(Text).IsAssignableFrom(t) => ["Content", "Color", "WordWrap", "ClipToRect", "HorizontalAlignment", "VerticalAlignment"],
+        var t when typeof(Button).IsAssignableFrom(t) => ["NormalColor", "HoverColor", "PressedColor", "DisabledColor"],
+        var t when typeof(TextScrollView).IsAssignableFrom(t) => ["WheelStep"],
         _ => []
     };
+
+    public static IEnumerable<PropertyInfo> GetAdditionalEditableProperties(Type type)
+    {
+        var reserved = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Id", "Name", "Rect", "Visible", "IsEnabled", "HitTestVisible", "FillCanvas",
+            "Texture", "Region", "Font", "Text", "Body", "Canvas", "Parent", "Children",
+            "IsMouseOver", "IsDestroyed", "SortOrder"
+        };
+        reserved.UnionWith(PropertyNames(type));
+        return EditableProperties.Get(type).Where(property =>
+            property.GetMethod is { IsPublic: true, IsStatic: false } &&
+            property.SetMethod is { IsPublic: true, IsStatic: false } &&
+            property.GetIndexParameters().Length == 0 && !reserved.Contains(property.Name));
+    }
+
+    private static IEnumerable<string> SavedPropertyNames(Widget widget)
+    {
+        return PropertyNames(widget.GetType()).Concat(GetAdditionalEditableProperties(widget.GetType())
+            .Select(property => property.Name)).Distinct(StringComparer.Ordinal);
+    }
+    internal static JObject CaptureProperties(Widget widget)
+    {
+        var properties = new JObject();
+        var serializer = JsonSerializer.Create(JsonHelper.GetSettings());
+
+        foreach (var name in SavedPropertyNames(widget))
+        {
+            properties[name] = widget.GetType().GetProperty(name)!.GetValue(widget) is { } value
+                ? JToken.FromObject(value, serializer) : JValue.CreateNull();
+        }
+
+        return properties;
+    }
 
     internal static WidgetData Capture(Widget widget)
     {
@@ -150,7 +186,7 @@ public sealed class WidgetData
             Position = rect.Position, Size = rect.Size,
             Anchor = rect.Anchor, Pivot = rect.Pivot,
             Visible = widget.Visible, IsEnabled = widget.IsEnabled, HitTestVisible = widget.HitTestVisible,
-            FillCanvas = widget.FillCanvas
+            FillCanvas = widget.FillCanvas, SortOrder = widget.SortOrder
         };
 
         if (data.GetWidgetType() != widget.GetType())
@@ -158,12 +194,7 @@ public sealed class WidgetData
             throw new InvalidDataException($"UI capture supports standard widget types. Found {widget.GetType()}.");
         }
 
-        var serializer = JsonSerializer.Create(JsonHelper.GetSettings());
-
-        foreach (var name in PropertyNames(widget))
-        {
-            data.Properties[name] = JToken.FromObject(widget.GetType().GetProperty(name)!.GetValue(widget)!, serializer);
-        }
+        data.Properties = CaptureProperties(widget);
 
         if (widget is Image image)
         {
@@ -217,6 +248,25 @@ public sealed class WidgetData
         return data;
     }
 
+    internal static void ApplyProperties(Widget widget, JObject properties)
+    {
+        var serializer = JsonSerializer.Create(JsonHelper.GetSettings());
+        
+        foreach (var property in properties.Properties())
+        {
+            if (!SavedPropertyNames(widget).Contains(property.Name))
+            {
+                throw new InvalidDataException($"Unsupported {widget.GetType().Name} property '{property.Name}'.");
+            }
+            
+            var target = widget.GetType().GetProperty(property.Name)!;
+            target.SetValue(widget, property.Value.ToObject(target.PropertyType, serializer));
+        }
+        
+        // JSON property order must not let Content overwrite the resolved translation.
+        if (widget is Text text) text.RefreshLocalize();
+    }
+
     internal void Apply(Widget widget)
     {
         if (widget.GetType() != GetWidgetType())
@@ -231,24 +281,14 @@ public sealed class WidgetData
 
         widget.Id = Id;
         widget.Name = Name;
+        widget.SortOrder = SortOrder;
         widget.Rect.Position = Position;
         widget.Rect.Size = Size;
         widget.Rect.Anchor = Anchor;
         widget.Rect.Pivot = Pivot;
         
-        var serializer = JsonSerializer.Create(JsonHelper.GetSettings());
-        
-        foreach (var property in Properties.Properties())
-        {
-            if (!PropertyNames(widget).Contains(property.Name))
-            {
-                throw new InvalidDataException($"Unsupported {Type} property '{property.Name}'.");
-            }
-            
-            var target = widget.GetType().GetProperty(property.Name)!;
-            target.SetValue(widget, property.Value.ToObject(target.PropertyType, serializer));
-        }
-        
+        ApplyProperties(widget, Properties);
+
         if (widget is Image image)
         {
             image.Texture = Texture == null ? null : Content.LoadTexture(Texture, TextureFormat)

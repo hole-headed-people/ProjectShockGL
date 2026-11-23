@@ -54,20 +54,21 @@ public static class EntityAssetEditor
             Document.Open(path);
     }
 
-    private static bool Save()
+    private static bool Save(bool saveAs = false)
     {
         try
         {
             var path = Document.FilePath;
-            if (path == null)
+            if (saveAs || path == null)
             {
                 Directory.CreateDirectory(Document.DirectoryPath);
                 using var dialog = new NativeFileDialog().SaveFile().AddFilter("Entity JSON", "json");
-                if (dialog.Open(out path, Document.DirectoryPath, "Entity.json") != DialogResult.Okay || string.IsNullOrWhiteSpace(path))
+                if (dialog.Open(out path, Document.DirectoryPath, saveAs && Document.FilePath != null ? Path.GetFileNameWithoutExtension(Document.FilePath) + " Copy.json" : "Entity.json") != DialogResult.Okay || string.IsNullOrWhiteSpace(path))
                     return false;
                 if (!Path.HasExtension(path)) path += ".json";
             }
-            Document.Save(path);
+            if (saveAs) Document.SaveAs(path);
+            else Document.Save(path);
             _error = null;
             return true;
         }
@@ -79,7 +80,7 @@ public static class EntityAssetEditor
         if (!Open) return;
         ImGui.SetNextWindowSize(new Vector2(720, 500), ImGuiCond.FirstUseEver);
         var open = true;
-        var visible = ImGui.Begin("Entity Asset", ref open);
+        var visible = ImGui.Begin("Entity Asset Editor", ref open);
         if (!open) Request(() => Open = false);
         if (visible)
         {
@@ -88,6 +89,8 @@ public static class EntityAssetEditor
             if (ImGui.Button("Open")) Request(Load);
             ImGui.SameLine();
             if (ImGui.Button("Save")) Save();
+            ImGui.SameLine();
+            if (ImGui.Button("Save As")) Save(saveAs: true);
             ImGui.SameLine();
             if (ImGui.Button("Fix Asset References")) Request(FixReferences);
             ImGui.SameLine();

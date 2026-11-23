@@ -11,12 +11,16 @@ public sealed class FontAtlas
 {
     private readonly Dictionary<int, FontGlyph> _glyphs;
     private readonly Dictionary<(int, int), float> _kerning;
+    
     private readonly byte[] _pixels;
+    
     public int PixelHeight { get; }
     public int Width { get; }
     public int Height { get; }
+    
     public float Ascent { get; }
     public float LineHeight { get; }
+    
     public ReadOnlyMemory<byte> Pixels => _pixels;
     public IReadOnlyDictionary<int, FontGlyph> Glyphs { get; }
 
@@ -24,13 +28,18 @@ public sealed class FontAtlas
         Dictionary<int, FontGlyph> glyphs, Dictionary<(int, int), float> kerning)
     {
         PixelHeight = size;
+        
         Width = width;
         Height = height;
+        
         Ascent = ascent;
         LineHeight = lineHeight;
+        
         _pixels = pixels;
         _glyphs = glyphs;
+        
         Glyphs = new System.Collections.ObjectModel.ReadOnlyDictionary<int, FontGlyph>(glyphs);
+        
         _kerning = kerning;
     }
     

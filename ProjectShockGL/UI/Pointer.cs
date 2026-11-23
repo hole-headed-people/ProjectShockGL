@@ -257,9 +257,10 @@ public sealed class Pointer
 
     private Widget? HitTestChildren(IReadOnlyList<Widget> children)
     {
-        for (var i = children.Count - 1; i >= 0; i--)
+        var ordered = Widget.DrawOrder(children);
+        for (var i = ordered.Length - 1; i >= 0; i--)
         {
-            var widget = children[i];
+            var widget = ordered[i];
 
             if (widget.IsDestroyed || !widget.Visible || !widget.IsEnabled)
             {

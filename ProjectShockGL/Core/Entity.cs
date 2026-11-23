@@ -1,4 +1,4 @@
-using ProjectShockGL.UI;
+using ProjectShockGL.Rendering;
 
 namespace ProjectShockGL.Core;
 
@@ -6,14 +6,16 @@ public class Entity : Object
 {
     private Guid? _assetId;
     
-    private BillboardComponent? _debugBillboardComponent;
     private string? _debugBillboardName;
+    
+    private BillboardComponent? _debugBillboardComponent;
     private MeshComponent? _debugMeshComponent;
     
     private bool _belowKillY;
     
     protected sealed override bool CanBeStatic => false;
     protected sealed override bool AlwaysStatic => false;
+    
     protected override bool IsSaveableByDefault => true;
     
     public string Path { get; private set; } = "";
@@ -72,6 +74,8 @@ public class Entity : Object
         if (arguments.TryGetValue("DebugBillboard", out var debugBillboard))
         {
             _debugBillboardComponent ??= AddComponent<BillboardComponent>();
+
+            _debugBillboardComponent.SurfaceMode = SurfaceMode.Cutout;
             
             _debugBillboardComponent.IsDebug = true;
             _debugBillboardComponent.IgnoreDepth = true;
@@ -82,6 +86,7 @@ public class Entity : Object
             _debugBillboardComponent.RenderOrder = 1000;
             
             _debugBillboardName = (string)debugBillboard;
+            
             RefreshDebugBillboard();
         }
 

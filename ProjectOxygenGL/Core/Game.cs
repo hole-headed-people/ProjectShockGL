@@ -2,6 +2,7 @@ using System.Numerics;
 using ProjectOxygenGL.Placeables;
 using ProjectShockGL;
 using ProjectShockGL.Core;
+using ProjectShockGL.UI;
 
 namespace ProjectOxygenGL.Core;
 
@@ -9,9 +10,16 @@ public class Game : ProjectShockGL.Core.Game
 {
     public event Action? BeginPlay;
     public event Action? EndPlay;
+
+    public event Action<bool>? PausedChanged;
+
+    private bool _isPaused;
+
+    private InputMode _playerBeforePausedInputMode;
     
     private Player? _player;
     private Character? _playerCharacter;
+    
     private GameState? _loadingState;
     
     protected override void Load()
@@ -20,6 +28,7 @@ public class Game : ProjectShockGL.Core.Game
         
         LevelManager.Loaded += OnLevelLoaded;
         LevelManager.Unloading += OnLevelUnloading;
+        
         SaveManager.Saving += OnSaving;
         SaveManager.Loaded += OnSaveLoaded;
         
@@ -31,6 +40,7 @@ public class Game : ProjectShockGL.Core.Game
         {
             LevelManager.Loaded -= OnLevelLoaded;
             LevelManager.Unloading -= OnLevelUnloading;
+            
             SaveManager.Saving -= OnSaving;
             SaveManager.Loaded -= OnSaveLoaded;
             
@@ -224,6 +234,42 @@ public class Game : ProjectShockGL.Core.Game
         }
     }
 
+    public void SetPaused(bool isPaused)
+    {
+        _isPaused = isPaused;
+
+        if (_player != null)
+        {
+            if (isPaused)
+            {
+                _playerBeforePausedInputMode = _player.GetInputMode();
+            }
+        
+            _player?.SetInputMode(isPaused ? InputMode.UI : _playerBeforePausedInputMode);
+        }
+        
+        Time.TimeScale = isPaused ? 0f : 1f;
+        PausedChanged?.Invoke(isPaused);
+    }
+
+    [UIAction("Game/SetPaused")]
+    public static void SetPaused()
+    {
+        if (Instance is Game game)
+        {
+            game.SetPaused(true);
+        }
+    }
+    
+    [UIAction("Game/UnPause")]
+    public static void UnPause()
+    {
+        if (Instance is Game game)
+        {
+            game.SetPaused(false);
+        }
+    }
+
     public Player? GetPlayer()
     {
         return _player;
@@ -232,5 +278,10 @@ public class Game : ProjectShockGL.Core.Game
     public Character? GetPlayerCharacter()
     {
         return _playerCharacter;
+    }
+
+    public bool IsPaused()
+    {
+        return _isPaused;
     }
 }

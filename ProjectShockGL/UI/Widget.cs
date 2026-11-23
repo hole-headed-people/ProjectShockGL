@@ -37,6 +37,7 @@ public class Widget
 
     public Guid Id { get; internal set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
     public T? Find<T>(string name) where T : Widget => WidgetSearch.Find<T>(Children, name);
 
     public Widget? Parent { get; private set; }
@@ -143,6 +144,35 @@ public class Widget
         return widget;
     }
     
+    internal static Widget[] DrawOrder(IEnumerable<Widget> children)
+    {
+        return children.OrderBy(widget => widget.SortOrder).ToArray();
+    }
+
+    public void SetAsFirstSibling()
+    {
+        SetSiblingIndex(0);
+    }
+
+    public void SetAsLastSibling()
+    {
+        SetSiblingIndex(int.MaxValue);
+    }
+
+    public void SetSiblingIndex(int index)
+    {
+        ObjectDisposedException.ThrowIf(IsDestroyed, this);
+        ObjectDisposedException.ThrowIf(Canvas.IsDestroyed, Canvas);
+        if (Parent == null)
+        {
+            Canvas.SetSiblingIndex(this, index);
+            return;
+        }
+
+        var siblings = Parent._children;
+        siblings.Remove(this);
+        siblings.Insert(Math.Clamp(index, 0, siblings.Count), this);
+    }
     public void SetParent(Widget? parent)
     {
         ObjectDisposedException.ThrowIf(IsDestroyed || Canvas.IsDestroyed, this);
@@ -230,7 +260,7 @@ public class Widget
 
         try
         {
-            foreach (var child in _children.ToArray())
+            foreach (var child in DrawOrder(_children))
             {
                 if (IsDestroyed || !Visible)
                 {

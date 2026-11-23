@@ -1,4 +1,6 @@
 using System.Numerics;
+using ProjectShockGL.Core;
+using ProjectShockGL.Localization;
 using ProjectShockGL.Rendering;
 
 namespace ProjectShockGL.UI;
@@ -17,47 +19,85 @@ public class Text : Widget
     private TextLayout? _layout;
     
     public string Content { get; set; } = string.Empty;
+    
     public Font? Font { get; set; }
     public Color Color { get; set; } = Color.White;
+    
     public bool WordWrap { get; set; } = true;
     public bool ClipToRect { get; set; } = true;
+    
     public HorizontalAlignment HorizontalAlignment { get; set; } = HorizontalAlignment.Left;
     public VerticalAlignment VerticalAlignment { get; set; } = VerticalAlignment.Top;
 
-    [UIAction("Text/Set text")]
-    public void SetText(string text) => Content = text;
+    private bool _localize;
+    private string _key = "";
+    private string _table = "";
+    private bool _created;
+    private bool _localizationSubscribed;
 
+    [Editable]
+    public bool Localize
+    {
+        get => _localize;
+        set
+        {
+            if (_localize == value) return;
+            _localize = value;
+            UpdateLocalization();
+        }
+    }
+
+    [Editable]
+    public string Key
+    {
+        get => _key;
+        set
+        {
+            value ??= "";
+            
+            if (_key == value)
+            {
+                return;
+            }
+            
+            _key = value;
+            
+            UpdateLocalization();
+        }
+    }
+
+    [Editable]
+    public string Table
+    {
+        get => _table;
+        set
+        {
+            value ??= "";
+
+            if (_table == value)
+            {
+                return;
+            }
+            
+            _table = value;
+            
+            UpdateLocalization();
+        }
+    }
     public Text()
     {
         HitTestVisible = false;
     }
+
+    protected override void OnCreate()
+    {
+        base.OnCreate();
+
+        _created = true;
+        
+        UpdateLocalization();
+    }
     
-    public Vector2 MeasureText()
-    {
-        return GetLayout()?.Size ?? Vector2.Zero;
-    }
-
-    private TextLayout? GetLayout()
-    {
-        if (Font == null || Font.IsDisposed)
-        {
-            return null;
-        }
-        
-        var width = WordWrap ? Rect.Size.X : float.PositiveInfinity;
-        var content = Content;
-        
-        if (_layout == null || _layoutFont != Font || _layoutContent != content || _layoutWidth != width)
-        {
-            _layout = Font.Atlas.LayoutText(content, width);
-            _layoutFont = Font;
-            _layoutContent = content;
-            _layoutWidth = width;
-        }
-        
-        return _layout;
-    }
-
     protected override void OnDraw(Graphics graphics)
     {
         base.OnDraw(graphics);
@@ -99,7 +139,74 @@ public class Text : Widget
         _layoutFont = null;
         
         Font = null;
+
+        LocalizationManager.LanguageChanged -= RefreshLocalize;
         
+        _localizationSubscribed = false;
+        _created = false;
+
         base.OnDestroy();
+    }
+    
+    private void UpdateLocalization()
+    {
+        var subscribe = _created && !IsDestroyed && Localize && !Application.IsEditor;
+        
+        if (subscribe != _localizationSubscribed)
+        {
+            if (subscribe)
+            {
+                LocalizationManager.LanguageChanged += RefreshLocalize;
+            }
+            else
+            {
+                LocalizationManager.LanguageChanged -= RefreshLocalize;
+            }
+            
+            _localizationSubscribed = subscribe;
+        }
+        
+        RefreshLocalize();
+    }
+
+    internal void RefreshLocalize()
+    {
+        if (_created && !IsDestroyed && !Application.IsEditor && Localize &&
+            !string.IsNullOrWhiteSpace(Table) && !string.IsNullOrWhiteSpace(Key))
+        {
+            Content = LocalizationManager.GetString(Key, Table);
+        }
+    }
+    
+    private TextLayout? GetLayout()
+    {
+        if (Font == null || Font.IsDisposed)
+        {
+            return null;
+        }
+        
+        var width = WordWrap ? Rect.Size.X : float.PositiveInfinity;
+        var content = Content;
+        
+        if (_layout == null || _layoutFont != Font || _layoutContent != content || _layoutWidth != width)
+        {
+            _layout = Font.Atlas.LayoutText(content, width);
+            _layoutFont = Font;
+            _layoutContent = content;
+            _layoutWidth = width;
+        }
+        
+        return _layout;
+    }
+    
+    public Vector2 MeasureText()
+    {
+        return GetLayout()?.Size ?? Vector2.Zero;
+    }
+    
+    [UIAction("Text/Set text")]
+    public void SetText(string text)
+    {
+        Content = text;
     }
 }

@@ -8,6 +8,79 @@ using Silk.NET.Maths;
 using Silk.NET.OpenGL;
 using Silk.NET.Windowing;
 
+Run("Widget SortOrder and sibling changes agree for drawing and pointer selection at root and nested levels", () =>
+{
+    var canvas = new Canvas();
+    canvas.Resize(new Vector2(200));
+    var draws = new List<string>();
+    var first = canvas.Add<Probe>();
+    first.DrawAction = () => draws.Add("first");
+    first.SortOrder = 100;
+    var second = canvas.Add<Probe>();
+    second.DrawAction = () => draws.Add("second");
+    var pointer = new Pointer(canvas);
+    void Verify(string expectedOrder, Widget expectedTop)
+    {
+        draws.Clear();
+        canvas.Draw(null!);
+        Check(string.Join(",", draws) == expectedOrder);
+        pointer.Update(new Vector2(10), canvas.Size, Array.Empty<MouseButton>());
+        Check(pointer.HoveredWidget == expectedTop);
+    }
+    try
+    {
+        Verify("second,first", first);
+        first.SetAsFirstSibling();
+        Verify("second,first", first);
+        first.SortOrder = 0;
+        Verify("first,second", second);
+        first.SetAsLastSibling();
+        Verify("second,first", first);
+        first.SetSiblingIndex(-5);
+        Verify("first,second", second);
+        first.SetSiblingIndex(500);
+        Verify("second,first", first);
+        first.SetSiblingIndex(0);
+        var nestedA = second.Add<Probe>();
+        nestedA.DrawAction = () => draws.Add("A");
+        var nestedB = second.Add<Probe>();
+        nestedB.DrawAction = () => draws.Add("B");
+        nestedA.SortOrder = 2;
+        Verify("first,second,B,A", nestedA);
+        nestedA.SortOrder = 0;
+        nestedB.SetAsFirstSibling();
+        Verify("first,second,B,A", nestedA);
+        nestedB.SetAsLastSibling();
+        Verify("first,second,A,B", nestedB);
+        nestedB.SetSiblingIndex(0);
+        Verify("first,second,B,A", nestedA);
+        nestedB.Destroy();
+        Throws<ObjectDisposedException>(() => nestedB.SetAsLastSibling());
+    }
+    finally { pointer.Reset(); canvas.Destroy(); }
+});
+
+Run("UI JSON preserves SortOrder and authored sibling order with zero defaults for old screens", () =>
+{
+    var canvas = new Canvas();
+    canvas.Resize(new Vector2(200));
+    try
+    {
+        var root = canvas.Add<Widget>();
+        root.SortOrder = -7;
+        var a = root.Add<Widget>(); a.Name = "A"; a.SortOrder = 100;
+        var b = root.Add<Widget>(); b.Name = "B"; b.SortOrder = -1;
+        b.SetAsFirstSibling();
+        var asset = UIAsset.Capture(root);
+        var json = Newtonsoft.Json.JsonConvert.SerializeObject(asset);
+        var restored = Newtonsoft.Json.JsonConvert.DeserializeObject<UIAsset>(json)!.Instantiate(canvas);
+        Check(restored.SortOrder == -7 && restored.Children[0].Name == "B");
+        Check(restored.Children[0].SortOrder == -1 && restored.Children[1].SortOrder == 100);
+        var old = Newtonsoft.Json.JsonConvert.DeserializeObject<UIAsset>("{\"Root\":{\"Type\":\"Widget\"}}")!;
+        Check(old.Instantiate(canvas).SortOrder == 0);
+    }
+    finally { canvas.Destroy(); }
+});
 Run("Click Actions keep screen-local widget targets across JSON, rename and multiple instances", () =>
 {
     UIActionFixtures.Reset();

@@ -6,21 +6,25 @@ namespace ProjectShockGL.Core;
 
 public class Game
 {
+    private static bool _isInitialized;
+    
     private RenderQueue _renderQueue = null!;
     private TimerManager _timerManager = null!;
     
     public World World { get; private set; } = null!;
     public UIManager UIManager { get; private set; } = null!;
-    
-    private static bool _isInitialized;
     public static Game Instance { get; private set; } = null!;
     
     public static void Initialize()
     {
-        try { InitializeGame(); }
+        try
+        {
+            InitializeGame();
+        }
         catch (Exception error)
         {
             Log.PrintError("Cannot initialize the game.", error);
+            
             throw;
         }
     }

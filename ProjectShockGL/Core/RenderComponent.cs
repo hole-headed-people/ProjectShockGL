@@ -7,7 +7,8 @@ namespace ProjectShockGL.Core;
 
 public class RenderComponent : Component
 {
-    private SurfaceMode _surfaceMode = SurfaceMode.Cutout;
+    private SurfaceMode _surfaceMode = SurfaceMode.Opaque;
+    
     private float _alphaCutoff = 0.5f;
 
     public SurfaceMode SurfaceMode

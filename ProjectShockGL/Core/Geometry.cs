@@ -1,4 +1,3 @@
-using System.Numerics;
 using ProjectShockGL.Rendering;
 
 namespace ProjectShockGL.Core;

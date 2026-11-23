@@ -109,7 +109,7 @@ public class Canvas
         
         var visited = new HashSet<Widget>();
         
-        foreach (var child in _children.ToArray())
+        foreach (var child in Widget.DrawOrder(_children))
         {
             if (IsDestroyed || !Visible)
             {
@@ -144,6 +144,11 @@ public class Canvas
         OnDestroy();
     }
 
+    internal void SetSiblingIndex(Widget widget, int index)
+    {
+        _children.Remove(widget);
+        _children.Insert(Math.Clamp(index, 0, _children.Count), widget);
+    }
     internal void Attach(Widget widget)
     {
         _children.Add(widget);

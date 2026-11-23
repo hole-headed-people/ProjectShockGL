@@ -11,10 +11,10 @@ public enum InputMode
 
 public class Player : Controller
 {
-    protected override bool IsSaveableByDefault => false;
-
     private InputMode _inputMode;
     private bool _isInputEnabled;
+
+    protected override bool IsSaveableByDefault => false;
 
     public override void Update(float deltaSeconds)
     {
@@ -36,7 +36,7 @@ public class Player : Controller
         
         OnGameOrUIInput();
     }
-    
+
     protected virtual void OnGameInput(){}
     protected virtual void OnUIInput(){}
     protected virtual void OnGameOrUIInput(){}
@@ -57,5 +57,10 @@ public class Player : Controller
         _isInputEnabled = isEnabled;
         
         OnInputEnabledChanged(_isInputEnabled);
+    }
+
+    public InputMode GetInputMode()
+    {
+        return _inputMode;
     }
 }

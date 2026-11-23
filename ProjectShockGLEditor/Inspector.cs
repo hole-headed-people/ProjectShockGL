@@ -335,7 +335,12 @@ public static class Inspector
                             Changed(field, true);
                         }
                     }
-
+                    if (prop.GetCustomAttribute<ObjectNameAttribute>(inherit: true) != null &&
+                        ChooseOutputValue("##ObjectNameChoices", s, GetOutputTargetNames(entity.World), searchable: true) is { } choice)
+                    {
+                        prop.SetValue(entity, choice);
+                        Changed(field, true);
+                    }
                 }
                 else if (type == typeof(string[]))
                 {
@@ -604,10 +609,6 @@ public static class Inspector
         if (ImGui.Button("Delete"))
         {
             Editor.DeleteSelection();
-            ImGui.PopID();
-            ImGui.End();
-            
-            return;
         }
         
         ImGui.PopID();
@@ -868,13 +869,17 @@ public static class Inspector
             return;
         }
         var components = RenderSurfaceData.Components(obj).ToArray();
+        
         for (var index = 0; index < components.Length; index++)
         {
             var component = components[index];
+            
             ImGui.PushID("Surface/" + index);
             ImGui.TextUnformatted(component.GetType().Name);
+            
             DrawSurface("Surface/" + index, component.SurfaceMode, component.AlphaCutoff,
                 value => component.SurfaceMode = value, value => component.AlphaCutoff = value);
+            
             ImGui.PopID();
         }
     }
@@ -882,12 +887,14 @@ public static class Inspector
     private static void DrawSurface(string field, SurfaceMode mode, float cutoff, Action<SurfaceMode> setMode, Action<float> setCutoff)
     {
         var index = (int)mode;
+        
         if (ImGui.Combo("SurfaceMode", ref index, new[] { "Opaque", "Cutout", "Transparent" }, 3))
         {
             setMode((SurfaceMode)index);
             Changed(field + "/Mode", true);
             mode = (SurfaceMode)index;
         }
+        
         if (mode == SurfaceMode.Cutout)
         {
             if (ImGui.DragFloat("AlphaCutoff", ref cutoff, 0.01f, 0, 1))
@@ -895,6 +902,7 @@ public static class Inspector
                 setCutoff(Math.Clamp(cutoff, 0, 1));
                 Changed(field + "/AlphaCutoff");
             }
+            
             Finish(field + "/AlphaCutoff");
         }
     }

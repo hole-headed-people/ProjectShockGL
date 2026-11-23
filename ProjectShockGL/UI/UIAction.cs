@@ -96,12 +96,26 @@ public static class UIActionCatalog
 {
     private static readonly Dictionary<Type, UIActionMethod[]> WidgetMethods = [];
     private static UIActionMethod[]? _globals;
+    private static readonly HashSet<Assembly> RegisteredAssemblies = [];
 
     static UIActionCatalog()
     {
         AppDomain.CurrentDomain.AssemblyLoad += (_, _) => _globals = null;
     }
 
+    public static void RegisterAssembly(Assembly assembly)
+    {
+        ArgumentNullException.ThrowIfNull(assembly);
+        if (assembly.IsDynamic)
+        {
+            throw new ArgumentException("UI actions require a non-dynamic assembly.", nameof(assembly));
+        }
+
+        if (RegisteredAssemblies.Add(assembly))
+        {
+            _globals = null;
+        }
+    }
     private static bool Supported(MethodInfo method)
     {
         if (!method.IsPublic || method.IsAbstract || method.ContainsGenericParameters ||
@@ -143,7 +157,7 @@ public static class UIActionCatalog
         
         var methods = new List<UIActionMethod>();
         
-        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies().Where(assembly => !assembly.IsDynamic))
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies().Concat(RegisteredAssemblies).Distinct().Where(assembly => !assembly.IsDynamic))
         {
             Type[] types;
 

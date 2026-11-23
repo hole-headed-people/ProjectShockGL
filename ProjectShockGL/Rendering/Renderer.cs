@@ -68,16 +68,18 @@ public class Renderer : IDisposable
     private bool _frameFogEnabled;
     private bool _frameForceUnlit;
     
-    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+
     
     private Camera _frameCamera = null!;
     
     private float _frameTime;
+    private float _frameUnscaledTime;
     private bool _frameEnvironmentEnabled;
     
     private PostProcessor? _postProcessor;
     private GridRenderer? _gridRenderer;
     private SelectionBoundsRenderer? _selectionBounds;
+    
     private int _drawCalls;
     private long _triangles;
     private int _worldDrawCalls;
@@ -177,11 +179,16 @@ public class Renderer : IDisposable
     public void BeginFrame(Camera camera)
     {
         _drawCalls = _worldDrawCalls = _postProcessDrawCalls = _worldStart = 0;
+        
         _triangles = 0;
+        
         _worldWidth = _screenWidth;
         _worldHeight = _screenHeight;
+        
         _frameCamera = camera;
-        _frameTime = (float)_clock.Elapsed.TotalSeconds;
+        
+        _frameTime = (float)Time.ElapsedTime;
+        _frameUnscaledTime = (float)Time.UnscaledElapsedTime;
         
         var environmentEnabled = _preview?.EnvironmentEnabled ?? true;
         
@@ -191,7 +198,9 @@ public class Renderer : IDisposable
         _frameForceUnlit = _preview?.Unlit ?? false;
 
         _gl.Viewport(0, 0, (uint)_screenWidth, (uint)_screenHeight);
+        
         var clearColor = environmentEnabled && Environment.SkyColorEnabled ? Environment.SkyColor : camera.ClearColor;
+        
         _gl.ClearColor(clearColor.R, clearColor.G, clearColor.B, 1f);
         _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
@@ -337,7 +346,7 @@ public class Renderer : IDisposable
     public void EndWorld()
     {
         _worldDrawCalls = _drawCalls - _worldStart;
-        _postProcessor?.End(_frameTime);
+        _postProcessor?.End(_frameTime, _frameUnscaledTime);
         _postProcessDrawCalls = _postProcessor?.DrawCalls ?? 0;
         _drawCalls += _postProcessDrawCalls;
         _triangles += _postProcessDrawCalls;
@@ -751,6 +760,7 @@ public class Renderer : IDisposable
         shader.Write("uView", _frameView);
         shader.Write("uTexture", 0);
         shader.Write("uTime", _frameTime);
+        shader.Write("uUnscaledTime", _frameUnscaledTime);
         shader.Write("uUvRect", uvRect ?? new Vector4(0, 0, 1, 1));
         shader.Write("uSurfaceMode", (int)surfaceMode);
         shader.Write("uAlphaCutoff", surfaceMode == SurfaceMode.Cutout ? alphaCutoff : 0f);

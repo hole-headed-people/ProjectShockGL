@@ -53,6 +53,7 @@ namespace ProjectShockGL.Localization
             }
             
             _isInitialized = true;
+            _language = Settings.GetString("Localization", "Language", DefaultLanguage);
         }
         
         private static bool HasFormatPlaceholders(string text)
