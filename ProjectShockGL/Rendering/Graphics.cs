@@ -14,6 +14,7 @@ public class Graphics
     private Camera _camera = null!;
     private Renderer Renderer { get; }
     internal Vector3 CameraPosition => _camera.Transform.Position;
+    internal Matrix4x4 BillboardModel(Vector3 position, Vector2 size) => CreateBillboardModel(_camera, position, size, BillboardMode.ViewAligned);
     public RenderStatistics Statistics => Renderer.Statistics;
     
     public Graphics(Renderer renderer)
@@ -176,13 +177,13 @@ public class Graphics
         Renderer.DrawQuadMesh(texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters, surfaceMode: surfaceMode, alphaCutoff: alphaCutoff, dynamicAmbient: dynamicAmbient);
     }
 
-    public void DrawMesh(Mesh mesh, Vector3 position, Quaternion rotation, Vector3 scale, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, bool backfaceCulling = true, SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f, Texture? lightmap = null, Vector4? lightmapRect = null, bool dynamicAmbient = false)
+    public void DrawMesh(Mesh mesh, Vector3 position, Quaternion rotation, Vector3 scale, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, bool backfaceCulling = true, SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f, Texture? lightmap = null, Vector4? lightmapRect = null, bool dynamicAmbient = false, ParticleBlendMode particleBlendMode = ParticleBlendMode.Alpha)
     {
         var model = Matrix4x4.CreateScale(scale)
                   * Matrix4x4.CreateFromQuaternion(rotation)
                   * Matrix4x4.CreateTranslation(position);
 
-        Renderer.DrawMesh(mesh, texture, model, color, lit, ignoreDepth, shader, shaderParameters, backfaceCulling, surfaceMode, alphaCutoff, lightmap, lightmapRect, dynamicAmbient);
+        Renderer.DrawMesh(mesh, texture, model, color, lit, ignoreDepth, shader, shaderParameters, backfaceCulling, surfaceMode, alphaCutoff, lightmap, lightmapRect, dynamicAmbient, particleBlendMode);
     }
 
     public void DrawBillboard(Vector3 position, Vector2 size, Texture texture, Color color, bool lit = false, bool ignoreDepth = false, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, BillboardMode mode = BillboardMode.ViewAligned, SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f, bool dynamicAmbient = false)

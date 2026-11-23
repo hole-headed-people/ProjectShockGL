@@ -667,6 +667,307 @@ void Render()
         }
         finally {dynamicWorld.Clear();ProjectShockGL.Environment.Apply(dynamicEnvironment);}
     }
+    {
+        var particleEnvironment = ProjectShockGL.Environment.Capture();
+        var particleWorld = new World();
+        var emitter = particleWorld.Spawn<ProjectShockGL.Core.Object>();
+        emitter.Transform.Position = new Vector3(0, 0, -3);
+        var particles = emitter.AddComponent<ProjectShockGL.Core.ParticleSystemComponent>();
+        var particleAssetName = "Checks/GpuParticles-" + Guid.NewGuid().ToString("N");
+        Content.SaveParticle(particleAssetName, new ProjectShockGL.Core.ParticleAsset
+        {
+            Texture = "WhitePixel", Shape = ProjectShockGL.Core.ParticleShape.Box,
+            BoxSize = Vector3.Zero, Velocity = Vector3.Zero, Size = 1, Rate = 10
+        });
+        particles.Apply(Content.LoadParticle(particleAssetName)!);
+        var capturedParticleAsset = ProjectShockGL.Core.ParticleAsset.Capture(particles);
+        Check(capturedParticleAsset.Texture == "WhitePixel" && capturedParticleAsset.Shape == ProjectShockGL.Core.ParticleShape.Box);
+        var previousParticleTexture = particles.Texture;
+        try
+        {
+            particles.Apply(new ProjectShockGL.Core.ParticleAsset { Texture = "Checks/MissingParticleTexture", Rate = 123 });
+            throw new Exception("Missing particle texture was accepted.");
+        }
+        catch (FileNotFoundException) { }
+        Check(particles.Rate == 10 && particles.Texture == previousParticleTexture);
+        particleWorld.Update(1);
+        var particleCamera = Camera.Create();
+        var queue = new RenderQueue();
+        try
+        {
+            ProjectShockGL.Environment.Apply(new ProjectShockGL.Core.EnvironmentData { AmbientColor = Color.Black, IsFogEnabled = false });
+            byte[] ParticlePixel(bool occluder = false)
+            {
+                graphics.BeginDraw(particleCamera);
+                if (occluder) graphics.DrawQuad(new Vector3(0,0,-2), Quaternion.Identity, new Vector2(3), Content.GetWhitePixel(), Color.Red, surfaceMode: SurfaceMode.Opaque);
+                particleWorld.Render(queue);
+                queue.Flush(graphics);
+                gl.Finish();
+                var pixel = new byte[4];
+                unsafe { fixed (byte* ptr = pixel) gl.ReadPixels(320, 120, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, ptr); }
+                graphics.EndDraw();
+                return pixel;
+            }
+            var plain = ParticlePixel();
+            Check(plain[0] > 240 && plain[1] > 240 && graphics.Statistics.DrawCalls == 1);
+            Check(particles.ParticleCount == 10);
+            var covered = ParticlePixel(occluder: true);
+            Check(covered[0] > 240 && covered[1] < 10);
+            ProjectShockGL.Environment.Apply(new ProjectShockGL.Core.EnvironmentData { IsFogEnabled = true, FogNear = 0, FogFar = 1, FogColor = Color.Blue });
+            var fogged = ParticlePixel();
+            Check(fogged[0] < 10 && fogged[2] > 240);
+            ProjectShockGL.Environment.IsFogEnabled = false;
+            particleCamera.Transform.Position = new Vector3(3, 0, -3);
+            particleCamera.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI / 2);
+            var sideways = ParticlePixel();
+            Check(sideways[0] > 240 && sideways[1] > 240);
+            var particleMesh = (Mesh)typeof(ProjectShockGL.Core.ParticleSystemComponent).GetField("_mesh", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(particles)!;
+            particles.Clear();
+            ParticlePixel();
+            Check(graphics.Statistics.DrawCalls == 0);
+            particleWorld.Clear();
+            Check(particleMesh.IsDisposed && particles.IsDestroyed);
+            Check(gl.GetError() == GLEnum.NoError);
+            Console.WriteLine("PASS: Particle billboards batch into one Unlit draw, receive fog, respect scene depth, face each camera and release GPU meshes");
+        }
+        finally
+        {
+            particleWorld.Clear();
+            particleCamera.Dispose();
+            File.Delete(Path.Combine(Content.Path, "Particles", particleAssetName + ".json"));
+            ProjectShockGL.Environment.Apply(particleEnvironment);
+        }
+    }
+    {
+        var appearanceEnvironment=ProjectShockGL.Environment.Capture();
+        var appearanceWorld=new World();
+        using var appearanceCamera=Camera.Create();
+        appearanceCamera.Orthographic=true;
+        appearanceCamera.OrthoSize=4;
+        var appearanceOwner=appearanceWorld.Spawn<ProjectShockGL.Core.Object>();
+        var appearanceParticles=appearanceOwner.AddComponent<ProjectShockGL.Core.ParticleSystemComponent>();
+        appearanceParticles.Texture=Content.GetWhitePixel();
+        appearanceParticles.Rate=2;
+        appearanceParticles.Velocity=Vector3.Zero;
+        appearanceParticles.StartSize=new ProjectShockGL.Core.ParticleRange(.5f,.5f);
+        appearanceParticles.StartLifetime=new ProjectShockGL.Core.ParticleRange(4,4);
+        appearanceParticles.StartRotation=new ProjectShockGL.Core.ParticleRange(0,0);
+        appearanceParticles.RotationSpeed=new ProjectShockGL.Core.ParticleRange(90,90);
+        appearanceParticles.SizeOverLifetime=true;
+        appearanceParticles.SizeCurve=[new(0,1),new(1,2)];
+        appearanceParticles.ColorOverLifetime=true;
+        appearanceParticles.ColorGradient=[new(0,Color.Red),new(1,Color.Blue)];
+        appearanceWorld.Update(1);
+        appearanceParticles.Stop();
+        var instanceFlags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+        var particleList=(System.Collections.IList)typeof(ProjectShockGL.Core.ParticleSystemComponent).GetField("_particles",instanceFlags)!.GetValue(appearanceParticles)!;
+        for(var index=0;index<2;index++)
+        {
+            var particle=particleList[index]!;
+            particle.GetType().GetField("Age")!.SetValue(particle,index==0?1f:3f);
+            particle.GetType().GetField("Position")!.SetValue(particle,new Vector3(index==0?-1:1,0,-3));
+            particleList[index]=particle;
+        }
+        try
+        {
+            ProjectShockGL.Environment.Apply(new ProjectShockGL.Core.EnvironmentData {IsFogEnabled=false});
+            graphics.BeginDraw(appearanceCamera);
+            var appearanceQueue=new RenderQueue();
+            appearanceWorld.Render(appearanceQueue);
+            appearanceQueue.Flush(graphics);
+            gl.Finish();
+            byte[] Pixel(int x)
+            {
+                var pixel=new byte[4];
+                unsafe {fixed(byte* data=pixel)gl.ReadPixels(x,120,1,1,PixelFormat.Rgba,PixelType.UnsignedByte,data);}
+                return pixel;
+            }
+            var red=Pixel(260);var blue=Pixel(380);
+            Check(Math.Abs(red[0]-191)<4 && Math.Abs(red[2]-64)<4);
+            Check(Math.Abs(blue[0]-64)<4 && Math.Abs(blue[2]-191)<4);
+            Check(graphics.Statistics.DrawCalls==1);
+            var vertices=(float[])typeof(ProjectShockGL.Core.ParticleSystemComponent).GetField("_vertices",instanceFlags)!.GetValue(appearanceParticles)!;
+            // Age=1: size=.5*1.25=.625, rotation=90 degrees.
+            Check(Math.Abs(vertices[0]-(-1+.3125f))<.001f && Math.Abs(vertices[1]+.3125f)<.001f);
+            graphics.EndDraw();
+            Check(gl.GetError()==GLEnum.NoError);
+            Console.WriteLine("PASS: Individual particle gradients reach distinct pixels in one draw and lifetime size/rotation transform billboard corners correctly");
+        }
+        finally
+        {
+            appearanceWorld.Clear();
+            ProjectShockGL.Environment.Apply(appearanceEnvironment);
+        }
+    }
+    {
+        var blendEnvironment=ProjectShockGL.Environment.Capture();
+        var blendWorld=new World();
+        using var blendCamera=Camera.Create();
+        blendCamera.ClearColor=new Color(.4f,.5f,.6f,1);
+        var blendOwner=blendWorld.Spawn<ProjectShockGL.Core.Object>();
+        blendOwner.Transform.Position=new Vector3(0,0,-3);
+        var blendParticles=blendOwner.AddComponent<ProjectShockGL.Core.ParticleSystemComponent>();
+        blendParticles.Texture=Content.GetWhitePixel();
+        blendParticles.Velocity=Vector3.Zero;
+        blendParticles.Rate=1;
+        blendParticles.Size=1;
+        byte[] BlendPixel(ParticleBlendMode mode,Color color,bool fog=false)
+        {
+            blendParticles.Clear();blendParticles.Play();blendParticles.Color=color;blendParticles.BlendMode=mode;
+            blendWorld.Update(1);
+            ProjectShockGL.Environment.Apply(new ProjectShockGL.Core.EnvironmentData{IsFogEnabled=fog,FogNear=0,FogFar=1,FogColor=Color.Red});
+            gl.DepthMask(true);
+            graphics.BeginDraw(blendCamera);
+            gl.Enable(EnableCap.Blend);
+            gl.BlendFuncSeparate(BlendingFactor.One,BlendingFactor.Zero,BlendingFactor.One,BlendingFactor.Zero);
+            gl.DepthMask(false);
+            var queue=new RenderQueue();blendWorld.Render(queue);queue.Flush(graphics);
+            Check(gl.IsEnabled(EnableCap.Blend) && !gl.GetBoolean(GetPName.DepthWritemask));
+            Check(gl.GetInteger(GetPName.BlendSrcRgb)==(int)BlendingFactor.One && gl.GetInteger(GetPName.BlendDstRgb)==(int)BlendingFactor.Zero);
+            Check(graphics.Statistics.DrawCalls==1);
+            var pixel=new byte[4];
+            unsafe{fixed(byte* data=pixel)gl.ReadPixels(320,120,1,1,PixelFormat.Rgba,PixelType.UnsignedByte,data);}
+            graphics.EndDraw();gl.DepthMask(true);
+            return pixel;
+        }
+        void Matches(byte[] pixel,Vector3 expected)
+        {
+            Check(Math.Abs(pixel[0]-expected.X*255)<4 && Math.Abs(pixel[1]-expected.Y*255)<4 && Math.Abs(pixel[2]-expected.Z*255)<4);
+        }
+        try
+        {
+            var color=new Color(.2f,.4f,.6f,.5f);
+            Matches(BlendPixel(ParticleBlendMode.Alpha,color),new Vector3(.3f,.45f,.6f));
+            Matches(BlendPixel(ParticleBlendMode.Additive,color),new Vector3(.5f,.7f,.9f));
+            Matches(BlendPixel(ParticleBlendMode.Multiply,color),new Vector3(.24f,.35f,.48f));
+            Matches(BlendPixel(ParticleBlendMode.Additive,Color.Black),new Vector3(.4f,.5f,.6f));
+            Matches(BlendPixel(ParticleBlendMode.Multiply,Color.White),new Vector3(.4f,.5f,.6f));
+            Matches(BlendPixel(ParticleBlendMode.Multiply,new Color(0,0,0,0)),new Vector3(.4f,.5f,.6f));
+            Matches(BlendPixel(ParticleBlendMode.Multiply,Color.Black),Vector3.Zero);
+            Matches(BlendPixel(ParticleBlendMode.Additive,Color.White,true),new Vector3(.4f,.5f,.6f));
+            Matches(BlendPixel(ParticleBlendMode.Multiply,Color.Black,true),new Vector3(.4f,.5f,.6f));
+            // Returning to Alpha must not retain Multiply's shader parameter or GL blend factors.
+            Matches(BlendPixel(ParticleBlendMode.Alpha,color),new Vector3(.3f,.45f,.6f));
+            Check(gl.GetError()==GLEnum.NoError);
+            Console.WriteLine("PASS: Particle Alpha/Additive/Multiply match pixel formulas, respect opacity, fade neutrally in fog and restore GL blending/depth state");
+        }
+        finally {blendWorld.Clear();gl.DepthMask(true);ProjectShockGL.Environment.Apply(blendEnvironment);}
+    }
+    {
+        var particleContext = ImGuiNET.ImGui.CreateContext();
+        var flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+        var type = typeof(ProjectShockGLEditor.ParticleEditor);
+        var savedParticleEnvironment = ProjectShockGL.Environment.Capture();
+        var activeBefore = Camera.Active;
+        var gameTimeScale = Time.TimeScale;
+        try
+        {
+            Time.TimeScale = 0;
+            var io = ImGuiNET.ImGui.GetIO();
+            unsafe { io.NativePtr->IniFilename = null; io.NativePtr->LogFilename = null; }
+            io.DisplaySize = new Vector2(1280,800);
+            io.DeltaTime = .1f;
+            unsafe { io.Fonts.GetTexDataAsRGBA32(out byte* pixels,out int width,out int height); }
+            ProjectShockGLEditor.ParticleEditor.Open = true;
+            var particleFrames=0;
+            void Frame()
+            {
+                ImGuiNET.ImGui.NewFrame();
+                ProjectShockGLEditor.ParticleEditor.Draw();
+                ImGuiNET.ImGui.Render();
+                if (++particleFrames > 1) Check(ImGuiNET.ImGui.GetDrawData().TotalVtxCount>0);
+            }
+            Frame(); Frame();
+            var document=(ProjectShockGLEditor.ParticleAssetDocument)type.GetField("_document",flags)!.GetValue(null)!;
+            var particles=(ProjectShockGL.Core.ParticleSystemComponent)type.GetField("_particles",flags)!.GetValue(null)!;
+            var target=(RenderTexture)type.GetField("_target",flags)!.GetValue(null)!;
+            Check(particles.ParticleCount>0 && gl.IsTexture(target.Texture.Handle));
+            Check(ReferenceEquals(activeBefore,Camera.Active));
+            Check(ProjectShockGL.Environment.Capture().FogColor.Equals(savedParticleEnvironment.FogColor));
+            type.GetMethod("PausePreview",flags)!.Invoke(null,null);
+            var count=particles.ParticleCount;
+            Frame(); Frame();
+            Check(particles.ParticleCount==count);
+            type.GetMethod("RestartPreview",flags)!.Invoke(null,null);
+            Check(particles.ParticleCount==0);
+            Frame(); Frame();
+            Check(particles.ParticleCount>0);
+            document.Set("StartSize", new ProjectShockGL.Core.ParticleRange(.5f,1));
+            document.Set("StartLifetime", new ProjectShockGL.Core.ParticleRange(2,4));
+            document.Set("SizeOverLifetime",true);
+            document.Set("ColorOverLifetime",true);
+            Frame();
+            var editorCamera=(Camera)type.GetField("_camera",flags)!.GetValue(null)!;
+            type.GetField("_yaw",flags)!.SetValue(null,0f);
+            type.GetField("_pitch",flags)!.SetValue(null,0f);
+            Frame();
+            Check(Math.Abs(editorCamera.AspectRatio-(float)target.Width/target.Height)<.00001f);
+            Vector2 ProjectUnit(Vector3 point)
+            {
+                var clip=Vector4.Transform(new Vector4(point,1),editorCamera.GetViewMatrix()*editorCamera.GetProjectionMatrix());
+                return new Vector2((clip.X/clip.W+1)*.5f*target.Width,(1-clip.Y/clip.W)*.5f*target.Height);
+            }
+            var center=ProjectUnit(Vector3.Zero);
+            var horizontal=Vector2.Distance(center,ProjectUnit(Vector3.UnitX));
+            var vertical=Vector2.Distance(center,ProjectUnit(Vector3.UnitY));
+            Check(Math.Abs(horizontal-vertical)<.001f);
+            document.Set("VelocityOverLifetime",true);
+            document.Set("VelocityCurve",new[]{new ProjectShockGL.Core.ParticleVelocityKey(0,Vector3.Zero),new ProjectShockGL.Core.ParticleVelocityKey(1,Vector3.UnitX)});
+            document.Set("Noise",true);
+            document.Set("NoiseStrength",new Vector3(.2f));
+            Frame();
+            Check(particles.Noise && particles.VelocityOverLifetime);
+            var cameraPosition=editorCamera.Transform.Position;
+            document.Set("Offset",new Vector3(2,0,0));
+            Frame();
+            Check(Vector3.Distance(editorCamera.Transform.Position,cameraPosition)<.00001f);
+            document.Set("EmissionMode",ProjectShockGL.Core.ParticleEmissionMode.Burst);
+            document.Set("BurstCount",7);
+            Frame();
+            Check(particles.ParticleCount==7);
+            type.GetMethod("PausePreview",flags)!.Invoke(null,null);
+            Frame();Frame();
+            Check(particles.ParticleCount==7);
+            type.GetMethod("PlayPreview",flags)!.Invoke(null,null);
+            Check(particles.ParticleCount==7);
+            Frame();
+            Check(particles.ParticleCount==7);
+            type.GetMethod("RestartPreview",flags)!.Invoke(null,null);
+            Check(particles.ParticleCount==7);
+            document.Set("EmissionMode",ProjectShockGL.Core.ParticleEmissionMode.Continuous);
+            document.Set("Offset",Vector3.Zero);
+            Frame();
+            foreach(var blend in Enum.GetValues<ParticleBlendMode>()) { document.Set("BlendMode",blend); Frame(); }
+            foreach(var shape in Enum.GetValues<ProjectShockGL.Core.ParticleShape>())
+            {
+                document.Set("Shape",shape);
+                Frame();
+                Check(particles.Shape==shape);
+            }
+            document.Set("Texture","Missing/ParticlePreview");
+            Frame();
+            Check(type.GetField("_error",flags)!.GetValue(null)!=null);
+            document.Set("Texture","WhitePixel");
+            Frame();
+            Check(type.GetField("_error",flags)!.GetValue(null)==null);
+            Check(!ProjectShockGLEditor.ParticleEditor.AllowClose());
+            Frame();
+            Check(ImGuiNET.ImGui.IsPopupOpen("Unsaved particle asset",ImGuiNET.ImGuiPopupFlags.AnyPopupId));
+            var particlePreviewTexture=target.Texture.Handle;
+            ProjectShockGLEditor.ParticleEditor.Dispose();
+            Check(particles.IsDestroyed && target.IsDisposed && !gl.IsTexture(particlePreviewTexture));
+            Check(ReferenceEquals(activeBefore,Camera.Active));
+            Check(gl.GetError()==GLEnum.NoError);
+            Console.WriteLine("PASS: Particle Editor renders live isolated previews and shape wires, pauses/restarts at TimeScale zero, recovers resource errors, confirms unsaved changes and frees GPU resources");
+        }
+        finally
+        {
+            ProjectShockGLEditor.ParticleEditor.Dispose();
+            Time.TimeScale=gameTimeScale;
+            ProjectShockGL.Environment.Apply(savedParticleEnvironment);
+            ImGuiNET.ImGui.DestroyContext(particleContext);
+        }
+    }
     var lightWorld = new World();
     for (var i = 0; i < 17; i++) lightWorld.Spawn<ProjectShockGL.Core.Light>().SetActive(false);
     var point = lightWorld.Spawn<ProjectShockGL.Core.Light>();

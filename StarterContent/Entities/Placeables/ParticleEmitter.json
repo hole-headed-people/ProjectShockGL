@@ -1,0 +1,6 @@
+{
+  "Class": "ProjectShockGL.Placeables.ParticleEmitter, ProjectShockGL",
+  "Parameters": {
+    "DebugBillboard": "Editor/Entity"
+  }
+}

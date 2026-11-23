@@ -11,6 +11,7 @@ public class Mesh : IDisposable
     private uint _vbo;
     private uint _ebo;
     private uint _lightmapVbo;
+    private uint _colorVbo;
     
     private Vector2[] _lightmapUv = [];
 
@@ -24,7 +25,8 @@ public class Mesh : IDisposable
     internal ReadOnlyMemory<uint> Indices => _indices;
     
     internal int Revision { get; private set; }
-    internal long TriangleCount => _indexCount / 3;
+    internal uint? DrawIndexCount { get; set; }
+    internal long TriangleCount => (DrawIndexCount ?? _indexCount) / 3;
 
     public bool IsDisposed => _vao == 0;
     public Vector3 BoundsMin { get; private set; }
@@ -143,7 +145,7 @@ public class Mesh : IDisposable
 
         unsafe
         {
-            _gl.DrawElements(PrimitiveType.Triangles, _indexCount, DrawElementsType.UnsignedInt, (void*)0);
+            _gl.DrawElements(PrimitiveType.Triangles, Math.Min(DrawIndexCount ?? _indexCount, _indexCount), DrawElementsType.UnsignedInt, (void*)0);
         }
     }
 
@@ -173,8 +175,22 @@ public class Mesh : IDisposable
         Revision++;
     }
 
+    internal unsafe void UpdateVertexColors(Vector4[] colors)
+    {
+        ObjectDisposedException.ThrowIf(IsDisposed,this);
+        if (colors.Length != _vertices.Length / 8) throw new ArgumentException("Vertex color count must match the mesh.",nameof(colors));
+        _gl.BindVertexArray(_vao);
+        if (_colorVbo == 0) _colorVbo=_gl.GenBuffer();
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer,_colorVbo);
+        fixed(Vector4* data=colors)
+            _gl.BufferData(BufferTargetARB.ArrayBuffer,(nuint)(colors.Length*sizeof(Vector4)),data,BufferUsageARB.DynamicDraw);
+        _gl.VertexAttribPointer(9,4,VertexAttribPointerType.Float,false,(uint)sizeof(Vector4),(void*)0);
+        _gl.EnableVertexAttribArray(9);
+    }
     public void Dispose()
     {
+        if (_colorVbo != 0) _gl.DeleteBuffer(_colorVbo);
+        _colorVbo=0;
         if (_lightmapVbo != 0)
         {
             _gl.DeleteBuffer(_lightmapVbo);

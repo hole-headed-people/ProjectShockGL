@@ -307,14 +307,35 @@ public static class Inspector
                 }
                 else if (type == typeof(string))
                 {
-                    var s = (string)value;
-                    
-                    if (ImGui.InputText(prop.Name, ref s, 256))
+                    var s = value as string ?? "";
+                    var field = "Property/" + prop.Name;
+
+                    if (!string.IsNullOrWhiteSpace(prop.GetCustomAttribute<EditableAttribute>()?.ContentDirectory))
+                        ImGui.SetNextItemWidth(MathF.Max(30, ImGui.GetContentRegionAvail().X - ImGui.CalcTextSize(prop.Name).X - 44));
+                    if (ImGui.InputText(prop.Name, ref s, (uint)Math.Max(256, s.Length + 128)))
                     {
                         prop.SetValue(entity, s);
-                        
-                        Changed("Property/" + prop.Name, type == typeof(bool) || type.IsEnum);
+                        Changed(field);
                     }
+
+                    Finish(field);
+
+                    if (prop.GetCustomAttribute<EditableAttribute>()?.ContentDirectory is { Length: > 0 } assetDirectory)
+                    {
+                        var root = Path.GetFullPath(Path.Combine(Content.Path, assetDirectory));
+                        var contentRoot = Path.GetFullPath(Content.Path) + Path.DirectorySeparatorChar;
+                        var names = root.StartsWith(contentRoot, StringComparison.OrdinalIgnoreCase) && Directory.Exists(root)
+                            ? Directory.EnumerateFiles(root, "*.json", SearchOption.AllDirectories)
+                                .Select(file => Path.ChangeExtension(Path.GetRelativePath(root, file), null)!.Replace('\\', '/'))
+                                .Order(StringComparer.OrdinalIgnoreCase).ToArray()
+                            : [];
+                        if (ChooseOutputValue("##ContentAssetChoices", s, names, searchable: true, searchHint: "Search assets...") is { } assetChoice)
+                        {
+                            prop.SetValue(entity, assetChoice);
+                            Changed(field, true);
+                        }
+                    }
+
                 }
                 else if (type == typeof(string[]))
                 {
@@ -356,7 +377,7 @@ public static class Inspector
                     }
                 }
                 
-                Finish("Property/" + prop.Name);
+                if (type != typeof(string)) Finish("Property/" + prop.Name);
                 
                 ImGui.PopID();
             }
@@ -613,7 +634,7 @@ public static class Inspector
             .ToArray();
     }
 
-    private static string? ChooseOutputValue(string id, string current, string[] choices, bool searchable = false)
+    private static string? ChooseOutputValue(string id, string current, string[] choices, bool searchable = false, string searchHint = "Search targets...")
     {
         if (choices.Length == 0)
         {
@@ -636,7 +657,7 @@ public static class Inspector
             }
 
             ImGui.SetNextItemWidth(220);
-            ImGui.InputTextWithHint("##TargetSearch", "Search targets...", ref _targetSearch, 256);
+            ImGui.InputTextWithHint("##TargetSearch", searchHint, ref _targetSearch, 256);
         }
 
         var search = searchable ? _targetSearch.Trim() : "";

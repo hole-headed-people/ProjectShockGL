@@ -31,6 +31,7 @@ public static class Content
     private static readonly Dictionary<string, Mesh> Meshes = new();
     private static readonly Dictionary<string, GeometryData> Geometries = new();
     private static readonly Dictionary<string, DetailAsset> Details = new();
+    private static readonly Dictionary<string, ParticleAsset> Particles = new();
     private static readonly Dictionary<string, EntityData> Entities = new();
     private static readonly Dictionary<string, Level> Levels = new();
     private static readonly Dictionary<string, PostProcessProfile> PostProcessProfiles = new();
@@ -372,6 +373,60 @@ public static class Content
         }
     }
 
+    public static ParticleAsset? LoadParticle(string name)
+    {
+        try
+        {
+            var path = GetParticlePath(name);
+            name = name.Replace('\\', '/');
+            if (Particles.TryGetValue(name, out var cached)) return cached;
+            if (!File.Exists(path))
+            {
+                Log.PrintWarning($"Resource not found: {path}");
+                return null;
+            }
+            var asset = JsonConvert.DeserializeObject<ParticleAsset>(File.ReadAllText(path), JsonHelper.GetSettings())
+                ?? throw new InvalidDataException("Particle asset is empty or null.");
+            asset.Validate();
+            Particles.Add(name, asset);
+            return asset;
+        }
+        catch (Exception error)
+        {
+            Log.PrintError($"LoadParticle failed for '{name}'.", error);
+            throw;
+        }
+    }
+
+    public static void SaveParticle(string name, ParticleAsset asset)
+    {
+        ArgumentNullException.ThrowIfNull(asset);
+        asset.Validate();
+        var path = GetParticlePath(name);
+        var json = JsonConvert.SerializeObject(asset, JsonHelper.GetSettings());
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, json);
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
+        Particles.Remove(name.Replace('\\', '/'));
+    }
+
+    private static string GetParticlePath(string name)
+    {
+        DetailAsset.ValidateReference(name, nameof(name));
+        var directory = System.IO.Path.GetFullPath(System.IO.Path.Combine(Path, "Particles"));
+        var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(directory, name.Replace('\\', '/') + ".json"));
+        if (!path.StartsWith(directory + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Particle assets must be inside Content/Particles.");
+        return path;
+    }
     public static DetailAsset? LoadDetail(string name)
     {
         string? path = null;
@@ -885,6 +940,7 @@ public static class Content
         Meshes.Clear();
         Geometries.Clear();
         Details.Clear();
+        Particles.Clear();
         Entities.Clear();
         
         EntityAssetReferences.Refresh();

@@ -489,7 +489,7 @@ public class Renderer : IDisposable
 
     public void DrawMesh(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit = false, bool ignoreDepth = false,
         ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, bool backfaceCulling = true,
-        SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f, Texture? lightmap = null, Vector4? lightmapRect = null, bool dynamicAmbient = false)
+        SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f, Texture? lightmap = null, Vector4? lightmapRect = null, bool dynamicAmbient = false, ParticleBlendMode particleBlendMode = ParticleBlendMode.Alpha)
     {
         var cullFace = _gl.IsEnabled(EnableCap.CullFace);
         
@@ -504,7 +504,7 @@ public class Renderer : IDisposable
                 _gl.Disable(EnableCap.CullFace);
             }
 
-            DrawMeshInternal(mesh, texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters, surfaceMode: surfaceMode, alphaCutoff: alphaCutoff, lightmap: lightmap, lightmapRect: lightmapRect, dynamicAmbient: dynamicAmbient);
+            DrawMeshInternal(mesh, texture, model, color, lit, ignoreDepth, shader: shader, shaderParameters: shaderParameters, surfaceMode: surfaceMode, alphaCutoff: alphaCutoff, lightmap: lightmap, lightmapRect: lightmapRect, dynamicAmbient: dynamicAmbient, particleBlendMode: particleBlendMode);
         }
         finally
         {
@@ -582,9 +582,9 @@ public class Renderer : IDisposable
     }
     private void DrawMeshInternal(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit,
         bool ignoreDepth = false, Vector4? uvRect = null, ShaderProgram? shader = null, ShaderParameters? shaderParameters = null,
-        SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f, Texture? lightmap = null, Vector4? lightmapRect = null, bool dynamicAmbient = false)
+        SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f, Texture? lightmap = null, Vector4? lightmapRect = null, bool dynamicAmbient = false, ParticleBlendMode particleBlendMode = ParticleBlendMode.Alpha)
     {
-        if (!Enum.IsDefined(surfaceMode) || !float.IsFinite(alphaCutoff) || alphaCutoff < 0 || alphaCutoff > 1)
+        if (!Enum.IsDefined(particleBlendMode) || !Enum.IsDefined(surfaceMode) || !float.IsFinite(alphaCutoff) || alphaCutoff < 0 || alphaCutoff > 1)
         {
             throw new ArgumentOutOfRangeException(nameof(surfaceMode));
         }
@@ -623,7 +623,12 @@ public class Renderer : IDisposable
                 {
                     _gl.Enable(EnableCap.Blend);
                     _gl.BlendEquation(BlendEquationModeEXT.FuncAdd);
-                    _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                    if (particleBlendMode == ParticleBlendMode.Additive)
+                        _gl.BlendFuncSeparate(BlendingFactor.SrcAlpha, BlendingFactor.One, BlendingFactor.Zero, BlendingFactor.One);
+                    else if (particleBlendMode == ParticleBlendMode.Multiply)
+                        _gl.BlendFuncSeparate(BlendingFactor.DstColor, BlendingFactor.OneMinusSrcAlpha, BlendingFactor.Zero, BlendingFactor.One);
+                    else
+                        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
                 }
             }
             DrawMeshSurface(mesh, texture, model, color, lit, ignoreDepth, uvRect, shader, shaderParameters, surfaceMode, alphaCutoff, lightmap, lightmapRect, dynamicAmbient);

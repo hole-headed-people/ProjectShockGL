@@ -216,6 +216,7 @@ public static class Editor
         LightmapBakeWindow.Draw();
         UIEditor.Draw();
         EntityAssetEditor.Draw();
+        ParticleEditor.Draw();
         BrushTextureWindow.Draw(_windowSize, SceneMin, SceneMax);
         
         DrawStatus();
@@ -248,11 +249,13 @@ public static class Editor
         ObjectManipulator.Cancel();
         LightmapBakeWindow.Dispose();
         UIEditor.Dispose();
+        ParticleEditor.Dispose();
         _imGui.Dispose();
     }
 
     private static bool OnWindowClosing()
     {
+        if (!ParticleEditor.AllowClose()) return false;
         if (!EntityAssetEditor.AllowClose())
         {
             _allowClose = false;
@@ -483,6 +486,7 @@ public static class Editor
                 BrushTextureWindow.Open = !BrushTextureWindow.Open;
             }
             if (ImGui.MenuItem("Entity Asset", "", EntityAssetEditor.Open)) EntityAssetEditor.Toggle();
+            if (ImGui.MenuItem("Particle Editor", "", ParticleEditor.Open)) ParticleEditor.Toggle();
             if (ImGui.MenuItem("UI Editor", "", UIEditor.Open)) UIEditor.Open = !UIEditor.Open;
 
             if (ImGui.MenuItem("Bake Lighting", "", LightmapBakeWindow.Open)) LightmapBakeWindow.Open = !LightmapBakeWindow.Open;
@@ -639,7 +643,7 @@ public static class Editor
 
     private static void DrawSceneHints()
     {
-        if (UIEditor.Open) return;
+        if (UIEditor.Open || ParticleEditor.Open) return;
         var draw = ImGui.GetBackgroundDrawList();
         var position = SceneMin + new Vector2(10, 10);
         

@@ -40,6 +40,520 @@ Content.Initialize(null!); // Fixture assets deliberately contain no GPU resourc
 Game.Initialize();
 ((CheckGame)Game.Instance).LoadForTest();
 
+Run("Particle velocity lifetime is additive, follows birth rotation and does not accumulate into base velocity",()=>
+{
+    var world=new World();var owner=world.Spawn<GameObject>();
+    owner.Transform.Rotation=Quaternion.CreateFromAxisAngle(Vector3.UnitY,MathF.PI/2);
+    var particles=owner.AddComponent<ParticleSystemComponent>();
+    particles.EmissionMode=ParticleEmissionMode.Burst;particles.BurstCount=1;
+    particles.Velocity=Vector3.Zero;particles.Acceleration=new Vector3(0,2,0);particles.Lifetime=5;
+    particles.VelocityOverLifetime=true;
+    particles.VelocityCurve=[new(0,new Vector3(2,0,0)),new(1,new Vector3(2,0,0))];
+    object Particle() => ((System.Collections.IList)typeof(ParticleSystemComponent).GetField("_particles",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!.GetValue(particles)!)[0]!;
+    Vector3 Value(string name) {var value=Particle();return (Vector3)value.GetType().GetField(name)!.GetValue(value)!;}
+    world.Update(1);
+    Check(Vector3.Distance(Value("Position"),new Vector3(0,1,-2))<.001f);
+    Check(Vector3.Distance(Value("Velocity"),new Vector3(0,2,0))<.001f);
+    owner.Transform.Rotation=Quaternion.Identity;
+    world.Update(1);
+    Check(Vector3.Distance(Value("Position"),new Vector3(0,4,-4))<.002f);
+    particles.Clear();particles.VelocityOverLifetime=false;particles.Noise=true;
+    particles.NoiseStrength=new Vector3(1,2,3);particles.NoiseFrequency=0;particles.NoiseScrollSpeed=0;
+    particles.Acceleration=Vector3.Zero;particles.Play();
+    world.Update(1);var first=Value("Position");world.Update(1);
+    Check(Vector3.Distance(Value("Position"),first*2)<.001f && Value("Velocity")==Vector3.Zero);
+    particles.Noise=false;var previous=Value("Position");world.Update(.1f);
+    Check(Vector3.Distance(Value("Position"),previous)<.0001f);
+    world.Clear();
+});
+
+Run("Particle noise is smooth and bounded, stable across frame rates, and motion settings roundtrip without changing old assets",()=>
+{
+    for(var i=0;i<200;i++)
+    {
+        var point=new Vector3(i*.13f,i*.23f,i*.37f);
+        var value=ParticleMotion.Noise(point);
+        Check(Math.Abs(value.X)<=1.00001f && Math.Abs(value.Y)<=1.00001f && Math.Abs(value.Z)<=1.00001f);
+        Check(Vector3.Distance(value,ParticleMotion.Noise(point+new Vector3(.0001f)))<.01f);
+    }
+    Vector3 Simulate(float step,int frames)
+    {
+        var world=new World();var owner=world.Spawn<GameObject>();var particles=owner.AddComponent<ParticleSystemComponent>();
+        particles.EmissionMode=ParticleEmissionMode.Burst;particles.BurstCount=1;particles.Lifetime=5;
+        particles.Velocity=new Vector3(1,.3f,0);particles.Noise=true;particles.NoiseFrequency=.7f;particles.NoiseScrollSpeed=1.23f;
+        world.Update(0);
+        var list=(System.Collections.IList)typeof(ParticleSystemComponent).GetField("_particles",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!.GetValue(particles)!;
+        var particle=list[0]!;particle.GetType().GetField("NoiseSeed")!.SetValue(particle,new Vector3(12,34,56));list[0]=particle;
+        for(var i=0;i<frames;i++) world.Update(step);
+        particle=list[0]!;var result=(Vector3)particle.GetType().GetField("Position")!.GetValue(particle)!;
+        world.Clear();return result;
+    }
+    Check(Vector3.Distance(Simulate(1f/30,30),Simulate(1f/120,120))<.03f);
+    var legacy=JsonConvert.DeserializeObject<ParticleAsset>("{\"Texture\":null}",JsonHelper.GetSettings())!;
+    Check(!legacy.Noise && !legacy.VelocityOverLifetime);
+    var curve=new[]{new ParticleVelocityKey(0,Vector3.Zero),new ParticleVelocityKey(1,new Vector3(1,-2,3))};
+    Check(ParticleMotion.EvaluateVelocity(curve,.5f)==new Vector3(.5f,-1,1.5f));
+    var asset=new ParticleAsset {Texture=null,VelocityOverLifetime=true,VelocityCurve=curve,Noise=true,
+        NoiseStrength=new Vector3(.2f,.3f,.4f),NoiseFrequency=2,NoiseScrollSpeed=.5f};
+    var name="Checks/Motion-"+Guid.NewGuid().ToString("N");Content.SaveParticle(name,asset);
+    var component=new ParticleSystemComponent();component.Apply(Content.LoadParticle(name)!);
+    var captured=ParticleAsset.Capture(component);
+    Check(captured.Noise && captured.VelocityOverLifetime && captured.NoiseFrequency==2 && captured.VelocityCurve.SequenceEqual(curve));
+    curve[0]=new ParticleVelocityKey(0,Vector3.One);
+    Check(component.VelocityCurve[0].Velocity==Vector3.Zero);
+    Throws(()=>component.NoiseFrequency=-1);Throws(()=>component.NoiseStrength=new Vector3(float.NaN));
+    Throws(()=>component.VelocityCurve=[new(0,Vector3.Zero),new(0,Vector3.One)]);
+    var doc=new ParticleAssetDocument();doc.Set("Noise",true);doc.Set("VelocityOverLifetime",true);doc.Set("VelocityCurve",captured.VelocityCurve);
+    Check(doc.Asset.Noise && doc.Asset.VelocityOverLifetime);
+});
+Run("Particle Burst emits once on Play, honors capacity, expires without repeating and preserves Continuous defaults",()=>
+{
+    var world=new World();
+    var owner=world.Spawn<GameObject>();
+    var particles=owner.AddComponent<ParticleSystemComponent>();
+    particles.EmissionMode=ParticleEmissionMode.Burst;
+    particles.BurstCount=7;
+    particles.Rate=0;
+    particles.MaxParticles=10;
+    particles.Lifetime=3;
+    world.Update(.1f);
+    Check(particles.ParticleCount==7 && particles.IsPlaying);
+    world.Update(.5f);
+    Check(particles.ParticleCount==7);
+    world.Update(4);
+    Check(particles.ParticleCount==0 && !particles.IsPlaying);
+    world.Update(1);
+    Check(particles.ParticleCount==0);
+    particles.Play();Check(particles.ParticleCount==7);
+    particles.Play();Check(particles.ParticleCount==10);
+    particles.Stop();world.Update(.1f);
+    Check(particles.ParticleCount==10 && !particles.IsPlaying);
+    particles.Clear();Check(particles.ParticleCount==0);
+    particles.BurstCount=0;particles.Play();
+    Check(particles.ParticleCount==0 && !particles.IsPlaying);
+    Throws(()=>particles.BurstCount=-1);
+    Throws(()=>particles.EmissionMode=(ParticleEmissionMode)999);
+    world.Clear();
+    var legacy=JsonConvert.DeserializeObject<ParticleAsset>("{\"Texture\":null,\"Rate\":4}",JsonHelper.GetSettings())!;
+    Check(legacy.EmissionMode==ParticleEmissionMode.Continuous);
+    var asset=new ParticleAsset{Texture=null,EmissionMode=ParticleEmissionMode.Burst,BurstCount=23};
+    var name="Checks/Burst-"+Guid.NewGuid().ToString("N");
+    Content.SaveParticle(name,asset);
+    var component=new ParticleSystemComponent();component.Apply(Content.LoadParticle(name)!);
+    Check(component.EmissionMode==ParticleEmissionMode.Burst && component.BurstCount==23);
+    Check(ParticleAsset.Capture(component).BurstCount==23);
+    var doc=new ParticleAssetDocument();doc.Set("EmissionMode",ParticleEmissionMode.Burst);doc.Set("BurstCount",12);
+    Check(doc.Asset.EmissionMode==ParticleEmissionMode.Burst && doc.Asset.BurstCount==12);
+    Throws(()=>doc.Set("BurstCount",-1));
+    Check(doc.Asset.BurstCount==12);
+});
+Run("ParticleEmitter selected shapes follow position rotation and asset offset without inheriting scale",()=>
+{
+    var emitter=new ProjectShockGL.Placeables.ParticleEmitter();
+    emitter.Transform.Position=new Vector3(10,20,30);
+    emitter.Transform.Rotation=Quaternion.CreateFromAxisAngle(Vector3.UnitY,MathF.PI/2);
+    emitter.Transform.Scale=new Vector3(100);
+    var offset=Vector3.UnitX;
+    Vector3 Local(Vector3 point)=>Vector3.Transform(point-emitter.Transform.Position,Quaternion.Inverse(emitter.Transform.Rotation))-offset;
+    var box=emitter.GetShapeLines(new ParticleAsset{Shape=ParticleShape.Box,BoxSize=new Vector3(2,4,6),Offset=offset}).ToArray();
+    Check(box.Length==12);
+    foreach(var point in box.SelectMany(line=>new[]{line.From,line.To}))
+    {
+        var local=Local(point);
+        Check(Math.Abs(Math.Abs(local.X)-1)<.0001f && Math.Abs(Math.Abs(local.Y)-2)<.0001f && Math.Abs(Math.Abs(local.Z)-3)<.0001f);
+    }
+    var sphere=emitter.GetShapeLines(new ParticleAsset{Shape=ParticleShape.Sphere,Radius=2,Offset=offset}).ToArray();
+    Check(sphere.Length==144 && sphere.All(line=>Math.Abs(Local(line.From).Length()-2)<.0001f));
+    var cone=emitter.GetShapeLines(new ParticleAsset{Shape=ParticleShape.Cone,Radius=1,ConeAngle=30,Velocity=Vector3.UnitY,Lifetime=2,Offset=offset}).ToArray();
+    Check(cone.Length==101);
+    Check(Vector3.Distance(Local(cone[^1].To),new Vector3(0,0,-2))<.0001f);
+    Check(emitter.GetShapeLines(new ParticleAsset{Shape=ParticleShape.Point,Offset=offset}).Count()==3);
+});
+Run("Particle blend modes default to Alpha, roundtrip JSON and apply/capture through the editor without accepting invalid modes",()=>
+{
+    var old=JsonConvert.DeserializeObject<ParticleAsset>("{\"Texture\":null}",JsonHelper.GetSettings())!;
+    Check(old.BlendMode==ProjectShockGL.Rendering.ParticleBlendMode.Alpha);
+    var doc=new ParticleAssetDocument();
+    var component=new ParticleSystemComponent();
+    foreach(var mode in Enum.GetValues<ProjectShockGL.Rendering.ParticleBlendMode>())
+    {
+        doc.Set("BlendMode",mode);
+        doc.Set("Texture",null);
+        component.Apply(doc.Asset);
+        Check(component.BlendMode==mode);
+        var name="Checks/Blend-"+Guid.NewGuid().ToString("N");
+        Content.SaveParticle(name,ParticleAsset.Capture(component));
+        Check(Content.LoadParticle(name)!.BlendMode==mode);
+        Check(JsonConvert.SerializeObject(doc.Asset,JsonHelper.GetSettings()).Contains(mode.ToString()));
+    }
+    Throws(()=>component.BlendMode=(ProjectShockGL.Rendering.ParticleBlendMode)99);
+    Throws(()=>doc.Set("BlendMode",99));
+    Check(component.BlendMode==ProjectShockGL.Rendering.ParticleBlendMode.Multiply && doc.Asset.BlendMode==ProjectShockGL.Rendering.ParticleBlendMode.Multiply);
+});
+Run("Particle appearance ranges and lifetime keys preserve old JSON, validate data and copy independently",()=>
+{
+    var legacy=JsonConvert.DeserializeObject<ParticleAsset>("{\"Texture\":null,\"Size\":0.75,\"Lifetime\":6}",JsonHelper.GetSettings())!;
+    legacy.Validate();
+    Check(legacy.StartSize==null && legacy.StartLifetime==null && !legacy.SizeOverLifetime && !legacy.ColorOverLifetime);
+    var component=new ParticleSystemComponent();component.Apply(legacy);
+    Check(component.Size==.75f && component.Lifetime==6 && component.StartRotation==new ParticleRange(0,0));
+    var curve=new[]{new ParticleCurveKey(0,0),new ParticleCurveKey(.5f,2),new ParticleCurveKey(1,1)};
+    var colors=new[]{new ParticleColorKey(0,new Color(1,0,0,0)),new ParticleColorKey(1,new Color(0,0,1,1))};
+    Check(ParticleAppearance.EvaluateSize(curve,.25f)==1 && ParticleAppearance.EvaluateSize(curve,2)==1);
+    var mid=ParticleAppearance.EvaluateColor(colors,.5f);
+    Check(mid.R==.5f && mid.B==.5f && mid.A==.5f);
+    component.SizeCurve=curve;component.ColorGradient=colors;
+    curve[0]=new ParticleCurveKey(0,99);
+    colors[0]=new ParticleColorKey(0,Color.White);
+    Check(component.SizeCurve[0].Value==0 && component.ColorGradient[0].Color.A==0);
+    var exposed=component.SizeCurve;exposed[0]=new ParticleCurveKey(0,55);
+    Check(component.SizeCurve[0].Value==0);
+    var asset=new ParticleAsset
+    {
+        Texture=null,StartSize=new ParticleRange(.1f,.8f),StartLifetime=new ParticleRange(1,4),
+        StartRotation=new ParticleRange(-180,180),RotationSpeed=new ParticleRange(-30,30),
+        SizeOverLifetime=true,ColorOverLifetime=true,SizeCurve=component.SizeCurve,ColorGradient=component.ColorGradient
+    };
+    var name="Checks/Appearance-"+Guid.NewGuid().ToString("N");
+    Content.SaveParticle(name,asset);
+    var loaded=Content.LoadParticle(name)!;component.Apply(loaded);
+    var captured=ParticleAsset.Capture(component);
+    Check(captured.StartSize==asset.StartSize && captured.StartLifetime==asset.StartLifetime && captured.RotationSpeed==asset.RotationSpeed);
+    Check(captured.SizeCurve.SequenceEqual(asset.SizeCurve) && captured.ColorGradient.SequenceEqual(asset.ColorGradient));
+    loaded.SizeCurve[0]=new ParticleCurveKey(0,88);
+    Check(component.SizeCurve[0].Value==0);
+    Throws(()=>component.StartSize=new ParticleRange(2,1));
+    Throws(()=>component.StartLifetime=new ParticleRange(0,1));
+    Throws(()=>component.StartRotation=new ParticleRange(float.NaN,1));
+    Throws(()=>component.SizeCurve=[new(.5f,1),new(.5f,2)]);
+    Throws(()=>component.ColorGradient=[]);
+    var document=new ParticleAssetDocument();
+    document.Set("StartSize",new ParticleRange(.3f,.9f));
+    document.Set("SizeOverLifetime",true);
+    document.Set("SizeCurve",asset.SizeCurve);
+    Check(document.Asset.StartSize==new ParticleRange(.3f,.9f) && document.Asset.SizeOverLifetime);
+    Throws(()=>document.Set("SizeCurve",new[]{new ParticleCurveKey(-1,1)}));
+    Check(document.Asset.SizeCurve.SequenceEqual(asset.SizeCurve));
+});
+
+Run("Particles sample lifetime size and rotation once per birth and preserve individual values while moving",()=>
+{
+    var world=new World();
+    var owner=world.Spawn<GameObject>();
+    var particles=owner.AddComponent<ParticleSystemComponent>();
+    particles.Rate=100;
+    particles.StartSize=new ParticleRange(.1f,2);
+    particles.StartLifetime=new ParticleRange(2,4);
+    particles.StartRotation=new ParticleRange(0,360);
+    particles.RotationSpeed=new ParticleRange(-90,90);
+    world.Update(1);
+    var list=(System.Collections.IList)typeof(ParticleSystemComponent).GetField("_particles",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(particles)!;
+    var sizes=new HashSet<float>();
+    foreach(var particle in list)
+    {
+        float Value(string field)=>(float)particle!.GetType().GetField(field)!.GetValue(particle)!;
+        Check(Value("Lifetime")>=2 && Value("Lifetime")<=4);
+        Check(Value("StartSize")>=.1f && Value("StartSize")<=2);
+        Check(Value("Rotation")>=0 && Value("Rotation")<=360);
+        Check(Value("RotationSpeed")>=-90 && Value("RotationSpeed")<=90);
+        sizes.Add(Value("StartSize"));
+    }
+    Check(list.Count==100 && sizes.Count>90);
+    particles.Stop();
+    particles.StartLifetime=new ParticleRange(.1f,.1f);
+    world.Update(.1f);
+    Check(list.Count==100);
+    world.Update(5);
+    Check(particles.ParticleCount==0);
+    world.Clear();
+});
+RunScene("ParticleEmitter persists its asset through Inspector Undo, maps and prefabs and exposes Play Stop Clear Inputs", () =>
+{
+    var particleName="Checks/Emitter-"+Guid.NewGuid().ToString("N");
+    Content.SaveParticle(particleName,new ParticleAsset { Texture=null,Rate=10,Lifetime=3 });
+    Content.SaveParticle(particleName+"-off",new ParticleAsset { Texture=null,Rate=10,PlayOnStart=false });
+    File.WriteAllText(Path.Combine(testRoot,"Entities","ParticleEmitterCheck.json"),
+        JsonConvert.SerializeObject(new EntityData { Class=typeof(ProjectShockGL.Placeables.ParticleEmitter).AssemblyQualifiedName! }));
+    var emitter=(ProjectShockGL.Placeables.ParticleEmitter)SceneObjects.Create(PlaceableType.Entity,"ParticleEmitterCheck");
+    emitter.ParticleAsset=particleName;
+    UndoRedo.Clear();
+    RecordInspector(emitter,"Particle asset",()=>emitter.ParticleAsset=particleName+"-off");
+    UndoRedo.Undo();
+    Check(emitter.ParticleAsset==particleName);
+    UndoRedo.Redo();
+    Check(emitter.ParticleAsset==particleName+"-off");
+    emitter.ParticleAsset=particleName;
+    var property=typeof(ProjectShockGL.Placeables.ParticleEmitter).GetProperty("ParticleAsset")!;
+    Check(property.GetCustomAttributes(typeof(EditableAttribute),true).Cast<EditableAttribute>().Single().ContentDirectory=="Particles");
+    var inputs=InputInvoker.GetInputNames(emitter.GetType());
+    Check(inputs.Contains("Play") && inputs.Contains("Stop") && inputs.Contains("Clear"));
+    var map=Path.Combine(testRoot,"particle-emitter.map");
+    EditorLevelManager.SaveCurrentLevel(map);
+    var placement=EditorLevelManager.CaptureLevel([emitter]).Placeables.Single();
+    var template=JsonConvert.DeserializeObject<Placeable>(JsonConvert.SerializeObject(placement,JsonHelper.GetSettings()),JsonHelper.GetSettings())!;
+    var copy=(ProjectShockGL.Placeables.ParticleEmitter)Prefab.Instantiate(template,Game.Instance.World);
+    Check(copy.ParticleAsset==particleName && !copy.Particles.IsPlaying);
+    EditorLevelManager.OpenLevel(map);
+    var loaded=Game.Instance.World.Find<ProjectShockGL.Placeables.ParticleEmitter>()!;
+    Check(loaded.ParticleAsset==particleName && !loaded.Particles.IsPlaying && loaded.Particles.ParticleCount==0);
+    typeof(Application).GetProperty(nameof(Application.IsEditor))!.SetValue(null,false);
+    Game.Instance.World.Update(.5f);
+    Check(loaded.Particles.IsPlaying && loaded.Particles.ParticleCount==5);
+    InputInvoker.Invoke(loaded,"Stop","");
+    Game.Instance.World.Update(.5f);
+    Check(!loaded.Particles.IsPlaying && loaded.Particles.ParticleCount==5);
+    InputInvoker.Invoke(loaded,"Clear","");
+    Check(loaded.Particles.ParticleCount==0);
+    InputInvoker.Invoke(loaded,"Play","");
+    Game.Instance.World.Update(.5f);
+    Check(loaded.Particles.IsPlaying && loaded.Particles.ParticleCount==5);
+    loaded.SetActive(false);
+    Game.Instance.World.Update(4);
+    Check(loaded.Particles.ParticleCount==5);
+    loaded.SetActive(true);
+    var component=loaded.Particles;
+    Game.Instance.World.Destroy(loaded);
+    Check(component.IsDestroyed && component.ParticleCount==0);
+});
+
+Run("ParticleEmitter handles empty assets, pre-Start Stop, disabled autoplay and editor-only placement without simulation", () =>
+{
+    var name="Checks/EmitterStartup-"+Guid.NewGuid().ToString("N");
+    Content.SaveParticle(name,new ParticleAsset { Texture=null,PlayOnStart=false });
+    Content.SaveParticle(name+"-auto",new ParticleAsset { Texture=null,PlayOnStart=true });
+    var world=new World();
+    try
+    {
+        var empty=world.Spawn<ProjectShockGL.Placeables.ParticleEmitter>();
+        var stopped=world.Spawn<ProjectShockGL.Placeables.ParticleEmitter>();
+        stopped.ParticleAsset=name+"-auto";
+        stopped.Stop();
+        var off=world.Spawn<ProjectShockGL.Placeables.ParticleEmitter>();
+        off.ParticleAsset=name;
+        world.Update(1,simulate:false);
+        Check(!off.Particles.IsPlaying && off.Particles.ParticleCount==0);
+        world.Update(1);
+        Check(!empty.Particles.IsPlaying && empty.Particles.ParticleCount==0);
+        Check(!off.Particles.IsPlaying && !stopped.Particles.IsPlaying);
+        off.Play();world.Update(.5f);
+        Check(off.Particles.ParticleCount==5);
+        Throws(()=>off.ParticleAsset=name+"-missing");
+        Check(off.ParticleAsset==name && off.Particles.ParticleCount==5);
+    }
+    finally {world.Clear();}
+});
+Run("Particle editor documents preserve drafts, save copies, reload files and reject invalid edits without losing state", () =>
+{
+    var document = new ParticleAssetDocument();
+    Check(!document.IsDirty && document.FilePath == null);
+    document.Set("Shape", ParticleShape.Box);
+    document.Set("BoxSize", new Vector3(2,3,4));
+    document.Set("Color", new Color(.2f,.3f,.4f,.5f));
+    Check(document.IsDirty);
+    var path = Path.Combine(testRoot,"Particles","Editor",Guid.NewGuid().ToString("N")+".json");
+    document.Save(path);
+    Check(!document.IsDirty && document.FilePath == path);
+    var original=File.ReadAllText(path);
+    document.Set("Rate",35f);
+    var copy=Path.Combine(Path.GetDirectoryName(path)!,"Copy.json");
+    document.Save(copy);
+    Check(!document.IsDirty && document.FilePath==copy && File.ReadAllText(path)==original);
+    document.Open(path);
+    Check(document.Asset.Rate==10 && document.Asset.BoxSize==new Vector3(2,3,4));
+    Throws(()=>document.Set("Lifetime",0f));
+    Check(!document.IsDirty && document.Asset.Lifetime==3);
+    document.Set("Rate",17f);
+    var bad=Path.Combine(Path.GetDirectoryName(path)!,"Bad.json");
+    File.WriteAllText(bad,"{\"Shape\":999}");
+    Throws(()=>document.Open(bad));
+    Check(document.Asset.Rate==17 && document.IsDirty && document.FilePath==path);
+    Throws(()=>document.Save(Path.Combine(testRoot,"Outside.json")));
+    Check(document.FilePath==path && document.IsDirty);
+    document.New();
+    Check(!document.IsDirty && document.Asset.Shape==ParticleShape.Point && document.FilePath==null);
+});
+Run("Particle shapes sample centered boxes, uniform sphere volumes/surfaces and cone disks/directions", () =>
+{
+    var component = new ParticleSystemComponent { Velocity = new Vector3(0, 0, 2) };
+    Check(component.SampleEmission() == (Vector3.Zero, component.Velocity));
+    component.Shape = ParticleShape.Box;
+    component.BoxSize = new Vector3(2,4,6);
+    var mean = Vector3.Zero;
+    for (var i = 0; i < 4000; i++)
+    {
+        var point = component.SampleEmission().Position;
+        Check(Math.Abs(point.X) <= 1 && Math.Abs(point.Y) <= 2 && Math.Abs(point.Z) <= 3);
+        mean += point / 4000;
+    }
+    Check(mean.Length() < .15f);
+    component.Shape = ParticleShape.Sphere;
+    component.Radius = 2;
+    var meanRadiusSquared = 0f;
+    for (var i = 0; i < 4000; i++)
+    {
+        var point = component.SampleEmission().Position;
+        Check(point.LengthSquared() <= 4.00001f);
+        meanRadiusSquared += point.LengthSquared() / 4000;
+    }
+    Check(Math.Abs(meanRadiusSquared - 2.4f) < .15f);
+    component.SphereSurface = true;
+    for (var i = 0; i < 100; i++) Check(Math.Abs(component.SampleEmission().Position.Length() - 2) < .00001f);
+    component.Shape = ParticleShape.Cone;
+    component.ConeAngle = 30;
+    for (var i = 0; i < 1000; i++)
+    {
+        var sample = component.SampleEmission();
+        Check(sample.Position.Z == 0 && sample.Position.LengthSquared() <= 4.00001f);
+        Check(Math.Abs(sample.Velocity.Length() - 2) < .00001f && -sample.Velocity.Z / 2 >= MathF.Cos(MathF.PI / 6) - .00001f);
+    }
+    component.Radius = 0;
+    component.ConeAngle = 0;
+    Check(component.SampleEmission() == (Vector3.Zero, new Vector3(0,0,-2)));
+    Throws(() => component.Shape = (ParticleShape)999);
+    Throws(() => component.BoxSize = new Vector3(-1));
+    Throws(() => component.Radius = float.NaN);
+    Throws(() => component.ConeAngle = 90);
+});
+
+Run("Particle shape birth uses owner rotation and offset but ignores owner scale", () =>
+{
+    var world = new World();
+    var obj = world.Spawn<GameObject>();
+    obj.Transform.Position = new Vector3(10,20,30);
+    obj.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI / 2);
+    obj.Transform.Scale = new Vector3(100);
+    var component = obj.AddComponent<ParticleSystemComponent>();
+    component.Shape = ParticleShape.Cone;
+    component.Radius = 0;
+    component.ConeAngle = 0;
+    component.Rate = 1;
+    component.Offset = Vector3.UnitX;
+    component.Velocity = new Vector3(0,0,2);
+    world.Update(1);
+    var particles = (System.Collections.IList)typeof(ParticleSystemComponent).GetField("_particles", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(component)!;
+    var particle = particles[0]!;
+    var position = (Vector3)particle.GetType().GetField("Position")!.GetValue(particle)!;
+    var velocity = (Vector3)particle.GetType().GetField("Velocity")!.GetValue(particle)!;
+    Check(Vector3.Distance(position, obj.Transform.Position + Vector3.Transform(Vector3.UnitX, obj.Transform.Rotation)) < .0001f);
+    Check(Vector3.Distance(velocity, Vector3.Transform(new Vector3(0,0,-2), obj.Transform.Rotation)) < .0001f);
+    world.Clear();
+});
+
+Run("Particle assets roundtrip through Content, validate before overwrite, refresh cache and copy settings independently", () =>
+{
+    var name = "Checks/Particles-" + Guid.NewGuid().ToString("N");
+    var asset = new ParticleAsset
+    {
+        Texture = null, Shape = ParticleShape.Box, BoxSize = new Vector3(2,3,4), Radius = 2,
+        SphereSurface = true, ConeAngle = 35, Rate = 20, Lifetime = 7, Size = .3f, MaxParticles = 100,
+        PlayOnStart = false, Velocity = new Vector3(1,2,3), Acceleration = new Vector3(0,-1,0),
+        Offset = Vector3.One, Color = new Color(.1f,.2f,.3f,.4f), RenderOrder = 5
+    };
+    Content.SaveParticle(name, asset);
+    var loaded = Content.LoadParticle(name)!;
+    Check(ReferenceEquals(loaded, Content.LoadParticle(name.Replace('/', '\\'))));
+    Check(loaded.Shape == ParticleShape.Box && loaded.BoxSize == asset.BoxSize && loaded.Color.Equals(asset.Color));
+    var component = new ParticleSystemComponent();
+    component.Apply(loaded);
+    component.BoxSize = new Vector3(10);
+    Check(loaded.BoxSize == new Vector3(2,3,4));
+    var captured = ParticleAsset.Capture(component);
+    Check(captured.BoxSize == new Vector3(10) && captured.Rate == 20 && captured.RenderOrder == 5 && captured.Texture == null);
+    var json = JsonConvert.SerializeObject(loaded, JsonHelper.GetSettings());
+    Check(json.Contains("Box"));
+    var path = Path.Combine(testRoot, "Particles", name + ".json");
+    var previous = File.ReadAllText(path);
+    Throws(() => Content.SaveParticle(name, new ParticleAsset { Lifetime = 0 }));
+    Check(File.ReadAllText(path) == previous && ReferenceEquals(loaded, Content.LoadParticle(name)));
+    Throws(() => component.Apply(new ParticleAsset { Radius = -1 }));
+    Check(component.Rate == 20 && component.BoxSize == new Vector3(10));
+    Throws(() => Content.SaveParticle("../Outside", asset));
+    Content.SaveParticle(name, captured);
+    Check(!ReferenceEquals(loaded, Content.LoadParticle(name)) && Content.LoadParticle(name)!.BoxSize == new Vector3(10));
+    var minimal = JsonConvert.DeserializeObject<ParticleAsset>("{}", JsonHelper.GetSettings())!;
+    minimal.Validate();
+    Check(minimal.Shape == ParticleShape.Point && minimal.Rate == 10);
+    Check(Content.LoadParticle(name + "-missing") == null);
+    var badName = name + "-bad";
+    var badPath = Path.Combine(testRoot, "Particles", badName + ".json");
+    File.WriteAllText(badPath, "{\"Shape\":999}");
+    Throws(() => Content.LoadParticle(badName));
+    File.WriteAllText(badPath, "{\"Texture\":null,\"Shape\":\"Sphere\"}");
+    Check(Content.LoadParticle(badName)!.Shape == ParticleShape.Sphere);
+});
+Run("Particles emit independently of frame rate, move in world space, expire, stop, clear and respect owner lifecycle", () =>
+{
+    var world = new World();
+    var obj = world.Spawn<GameObject>();
+    var particles = obj.AddComponent<ParticleSystemComponent>();
+    particles.Rate = 4;
+    particles.Lifetime = 2;
+    particles.Velocity = new Vector3(2, 0, 0);
+    world.Update(.5f);
+    Check(particles.IsPlaying && particles.ParticleCount == 2);
+    Vector3 Position(int index)
+    {
+        var list = (System.Collections.IList)typeof(ParticleSystemComponent).GetField("_particles", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(particles)!;
+        var particle = list[index]!;
+        return (Vector3)particle.GetType().GetField("Position")!.GetValue(particle)!;
+    }
+    particles.Stop();
+    var start = Position(0);
+    obj.Transform.Position = new Vector3(100, 0, 0);
+    world.Update(.25f);
+    Check(particles.ParticleCount == 2 && Vector3.Distance(Position(0), start + new Vector3(.5f, 0, 0)) < .0001f);
+    var frozen = Position(0);
+    world.Update(0);
+    Check(Position(0) == frozen);
+    obj.SetActive(false);
+    world.Update(.25f);
+    Check(Position(0) == frozen);
+    obj.SetActive(true);
+    world.Update(3);
+    Check(particles.ParticleCount == 0 && !particles.IsPlaying);
+    particles.Play();
+    particles.MaxParticles = 2;
+    world.Update(1);
+    Check(particles.ParticleCount == 2);
+    particles.Clear();
+    Check(particles.IsPlaying && particles.ParticleCount == 0);
+    particles.Rate = 3;
+    world.Update(.1f);
+    world.Update(.1f);
+    world.Update(.1f);
+    Check(particles.ParticleCount == 0);
+    world.Update(.1f);
+    Check(particles.ParticleCount == 1);
+    particles.MaxParticles = 0;
+    Check(particles.ParticleCount == 0);
+    particles.MaxParticles = 10;
+    particles.Clear();
+    particles.Rate = 2;
+    particles.Lifetime = .6f;
+    world.Update(10);
+    Check(particles.ParticleCount == 2);
+    Throws(() => particles.Rate = float.PositiveInfinity);
+    Throws(() => particles.Lifetime = 0);
+    Throws(() => particles.Velocity = new Vector3(float.NaN));
+    world.Clear();
+    Check(particles.IsDestroyed && !particles.IsPlaying && particles.ParticleCount == 0);
+});
+
+Run("Stopping particles before Start prevents autoplay and editor updates do not simulate them", () =>
+{
+    var world = new World();
+    var obj = world.Spawn<GameObject>();
+    var particles = obj.AddComponent<ParticleSystemComponent>();
+    particles.Stop();
+    world.Update(1, simulate: false);
+    Check(!particles.IsPlaying && particles.ParticleCount == 0);
+    world.Update(1);
+    Check(!particles.IsPlaying && particles.ParticleCount == 0);
+    particles.Play();
+    world.Update(.5f);
+    Check(particles.ParticleCount == 5);
+    world.Clear();
+});
 Run("Object.World refers to its actual owner during Create and supports local spawn/find/destroy", () =>
 {
     var world = new World();
