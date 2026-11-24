@@ -20,16 +20,94 @@ public static unsafe class Audio
     private static readonly HashSet<AudioClip> Buffers = [];
 
     private static bool _listenerApplied;
+    
     private static Vector3 _listenerPosition;
     private static Vector3 _listenerForward;
     private static Vector3 _listenerUp;
+    
+    internal static int ListenerWriteCount { get; private set; }
+    internal static AL Api => _al ?? throw new InvalidOperationException("Audio is not initialized.");
+    
     public static double UpdateTimeMs { get; private set; }
     public static double SpatialUpdateTimeMs { get; private set; }
     public static double TotalUpdateTimeMs => UpdateTimeMs + SpatialUpdateTimeMs;
-    internal static int ListenerWriteCount { get; private set; }
     public static bool IsAvailable => _al != null;
 
-    internal static AL Api => _al ?? throw new InvalidOperationException("Audio is not initialized.");
+    public static AudioGroup Master { get; } = new("Master", null);
+    
+    private static readonly Dictionary<string, AudioGroup> GroupLookup = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Master"] = Master
+    };
+    
+    public static IReadOnlyDictionary<string, AudioGroup> Groups { get; } =
+        new System.Collections.ObjectModel.ReadOnlyDictionary<string, AudioGroup>(GroupLookup);
+
+    public static AudioGroup CreateGroup(string name, AudioGroup? parent = null)
+    {
+        RequireGroupThread();
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        
+        name = name.Trim();
+        if (parent != null) RequireRegisteredGroup(parent);
+        var group = new AudioGroup(name, parent ?? Master);
+        
+        if (!GroupLookup.TryAdd(name, group))
+        {
+            throw new ArgumentException($"Audio group '{name}' already exists.", nameof(name));
+        }
+        
+        RefreshGroupVolumes();
+        return group;
+    }
+
+    public static void ApplyGroups(AudioGroupsAsset asset)
+    {
+        ArgumentNullException.ThrowIfNull(asset);
+        RequireGroupThread();
+        var definitions = asset.GetValidatedGroups();
+        var groups = new Dictionary<string, AudioGroup>(StringComparer.OrdinalIgnoreCase);
+        foreach (var definition in definitions.Values)
+        {
+            groups.Add(definition.Name, GroupLookup.GetValueOrDefault(definition.Name)
+                ?? new AudioGroup(definition.Name, null));
+        }
+        foreach (var definition in definitions.Values)
+        {
+            groups[definition.Name].Configure(definition.Volume,
+                definition.Parent == null ? null : groups[definition.Parent]);
+        }
+        GroupLookup.Clear();
+        foreach (var (name, group) in groups) GroupLookup.Add(name, group);
+        RefreshGroupVolumes();
+    }
+
+    internal static void LoadGroupsFromSettings()
+    {
+        var name = Settings.GetString("Audio", "Groups", "");
+        ApplyGroups(string.IsNullOrWhiteSpace(name) ? new AudioGroupsAsset() : Content.LoadAudioGroups(name));
+    }
+
+    public static AudioGroup? GetGroup(string? name)
+    {
+        return string.IsNullOrWhiteSpace(name) ? Master : GroupLookup.GetValueOrDefault(name.Trim());
+    }
+
+    internal static void RequireRegisteredGroup(AudioGroup group)
+    {
+        if (!ReferenceEquals(GetGroup(group.Name), group))
+            throw new InvalidOperationException($"Audio group '{group.Name}' is no longer registered; get it again after applying a new configuration.");
+    }
+
+    internal static void RequireGroupThread()
+    {
+        if (IsAvailable) RequireThread();
+    }
+
+    internal static void RefreshGroupVolumes()
+    {
+        foreach (var source in Sources) source.RefreshGain();
+    }
 
     public static bool Initialize()
     {
@@ -125,44 +203,64 @@ public static unsafe class Audio
     internal static void SynchronizeSpatialAudio()
     {
         SpatialUpdateTimeMs = 0;
-        if (!IsAvailable) return;
+
+        if (!IsAvailable)
+        {
+            return;
+        }
+        
         RequireThread();
+        
         var started = Stopwatch.GetTimestamp();
+        
         try
         {
             var camera = Rendering.Camera.Active;
+            
             var position = camera.Transform.Position;
             var forward = camera.Transform.Forward;
             var up = camera.Transform.Up;
+            
             var changed = false;
+            
             if (!_listenerApplied || _listenerPosition != position)
             {
                 Api.SetListenerProperty(ListenerVector3.Position, position);
                 ListenerWriteCount++;
                 changed = true;
             }
+            
             if (!_listenerApplied || _listenerForward != forward || _listenerUp != up)
             {
                 float* orientation = stackalloc float[6] { forward.X, forward.Y, forward.Z, up.X, up.Y, up.Z };
+                
                 Api.SetListenerProperty(ListenerFloatArray.Orientation, orientation);
                 ListenerWriteCount++;
+                
                 changed = true;
             }
+            
             if (changed)
             {
                 CheckError("synchronize audio listener");
+                
                 _listenerPosition = position;
                 _listenerForward = forward;
                 _listenerUp = up;
                 _listenerApplied = true;
             }
-            foreach (var source in Sources.ToArray()) source.SynchronizePosition();
+
+            foreach (var source in Sources.ToArray())
+            {
+                source.SynchronizePosition();
+            }
         }
         finally
         {
             SpatialUpdateTimeMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         }
     }
+    
     internal static void RequireThread()
     {
         if (_thread != System.Environment.CurrentManagedThreadId)

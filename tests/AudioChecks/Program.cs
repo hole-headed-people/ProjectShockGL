@@ -108,6 +108,19 @@ Run("Content caches clips with normalized resource names and rejects traversal",
     Check(!ReferenceEquals(first,Content.LoadAudioClip("UI/Test")));
 });
 
+Run("Game and editor load the same configured Audio Groups without opening a sound device",()=>
+{
+    var path=Content.GetAudioGroupsPath("StartupMixer");
+    File.WriteAllText(path,"""{"Groups":[{"Name":"Music","Volume":0.6},{"Name":"Effects","Volume":0.8}]}""");
+    var ini="[Content]\nCustomPath="+root+"\n[Audio]\nGroups=StartupMixer\n";
+    File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"GameSettings.ini"),ini);
+    File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"EditorSettings.ini"),ini);
+    Settings.Initialize();AudioSystem.LoadGroupsFromSettings();
+    Near(AudioSystem.GetGroup("Music")!.Volume,.6f);Check(!AudioSystem.IsAvailable);
+    Settings.Initialize(isEditor:true);AudioSystem.LoadGroupsFromSettings();
+    Near(AudioSystem.GetGroup("Effects")!.Volume,.8f);Check(!AudioSystem.IsAvailable);
+    Settings.Initialize();AudioSystem.ApplyGroups(new AudioGroupsAsset());
+});
 if(args.Contains("--unavailable"))
 {
     Check(!AudioSystem.Initialize());
@@ -296,7 +309,76 @@ Run("Listener follows only active camera and components follow owners even with 
     Check(AudioSystem.Initialize());
     using var fresh=AudioSystem.CreateSource(clip);fresh.Play();AudioSystem.SynchronizeSpatialAudio();
     Check(fresh.SpatialWriteCount==5 && AudioSystem.ListenerWriteCount==2);
-});Run("Natural completion, Content unload and context restart release sources and buffers safely",()=>
+});Run("Audio groups multiply parents with source volume and fades, update paused sources and reject cycles",()=>
+{
+    var effects=AudioSystem.CreateGroup("CheckEffects");
+    var ambience=AudioSystem.CreateGroup("CheckAmbience",effects);
+    var music=AudioSystem.CreateGroup("CheckMusic");
+    using var clip=Read(Wave());using var source=AudioSystem.CreateSource(clip);
+    using var defaultSource=AudioSystem.CreateSource(clip);
+    source.GroupName=ambience.Name;source.Volume=.8f;source.Loop=true;source.Play(1);
+    defaultSource.Loop=true;defaultSource.Play();
+    try
+    {
+        AudioSystem.Master.Volume=.5f;effects.Volume=.7f;ambience.Volume=.5f;
+        AudioSystem.Update(.5f);Near(source.EffectiveVolume,.07f);
+        AudioSystem.Api.GetSourceProperty(source.Handle,SourceFloat.Gain,out float gain);Near(gain,.07f);
+        Near(defaultSource.EffectiveVolume,.5f);
+        source.Pause();effects.Volume=.4f;
+        AudioSystem.Api.GetSourceProperty(source.Handle,SourceFloat.Gain,out gain);Near(gain,.04f);
+        Check(source.IsPaused);Near(source.Volume,.8f);
+        music.Volume=.25f;ambience.Parent=music;
+        AudioSystem.Api.GetSourceProperty(source.Handle,SourceFloat.Gain,out gain);Near(gain,.025f);
+        Throws<InvalidOperationException>(()=>music.Parent=ambience);
+        Throws<InvalidOperationException>(()=>AudioSystem.Master.Parent=effects);
+        Throws<ArgumentOutOfRangeException>(()=>effects.Volume=float.NaN);
+        Throws<ArgumentOutOfRangeException>(()=>effects.Volume=1.1f);
+        Throws<ArgumentException>(()=>AudioSystem.CreateGroup("checkeffects"));
+        Check(ReferenceEquals(AudioSystem.GetGroup("CHECKAMBIENCE"),ambience));
+        source.GroupName="CheckLater";Near(source.EffectiveVolume,.2f);
+        var later=AudioSystem.CreateGroup("CheckLater");later.Volume=.1f;
+        AudioSystem.Api.GetSourceProperty(source.Handle,SourceFloat.Gain,out gain);Near(gain,.02f);
+        source.Resume();AudioSystem.Update(.5f);Near(source.EffectiveVolume,.04f);
+        source.GroupName="";Near(source.EffectiveVolume,.4f);
+        ambience.Parent=null;Check(ReferenceEquals(ambience.Parent,AudioSystem.Master));
+        var world=new World();var emitter=world.Spawn<ProjectShockGL.Placeables.AudioEmitter>();
+        emitter.ClipName="UI/Test";emitter.GroupName=effects.Name;world.Update(0);
+        Check(emitter.Source.GroupName==effects.Name && emitter.Source.IsPlaying);
+        emitter.GroupName=music.Name;Check(emitter.Source.GroupName==music.Name);world.Clear();
+        AudioSystem.CheckError("finish audio group checks");
+    }
+    finally {AudioSystem.Master.Volume=1;}
+});
+Run("Audio Groups JSON loads through Content, validates before replacing live groups and keeps sources playing",()=>
+{
+    var path=Content.GetAudioGroupsPath("Checks/Mixer");Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    File.WriteAllText(path,"""{"Groups":[{"Name":"Ambience","Parent":"Effects","Volume":0.5},{"Name":"Master","Volume":0.8},{"Name":"Effects","Volume":0.5}]}""");
+    using var clip=Read(Wave());using var source=AudioSystem.CreateSource(clip);
+    source.GroupName="Ambience";source.Loop=true;source.Play();
+    AudioSystem.ApplyGroups(Content.LoadAudioGroups("Checks/Mixer"));
+    Near(source.EffectiveVolume,.2f);Check(source.IsPlaying);
+    var master=AudioSystem.Master;var effects=AudioSystem.GetGroup("Effects")!;
+    AudioSystem.Api.GetSourceProperty(source.Handle,SourceFloat.Gain,out float gain);Near(gain,.2f);
+    foreach(var json in new[]{
+        """{"Groups":[{"Name":"A","Parent":"Missing"}]}""",
+        """{"Groups":[{"Name":"A","Parent":"B"},{"Name":"B","Parent":"A"}]}""",
+        """{"Groups":[{"Name":"A"},{"Name":"a"}]}""",
+        """{"Groups":[{"Name":"Master","Parent":"A"},{"Name":"A"}]}""",
+        """{"Groups":[{"Name":"A","Volume":2}]}"""})
+    {
+        File.WriteAllText(path,json);Throws<InvalidDataException>(()=>AudioSystem.ApplyGroups(Content.LoadAudioGroups("Checks/Mixer")));
+        Check(ReferenceEquals(effects,AudioSystem.GetGroup("Effects")));Near(source.EffectiveVolume,.2f);
+    }
+    Throws<InvalidDataException>(()=>Content.GetAudioGroupsPath("../Outside"));
+    File.WriteAllText(path,"""{"Groups":[{"Name":"Effects","Volume":0.3}]}""");
+    AudioSystem.ApplyGroups(Content.LoadAudioGroups("Checks/Mixer"));
+    Check(ReferenceEquals(master,AudioSystem.Master) && ReferenceEquals(effects,AudioSystem.GetGroup("Effects")));
+    Near(effects.Volume,.3f);Near(source.EffectiveVolume,1);Check(source.IsPlaying);
+    AudioSystem.ApplyGroups(new AudioGroupsAsset());
+    Throws<InvalidOperationException>(()=>effects.Parent=AudioSystem.Master);
+    Near(AudioSystem.Master.Volume,1);
+});
+Run("Natural completion, Content unload and context restart release sources and buffers safely",()=>
 {
     using(var shortClip=Read(Wave(pcm:new byte[16])))
     using(var shortSource=AudioSystem.CreateSource(shortClip))

@@ -1,0 +1,9 @@
+{
+  "Groups": [
+    { "Name": "Master", "Volume": 1.0 },
+    { "Name": "Music", "Parent": "Master", "Volume": 1.0 },
+    { "Name": "Effects", "Parent": "Master", "Volume": 1.0 },
+    { "Name": "Environment", "Parent": "Effects", "Volume": 1.0 },
+    { "Name": "Interface", "Parent": "Effects", "Volume": 1.0 }
+  ]
+}

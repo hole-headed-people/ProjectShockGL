@@ -80,6 +80,7 @@ public class Game
         
         Layers.Load();
         Physics.Initialize();
+        AudioSystem.LoadGroupsFromSettings();
         if (!Application.IsEditor) AudioSystem.Initialize();
         
         PostProcessSettings.Apply(Settings.GetString("Game", "PostProcessingProfile", "Default"));

@@ -72,6 +72,7 @@ public class Game : ProjectShockGL.Core.Game
             SaveHelper.CaptureLevel();
         }
 
+        OnEndPlay();
         EndPlay?.Invoke();
         
         _player = null;
@@ -109,6 +110,7 @@ public class Game : ProjectShockGL.Core.Game
             OnRestoreState(state);
         }
         
+        OnBeginPlay();
         BeginPlay?.Invoke();
         BeginPlayEvent.InvokeAll();
     }
@@ -156,6 +158,8 @@ public class Game : ProjectShockGL.Core.Game
         }
     }
 
+    protected virtual void OnBeginPlay(){}
+    protected virtual void OnEndPlay(){}
     protected virtual void OnCaptureState(GameState state){}
     protected virtual void OnRestoreState(GameState state){}
     

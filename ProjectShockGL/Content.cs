@@ -375,6 +375,34 @@ public static class Content
         }
     }
 
+    public static AudioGroupsAsset LoadAudioGroups(string name)
+    {
+        try
+        {
+            return AudioGroupsAsset.Read(GetAudioGroupsPath(name));
+        }
+        catch (Exception error)
+        {
+            Log.PrintError($"LoadAudioGroups failed for '{name}'.", error);
+            throw;
+        }
+    }
+
+    public static string GetAudioGroupsPath(string name)
+    {
+        DetailAsset.ValidateReference(name, nameof(name));
+        
+        var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(Path, "Audio"));
+        var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(root, name.Replace('\\', '/') + ".json"));
+
+        if (!path.StartsWith(root + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("Audio Groups must be inside Content/Audio.");
+        }
+        
+        return path;
+    }
+
     public static AudioClip? LoadAudioClip(string name)
     {
         try

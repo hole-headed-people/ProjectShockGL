@@ -8,7 +8,8 @@ public class DamageableEntity : Entity,
     IKillable
 {
     public event Action<float>? CurrentHealthChanged; 
-    public event Action<Object, float, DamageInfo>? DamageReceived; 
+    public event Action<Object, float, DamageInfo>? DamageReceived;
+    public event Action<Object, Object?>? Died;
     
     private const float DefaultMaxHealth = 100f;
 
@@ -78,6 +79,7 @@ public class DamageableEntity : Entity,
         if (died)
         {
             OnDied(caller, info.Instigator);
+            Died?.Invoke(caller, info.Instigator);
         }
     }
     

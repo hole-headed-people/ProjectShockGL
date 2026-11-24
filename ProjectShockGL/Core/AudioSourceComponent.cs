@@ -20,6 +20,19 @@ public class AudioSourceComponent : Component
     public bool IsPlaying => _source?.IsPlaying == true;
     public bool IsPaused => _source?.IsPaused == true;
 
+    private string _groupName = "";
+    public string GroupName
+    {
+        get => _groupName;
+        set
+        {
+            ObjectDisposedException.ThrowIf(IsDestroyed, this);
+            value = value?.Trim() ?? "";
+            if (_source is { IsDisposed: false }) _source.GroupName = value;
+            _groupName = value;
+        }
+    }
+
     public AudioClip? Clip
     {
         get => _clip;
@@ -173,6 +186,7 @@ public class AudioSourceComponent : Component
             _source.SynchronizePosition();
         }
         
+        _source.GroupName = GroupName;
         _source.Volume = Volume;
         _source.Loop = Loop;
         

@@ -29,7 +29,7 @@
 - [x] Добавить основу 2D-звука: AudioClip через Content/Audio, WAV PCM/float mono/stereo, AudioSource и AudioSourceComponent, Play / Pause / Resume / Stop, Volume 0..1, Loop и Fade In / Fade Out на unscaled-времени.
 - [x] Добавить режим 2D / 3D источникам, линейное ослабление MinDistance / MaxDistance и слушателя от активной камеры; камеры наблюдения не меняют слушателя.
 - [x] Добавить размещаемый AudioEmitter: выбор WAV, режим 2D / 3D, громкость, Loop, PlayOnStart, расстояния и Inputs Play / Pause / Resume / Stop; сохранение в .map и префабы.
-- [ ] Добавить группы громкости Master / Music / Effects / UI.
+- [x] Добавить AudioGroup: словарь по имени, Master, родительские группы, громкость 0..1 и выбор группы AudioEmitter в Inspector. Категории загружаются из JSON через Content; добавлен Edit → Audio Groups Editor.
 - [ ] Добавить потоковое воспроизведение длинных записей и сжатые форматы. При публикации сохранять сведения о лицензии и нативных зависимостях звука.
 - [ ] Позже рассмотреть FMOD: отдельные звуковые события и параметры с сохранением API обычного воспроизведения клипов и совместимости старых проектов.
 - [x] Добавить систему частиц: ParticleSystemComponent, формы, JSON-ассеты, Particle Editor, ParticleEmitter, диапазоны, кривые, градиент, смешивание, Burst и Noise.

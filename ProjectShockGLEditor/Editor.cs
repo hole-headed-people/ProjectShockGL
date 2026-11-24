@@ -217,6 +217,7 @@ public static class Editor
         LightmapBakeWindow.Draw();
         UIEditor.Draw();
         EntityAssetEditor.Draw();
+        AudioGroupsEditor.Draw();
         ParticleEditor.Draw();
         BrushTextureWindow.Draw(_windowSize, SceneMin, SceneMax);
         
@@ -251,12 +252,14 @@ public static class Editor
         LightmapBakeWindow.Dispose();
         UIEditor.Dispose();
         ParticleEditor.Dispose();
+        AudioGroupsEditor.Dispose();
         _imGui.Dispose();
     }
 
     private static bool OnWindowClosing()
     {
         if (!ParticleEditor.AllowClose()) return false;
+        if (!AudioGroupsEditor.AllowClose()) return false;
         if (!EntityAssetEditor.AllowClose())
         {
             _allowClose = false;
@@ -487,6 +490,7 @@ public static class Editor
                 BrushTextureWindow.Open = !BrushTextureWindow.Open;
             }
             if (ImGui.MenuItem("Entity Asset Editor", "", EntityAssetEditor.Open)) EntityAssetEditor.Toggle();
+            if (ImGui.MenuItem("Audio Groups Editor", "", AudioGroupsEditor.Open)) AudioGroupsEditor.Toggle();
             if (ImGui.MenuItem("Particle Editor", "", ParticleEditor.Open)) ParticleEditor.Toggle();
             if (ImGui.MenuItem("UI Editor", "", UIEditor.Open)) UIEditor.Open = !UIEditor.Open;
 

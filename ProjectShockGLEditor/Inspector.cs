@@ -335,6 +335,14 @@ public static class Inspector
                             Changed(field, true);
                         }
                     }
+                    if (prop.GetCustomAttribute<AudioGroupNameAttribute>(inherit: true) != null &&
+                        ChooseOutputValue("##AudioGroupChoices", string.IsNullOrWhiteSpace(s) ? "Master" : s,
+                            ProjectShockGL.Audio.Audio.Groups.Keys.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
+                            searchable: true, searchHint: "Search audio groups...") is { } groupChoice)
+                    {
+                        prop.SetValue(entity, groupChoice);
+                        Changed(field, true);
+                    }
                     if (prop.GetCustomAttribute<ObjectNameAttribute>(inherit: true) != null &&
                         ChooseOutputValue("##ObjectNameChoices", s, GetOutputTargetNames(entity.World), searchable: true) is { } choice)
                     {

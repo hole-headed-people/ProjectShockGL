@@ -4312,12 +4312,15 @@ RunScene("AudioEmitter properties survive maps, prefabs, duplication and inspect
     File.WriteAllText(Path.Combine(testRoot,"Entities","AudioEmitter.json"),
         JsonConvert.SerializeObject(new EntityData {Class=typeof(ProjectShockGL.Placeables.AudioEmitter).AssemblyQualifiedName!}));
     var emitter=(ProjectShockGL.Placeables.AudioEmitter)SceneObjects.Create(PlaceableType.Entity,"AudioEmitter");
+    emitter.GroupName="Environment";
+    RecordInspector(emitter,"GroupName",()=>emitter.GroupName="Music");
+    UndoRedo.Undo();Check(emitter.GroupName=="Environment");UndoRedo.Redo();Check(emitter.GroupName=="Music");
     emitter.ClipName="Ambience/Room";emitter.SpatialMode=ProjectShockGL.Audio.AudioSpatialMode.ThreeD;
     emitter.Loop=true;emitter.PlayOnStart=false;emitter.MinDistance=30;emitter.MaxDistance=50;
     RecordInspector(emitter,"Volume",()=>emitter.Volume=.35f);
     UndoRedo.Undo();Check(emitter.Volume==1);UndoRedo.Redo();Check(emitter.Volume==.35f);
     var editable=EditableProperties.Get(emitter.GetType());
-    foreach(var name in new[]{"ClipName","SpatialMode","Volume","Loop","PlayOnStart","MinDistance","MaxDistance"})
+    foreach(var name in new[]{"ClipName","GroupName","SpatialMode","Volume","Loop","PlayOnStart","MinDistance","MaxDistance"})
         Check(editable.Any(property=>property.Name==name));
     var clipProperty=editable.Single(property=>property.Name=="ClipName");
     var attribute=clipProperty.GetCustomAttributes(typeof(EditableAttribute),true).Cast<EditableAttribute>().Single();
@@ -4327,6 +4330,7 @@ RunScene("AudioEmitter properties survive maps, prefabs, duplication and inspect
     var loaded=Game.Instance.World.Find<ProjectShockGL.Placeables.AudioEmitter>()!;
     void Verify(ProjectShockGL.Placeables.AudioEmitter item)
     {
+        Check(item.GroupName=="Music");
         Check(item.ClipName=="Ambience/Room" && item.SpatialMode==ProjectShockGL.Audio.AudioSpatialMode.ThreeD);
         Check(item.Volume==.35f && item.Loop && !item.PlayOnStart && item.MinDistance==30 && item.MaxDistance==50);
         Check(item.Source.Clip==null && !item.Source.IsPlaying);
@@ -5528,6 +5532,25 @@ RunScene("Resize snap, minimum size and combined size-position history survive r
     finally { SceneGrid.Step = previousStep; ObjectManipulator.Cancel(); }
 });
 
+Run("Audio Groups document opens and saves atomically, preserves dirty edits on errors and rejects invalid hierarchies",()=>
+{
+    var directory=Path.Combine(testRoot,"Audio");Directory.CreateDirectory(directory);
+    var document=new AudioGroupsDocument(directory);var path=Path.Combine(directory,"Mixer.json");
+    Check(!document.IsDirty && document.FilePath==null);
+    document.Asset.Groups.Add(new ProjectShockGL.Audio.AudioGroupData{Name="Effects",Parent="Master",Volume=.6f});
+    document.Asset.Groups.Add(new ProjectShockGL.Audio.AudioGroupData{Name="Environment",Parent="Effects",Volume=.5f});
+    Check(document.IsDirty);document.Save(path);Check(!document.IsDirty);
+    var saved=File.ReadAllText(path);document.Asset.Groups[1].Parent="Environment";
+    Throws(()=>document.Save(path));Check(File.ReadAllText(path)==saved && document.IsDirty);
+    document.Open(path);Check(!document.IsDirty && document.Asset.Groups[1].Parent=="Master");
+    var broken=Path.Combine(directory,"Broken.json");File.WriteAllText(broken,"""{"Groups":[{"Name":"A","Parent":"Missing"}]}""");
+    Throws(()=>document.Open(broken));Check(document.FilePath==path && document.Asset.Groups.Count==3);
+    document.Asset.Groups[1].Volume=.3f;var copy=Path.Combine(directory,"Copy.json");document.Save(copy);
+    Check(File.ReadAllText(path)==saved && document.FilePath==copy && !document.IsDirty);
+    Throws(()=>document.Save(Path.Combine(testRoot,"Outside.json")));
+    document.New();Check(document.FilePath==null && !document.IsDirty && document.Asset.Groups.Single().Name=="Master");
+});
+
 if (args.Contains("--imgui"))
 {
     var context = ImGuiNET.ImGui.CreateContext();
@@ -5549,6 +5572,36 @@ if (args.Contains("--imgui"))
             draw();
             ImGuiNET.ImGui.Render();
         }
+        Run("Real Audio Groups Editor opens configured JSON, saves and applies groups, and protects unsaved changes",()=>
+        {
+            var originalSettings=File.ReadAllText(settingsPath);
+            var mixer=Path.Combine(testRoot,"Audio","EditorMixer.json");
+            File.WriteAllText(mixer,"""{"Groups":[{"Name":"Master"},{"Name":"Effects","Parent":"Master","Volume":0.7}]}""");
+            File.WriteAllText(settingsPath,originalSettings+"\n[Audio]\nGroups=EditorMixer\n");
+            Settings.Initialize();
+            AudioGroupsEditor.Open=true;
+            try
+            {
+                Frame(AudioGroupsEditor.Draw);Check(ImGuiNET.ImGui.GetDrawData().TotalVtxCount>0);
+                var flags=System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic;
+                var document=(AudioGroupsDocument)typeof(AudioGroupsEditor).GetField("_document",flags)!.GetValue(null)!;
+                Check(document.FilePath==mixer && document.Asset.Groups.Count==2);
+                document.Asset.Groups[1].Volume=.25f;
+                var saved=(bool)typeof(AudioGroupsEditor).GetMethod("Save",flags)!.Invoke(null,new object[]{false})!;
+                Check(saved && !document.IsDirty && Content.LoadAudioGroups("EditorMixer").Groups[1].Volume==.25f);
+                Check(ProjectShockGL.Audio.Audio.GetGroup("Effects")!.Volume==.25f);
+                document.Asset.Groups.Add(new ProjectShockGL.Audio.AudioGroupData{Name="Ambience",Parent="Effects"});
+                Frame(AudioGroupsEditor.Draw);
+                Check(!AudioGroupsEditor.AllowClose() && AudioGroupsEditor.Open);
+                Frame(AudioGroupsEditor.Draw);
+                Check(ImGuiNET.ImGui.GetDrawData().TotalVtxCount>0);
+            }
+            finally
+            {
+                AudioGroupsEditor.Dispose();File.WriteAllText(settingsPath,originalSettings);Settings.Initialize();
+                ProjectShockGL.Audio.Audio.ApplyGroups(new ProjectShockGL.Audio.AudioGroupsAsset());
+            }
+        });
         RunScene("Real Texture window draws face controls, fits through its button and restores with undo", () =>
         {
             var brush = (BrushBox)SceneObjects.Create(PlaceableType.BrushBox);

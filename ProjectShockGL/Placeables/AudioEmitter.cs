@@ -34,6 +34,14 @@ public class AudioEmitter : Entity
     }
 
     [Editable]
+    [AudioGroupName]
+    public string GroupName
+    {
+        get => Source.GroupName;
+        set => Source.GroupName = value;
+    }
+
+    [Editable]
     public AudioSpatialMode SpatialMode
     {
         get => Source.SpatialMode;

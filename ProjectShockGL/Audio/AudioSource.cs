@@ -32,7 +32,7 @@ public sealed partial class AudioSource : IDisposable
     
     public bool IsDisposed { get; private set; }
     
-    internal float EffectiveVolume => _volume * _fade;
+    internal float EffectiveVolume => _volume * _fade * (Audio.GetGroup(GroupName) ?? Audio.Master).EffectiveVolume;
     internal uint Handle => _handle;
 
     internal AudioSource(AudioClip clip)
@@ -62,6 +62,26 @@ public sealed partial class AudioSource : IDisposable
 
     public bool IsPlaying => State == AudioPlaybackState.Playing;
     public bool IsPaused => State == AudioPlaybackState.Paused;
+
+    private string _groupName = "";
+    public string GroupName
+    {
+        get => _groupName;
+        set
+        {
+            ObjectDisposedException.ThrowIf(IsDisposed, this);
+            Audio.RequireGroupThread();
+            value = value?.Trim() ?? "";
+            if (_groupName == value) return;
+            _groupName = value;
+            ApplyGain();
+        }
+    }
+
+    internal void RefreshGain()
+    {
+        if (!IsDisposed) ApplyGain();
+    }
 
     public float Volume
     {
