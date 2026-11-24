@@ -1,3 +1,4 @@
+using ProjectShockGL.Audio;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using ProjectShockGL.Core;
@@ -24,6 +25,7 @@ public static class Content
     public static string Path { get; private set; } = null!;
 
     private static readonly Dictionary<string, Texture> Textures = new();
+    private static readonly Dictionary<string, AudioClip> AudioClips = new();
     private static readonly Dictionary<string, TextureAtlas> TextureAtlases = new();
     private static readonly Dictionary<(string Name, int Size), Font> Fonts = new();
     private static readonly Dictionary<string, Shader> Shaders = new();
@@ -373,22 +375,77 @@ public static class Content
         }
     }
 
+    public static AudioClip? LoadAudioClip(string name)
+    {
+        try
+        {
+            DetailAsset.ValidateReference(name, nameof(name));
+
+            name = name.Replace('\\', '/');
+            
+            var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(Path, "Audio"));
+            var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(root, name + ".wav"));
+
+            if (!path.StartsWith(root + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("Audio clips must be inside Content/Audio.");
+            }
+            
+            if (AudioClips.TryGetValue(name, out var cached))
+            {
+                if (!cached.IsDisposed)
+                {
+                    return cached;
+                }
+                
+                AudioClips.Remove(name);
+            }
+
+            if (!File.Exists(path))
+            {
+                Log.PrintWarning($"Resource not found: {path}");
+                
+                return null;
+            }
+
+            var clip = AudioClip.Load(path);
+            AudioClips.Add(name, clip);
+            
+            return clip;
+        }
+        catch (Exception error)
+        {
+            Log.PrintError($"LoadAudioClip failed for '{name}'.", error);
+            
+            throw;
+        }
+    }
+
     public static ParticleAsset? LoadParticle(string name)
     {
         try
         {
             var path = GetParticlePath(name);
             name = name.Replace('\\', '/');
-            if (Particles.TryGetValue(name, out var cached)) return cached;
+
+            if (Particles.TryGetValue(name, out var cached))
+            {
+                return cached;
+            }
+            
             if (!File.Exists(path))
             {
                 Log.PrintWarning($"Resource not found: {path}");
+                
                 return null;
             }
+            
             var asset = JsonConvert.DeserializeObject<ParticleAsset>(File.ReadAllText(path), JsonHelper.GetSettings())
                 ?? throw new InvalidDataException("Particle asset is empty or null.");
+            
             asset.Validate();
             Particles.Add(name, asset);
+            
             return asset;
         }
         catch (Exception error)
@@ -401,11 +458,16 @@ public static class Content
     public static void SaveParticle(string name, ParticleAsset asset)
     {
         ArgumentNullException.ThrowIfNull(asset);
+        
         asset.Validate();
+        
         var path = GetParticlePath(name);
         var json = JsonConvert.SerializeObject(asset, JsonHelper.GetSettings());
+        
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+        
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        
         try
         {
             File.WriteAllText(temporary, json);
@@ -413,18 +475,27 @@ public static class Content
         }
         finally
         {
-            if (File.Exists(temporary)) File.Delete(temporary);
+            if (File.Exists(temporary))
+            {
+                File.Delete(temporary);
+            }
         }
+        
         Particles.Remove(name.Replace('\\', '/'));
     }
 
     private static string GetParticlePath(string name)
     {
         DetailAsset.ValidateReference(name, nameof(name));
+        
         var directory = System.IO.Path.GetFullPath(System.IO.Path.Combine(Path, "Particles"));
         var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(directory, name.Replace('\\', '/') + ".json"));
+
         if (!path.StartsWith(directory + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        {
             throw new InvalidDataException("Particle assets must be inside Content/Particles.");
+        }
+        
         return path;
     }
     public static DetailAsset? LoadDetail(string name)
@@ -916,7 +987,7 @@ public static class Content
         PostProcessProfiles.Clear();
         
         var resources = Fonts.Values.Cast<IDisposable>()
-            .Concat(TextureAtlases.Values)
+            .Concat(AudioClips.Values).Concat(TextureAtlases.Values)
             .Concat(Programs.Values).Concat(Shaders.Values).Concat(Textures.Values).Concat(Meshes.Values).ToList();
         
         Programs.Clear();
@@ -933,6 +1004,7 @@ public static class Content
         
         _quadMesh = null;
 
+        AudioClips.Clear();
         Fonts.Clear();
         TextureAtlases.Clear();
         Shaders.Clear();

@@ -739,6 +739,63 @@ void Render()
         }
     }
     {
+        var environment=ProjectShockGL.Environment.Capture();
+        var world=new World();
+        using var front=Camera.Create();
+        using var back=Camera.Create();
+        using var side=Camera.Create();
+        front.AspectRatio=1;front.Near=.1f;front.Far=20;
+        back.AspectRatio=1;back.Transform.Rotation=Quaternion.CreateFromAxisAngle(Vector3.UnitY,MathF.PI);
+        side.Orthographic=true;side.OrthoSize=4;side.AspectRatio=1;
+        side.Transform.Position=new Vector3(100,0,0);
+        var particles=world.Spawn<ProjectShockGL.Core.Object>().AddComponent<ProjectShockGL.Core.ParticleSystemComponent>();
+        particles.Texture=Content.GetWhitePixel();particles.Rate=3;particles.Lifetime=100;
+        particles.Velocity=Vector3.Zero;particles.Size=.5f;
+        world.Update(1);particles.Stop();
+        var flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+        var list=(System.Collections.IList)typeof(ProjectShockGL.Core.ParticleSystemComponent).GetField("_particles",flags)!.GetValue(particles)!;
+        void Set(int index,string field,object value)
+        {
+            var particle=list[index]!;particle.GetType().GetField(field)!.SetValue(particle,value);list[index]=particle;
+        }
+        float Age(int index) {var particle=list[index]!;return (float)particle.GetType().GetField("Age")!.GetValue(particle)!;}
+        Mesh Mesh()=>(Mesh)typeof(ProjectShockGL.Core.ParticleSystemComponent).GetField("_mesh",flags)!.GetValue(particles)!;
+        var queue=new RenderQueue();
+        void Frame(Camera camera,int expected)
+        {
+            graphics.BeginDraw(camera);world.Render(queue);queue.Flush(graphics);gl.Finish();
+            Check(graphics.Statistics.DrawCalls==(expected==0?0:1));
+            Check(Mesh().DrawIndexCount==(uint)(expected*6));graphics.EndDraw();
+        }
+        try
+        {
+            ProjectShockGL.Environment.IsFogEnabled=false;
+            Set(0,"Position",new Vector3(0,0,-3));
+            Set(1,"Position",new Vector3(100,0,-3));
+            Set(2,"Position",new Vector3(0,0,3));
+            Frame(front,1);Frame(back,1);Frame(side,1);Frame(front,1);
+            front.Transform.Rotation=Quaternion.CreateFromAxisAngle(Vector3.UnitY,MathF.PI/2);
+            Frame(front,0);
+            var age=Age(0);Set(0,"Velocity",new Vector3(.2f,0,0));world.Update(1);
+            Check(particles.ParticleCount==3 && Age(0)>age+.99f);
+            front.Transform.Rotation=Quaternion.Identity;Frame(front,1);
+            // Center lies outside the orthographic view, but a rotated corner remains visible.
+            side.Transform.Position=Vector3.Zero;
+            Set(1,"Position",new Vector3(1000,0,-3));Set(2,"Position",new Vector3(1000,0,3));
+            Set(0,"Position",new Vector3(2.8f,0,-3));Set(0,"StartSize",2f);Set(0,"Rotation",45f);
+            Frame(side,1);
+            Set(0,"Position",new Vector3(4,0,-3));Frame(side,0);
+            // Lifetime scaling must be included in the bound used for visibility.
+            particles.SizeOverLifetime=true;particles.SizeCurve=[new(0,3),new(1,3)];Frame(side,1);
+            particles.SizeOverLifetime=false;
+            Set(0,"Position",new Vector3(0,0,-30));Frame(front,0);
+            Set(0,"Position",new Vector3(0,0,-3));Frame(front,1);
+            Check(particles.ParticleCount==3 && gl.GetError()==GLEnum.NoError);
+            Console.WriteLine("PASS: Particle frustum culling filters per perspective/orthographic camera, retains rotated edge quads and lifetime sizes, skips empty draws and keeps offscreen simulation alive");
+        }
+        finally {world.Clear();ProjectShockGL.Environment.Apply(environment);}
+    }
+    {
         var appearanceEnvironment=ProjectShockGL.Environment.Capture();
         var appearanceWorld=new World();
         using var appearanceCamera=Camera.Create();
@@ -791,7 +848,25 @@ void Render()
             Check(Math.Abs(vertices[0]-(-1+.3125f))<.001f && Math.Abs(vertices[1]+.3125f)<.001f);
             graphics.EndDraw();
             Check(gl.GetError()==GLEnum.NoError);
-            Console.WriteLine("PASS: Individual particle gradients reach distinct pixels in one draw and lifetime size/rotation transform billboard corners correctly");
+            var mesh=(Mesh)typeof(ProjectShockGL.Core.ParticleSystemComponent).GetField("_mesh",instanceFlags)!.GetValue(appearanceParticles)!;
+            var sortBuffer=typeof(ProjectShockGL.Core.ParticleSystemComponent).GetField("_sortBuffer",instanceFlags)!.GetValue(appearanceParticles);
+            var colorBuffer=typeof(ProjectShockGL.Core.ParticleSystemComponent).GetField("_colors",instanceFlags)!.GetValue(appearanceParticles);
+            var revision=mesh.Revision;
+            var vbo=(uint)typeof(Mesh).GetField("_vbo",instanceFlags)!.GetValue(mesh)!;
+            particleList.RemoveAt(1);
+            graphics.BeginDraw(appearanceCamera);
+            appearanceWorld.Render(appearanceQueue);appearanceQueue.Flush(graphics);gl.Finish();
+            Check(mesh.DrawIndexCount==6 && mesh.TriangleCount==2 && graphics.Statistics.DrawCalls==1);
+            Check(ReferenceEquals(sortBuffer,typeof(ProjectShockGL.Core.ParticleSystemComponent).GetField("_sortBuffer",instanceFlags)!.GetValue(appearanceParticles)));
+            Check(ReferenceEquals(vertices,typeof(ProjectShockGL.Core.ParticleSystemComponent).GetField("_vertices",instanceFlags)!.GetValue(appearanceParticles)));
+            Check(ReferenceEquals(colorBuffer,typeof(ProjectShockGL.Core.ParticleSystemComponent).GetField("_colors",instanceFlags)!.GetValue(appearanceParticles)));
+            Check(mesh.Revision==revision);
+            var uploaded=new float[32];gl.BindBuffer(BufferTargetARB.ArrayBuffer,vbo);
+            unsafe {fixed(float* data=uploaded)gl.GetBufferSubData(BufferTargetARB.ArrayBuffer,0,(nuint)(32*sizeof(float)),data);}
+            Check(uploaded.AsSpan().SequenceEqual(vertices.AsSpan(0,32)));
+            Check(mesh.Vertices.Span[0]==0); // Transient uploads leave the unused CPU mesh copy untouched.
+            graphics.EndDraw();Check(gl.GetError()==GLEnum.NoError);
+            Console.WriteLine("PASS: Particle gradients and rotation remain correct; live-prefix GPU uploads reuse buffers and shrink draw counts without CPU mesh rebuilds");
         }
         finally
         {
@@ -846,6 +921,11 @@ void Render()
             Matches(BlendPixel(ParticleBlendMode.Multiply,Color.Black),Vector3.Zero);
             Matches(BlendPixel(ParticleBlendMode.Additive,Color.White,true),new Vector3(.4f,.5f,.6f));
             Matches(BlendPixel(ParticleBlendMode.Multiply,Color.Black,true),new Vector3(.4f,.5f,.6f));
+            foreach(var mode in Enum.GetValues<ParticleBlendMode>())
+            {
+                Matches(BlendPixel(mode,new Color(.8f,.6f,.4f,0)),new Vector3(.4f,.5f,.6f));
+                Matches(BlendPixel(mode,new Color(.8f,.6f,.4f,0),true),new Vector3(.4f,.5f,.6f));
+            }
             // Returning to Alpha must not retain Multiply's shader parameter or GL blend factors.
             Matches(BlendPixel(ParticleBlendMode.Alpha,color),new Vector3(.3f,.45f,.6f));
             Check(gl.GetError()==GLEnum.NoError);

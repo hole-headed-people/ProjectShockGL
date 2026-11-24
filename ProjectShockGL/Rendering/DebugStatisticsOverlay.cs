@@ -32,6 +32,7 @@ internal sealed class DebugStatisticsOverlay
             var uiAndDebug = stats.DrawCalls - stats.WorldDrawCalls - stats.PostProcessDrawCalls;
             var text = $"FPS: {Application.Fps:F0}   Frame: {Application.FrameTimeMs:F2} ms\n" +
                        $"CPU Update: {Application.UpdateTimeMs:F2} ms   Render: {Application.RenderTimeMs:F2} ms\n" +
+                       $"Audio CPU: {ProjectShockGL.Audio.Audio.TotalUpdateTimeMs:F3} ms (Update {ProjectShockGL.Audio.Audio.UpdateTimeMs:F3} / Spatial {ProjectShockGL.Audio.Audio.SpatialUpdateTimeMs:F3})\n" +
                        $"Draw calls (excl. stats): {stats.DrawCalls}\n" +
                        $"World: {stats.WorldDrawCalls}   Post: {stats.PostProcessDrawCalls}   UI/Debug: {uiAndDebug}\n" +
                        $"Triangles (incl. UI): {stats.Triangles:N0}\n" +

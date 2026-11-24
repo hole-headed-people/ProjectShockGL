@@ -14,6 +14,7 @@ uniform bool uFogEnabled;
 void main()
 {
     vec4 color=texture(uTexture,vTexCoord)*vColor*uColor;
+    if(color.a == 0.0) discard;
     if(uFogEnabled)
     {
         float factor=clamp((uFogFar-length(vWorldPos-uCameraPos))/(uFogFar-uFogNear),0.0,1.0);

@@ -1,3 +1,4 @@
+using AudioSystem = ProjectShockGL.Audio.Audio;
 using ProjectShockGL.Rendering;
 using Silk.NET.Input;
 using Silk.NET.Core;
@@ -36,18 +37,21 @@ public static class Application
     private static Graphics _graphics = null!;
     
     private static readonly DebugStatisticsOverlay DebugStatistics = new();
-    public static double UpdateTimeMs { get; private set; }
-    public static double RenderTimeMs { get; private set; }
+    
     private static string _title = "";
     
     private static int _frameCount;
+    
     private static double _fpsTimer;
+    
     private static bool _quitRequested;
     private static bool _closeApproved;
     private static bool _hasUnloaded;
 
     private static bool _isShowingOverlayStatistics;
     
+    public static double UpdateTimeMs { get; private set; }
+    public static double RenderTimeMs { get; private set; }
     public static double Fps { get; private set; }
     public static double FrameTimeMs { get; private set; }
     public static bool IsEditor { get; private set; }
@@ -107,6 +111,7 @@ public static class Application
         if (mode.Equals("Borderless", StringComparison.OrdinalIgnoreCase))
         {
             var monitor = Silk.NET.Windowing.Monitor.GetMainMonitor(null);
+            
             var resolution = monitor.VideoMode.Resolution
                 ?? throw new InvalidOperationException("Cannot determine the primary monitor resolution.");
 
@@ -136,8 +141,10 @@ public static class Application
         }
         
         options.Size = new Vector2D<int>(width, height);
+        
         options.WindowState = Settings.GetBool("Window", "StartMaximized", false)
             ? WindowState.Maximized : WindowState.Normal;
+        
         options.WindowBorder = Settings.GetBool("Window", "CanResize", false)
             ? WindowBorder.Resizable : WindowBorder.Fixed;
         
@@ -207,6 +214,7 @@ public static class Application
         }
 
         var updateStart = System.Diagnostics.Stopwatch.GetTimestamp();
+        
         AdvanceTime(deltaTime);
         Update?.Invoke((float)deltaTime);
         
@@ -254,15 +262,25 @@ public static class Application
         }
         
         var renderStart = System.Diagnostics.Stopwatch.GetTimestamp();
+        
         Camera.SynchronizeComponents();
+        AudioSystem.SynchronizeSpatialAudio();
+        
         RenderCaptures?.Invoke();
         _graphics.BeginDraw(Camera.Active);
 
         BeforeRender?.Invoke((float)deltaTime);
         
         _graphics.BeginWorld();
-        try { Render?.Invoke(_graphics); }
-        finally { _graphics.EndWorld(); }
+        
+        try
+        {
+            Render?.Invoke(_graphics);
+        }
+        finally
+        {
+            _graphics.EndWorld();
+        }
 
         RenderOverlayBackground?.Invoke(_graphics);
         RenderOverlay?.Invoke(_graphics);
@@ -314,6 +332,7 @@ public static class Application
             () => Cleanup.Run(Unload?.GetInvocationList().Cast<Action>().ToArray() ?? []),
             _renderer.Dispose,
             Content.UnloadAll,
+            AudioSystem.Shutdown,
             _inputContext.Dispose,
             _gl.Dispose);
     }

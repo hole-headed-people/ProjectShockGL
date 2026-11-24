@@ -1,0 +1,7 @@
+{
+  "AssetId": "97bcb928-2934-47ef-b0ed-286ae87455d5",
+  "Class": "ProjectShockGL.Placeables.AudioEmitter, ProjectShockGL",
+  "Parameters": {
+    "DebugBillboard": "Editor/Entity"
+  }
+}

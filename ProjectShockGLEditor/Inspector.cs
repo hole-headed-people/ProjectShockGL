@@ -325,7 +325,7 @@ public static class Inspector
                         var root = Path.GetFullPath(Path.Combine(Content.Path, assetDirectory));
                         var contentRoot = Path.GetFullPath(Content.Path) + Path.DirectorySeparatorChar;
                         var names = root.StartsWith(contentRoot, StringComparison.OrdinalIgnoreCase) && Directory.Exists(root)
-                            ? Directory.EnumerateFiles(root, "*.json", SearchOption.AllDirectories)
+                            ? Directory.EnumerateFiles(root, prop.GetCustomAttribute<EditableAttribute>()!.ContentPattern, SearchOption.AllDirectories)
                                 .Select(file => Path.ChangeExtension(Path.GetRelativePath(root, file), null)!.Replace('\\', '/'))
                                 .Order(StringComparer.OrdinalIgnoreCase).ToArray()
                             : [];
@@ -813,7 +813,7 @@ public static class Inspector
                     
                     if (Directory.Exists(root))
                     {
-                        foreach (var file in Directory.EnumerateFiles(root, "*.json", SearchOption.AllDirectories)
+                        foreach (var file in Directory.EnumerateFiles(root, options.ContentPattern, SearchOption.AllDirectories)
                                      .Order(StringComparer.OrdinalIgnoreCase))
                         {
                             var name = Path.ChangeExtension(Path.GetRelativePath(root, file), null)!.Replace('\\', '/');

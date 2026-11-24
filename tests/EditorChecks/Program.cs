@@ -4307,6 +4307,38 @@ Run("Spotlight map roundtrip and duplication preserve full cone angles and orien
     Check(loaded.InnerAngle == 20);
 });
 
+RunScene("AudioEmitter properties survive maps, prefabs, duplication and inspector Undo/Redo without playback",()=>
+{
+    File.WriteAllText(Path.Combine(testRoot,"Entities","AudioEmitter.json"),
+        JsonConvert.SerializeObject(new EntityData {Class=typeof(ProjectShockGL.Placeables.AudioEmitter).AssemblyQualifiedName!}));
+    var emitter=(ProjectShockGL.Placeables.AudioEmitter)SceneObjects.Create(PlaceableType.Entity,"AudioEmitter");
+    emitter.ClipName="Ambience/Room";emitter.SpatialMode=ProjectShockGL.Audio.AudioSpatialMode.ThreeD;
+    emitter.Loop=true;emitter.PlayOnStart=false;emitter.MinDistance=30;emitter.MaxDistance=50;
+    RecordInspector(emitter,"Volume",()=>emitter.Volume=.35f);
+    UndoRedo.Undo();Check(emitter.Volume==1);UndoRedo.Redo();Check(emitter.Volume==.35f);
+    var editable=EditableProperties.Get(emitter.GetType());
+    foreach(var name in new[]{"ClipName","SpatialMode","Volume","Loop","PlayOnStart","MinDistance","MaxDistance"})
+        Check(editable.Any(property=>property.Name==name));
+    var clipProperty=editable.Single(property=>property.Name=="ClipName");
+    var attribute=clipProperty.GetCustomAttributes(typeof(EditableAttribute),true).Cast<EditableAttribute>().Single();
+    Check(attribute.ContentDirectory=="Audio" && attribute.ContentPattern=="*.wav");
+    var path=Path.Combine(testRoot,"audio-emitter.map");
+    EditorLevelManager.SaveCurrentLevel(path);EditorLevelManager.OpenLevel(path);
+    var loaded=Game.Instance.World.Find<ProjectShockGL.Placeables.AudioEmitter>()!;
+    void Verify(ProjectShockGL.Placeables.AudioEmitter item)
+    {
+        Check(item.ClipName=="Ambience/Room" && item.SpatialMode==ProjectShockGL.Audio.AudioSpatialMode.ThreeD);
+        Check(item.Volume==.35f && item.Loop && !item.PlayOnStart && item.MinDistance==30 && item.MaxDistance==50);
+        Check(item.Source.Clip==null && !item.Source.IsPlaying);
+    }
+    Verify(loaded);Verify((ProjectShockGL.Placeables.AudioEmitter)EditorLevelManager.DuplicateObject(loaded));
+    var prefab="AudioEmitter-"+Guid.NewGuid().ToString("N");PrefabTools.Save(loaded,prefab);
+    Verify((ProjectShockGL.Placeables.AudioEmitter)Prefab.Instantiate(prefab));
+    loaded.MaxDistance=.5f;loaded.MinDistance=.1f;loaded.SpatialMode=ProjectShockGL.Audio.AudioSpatialMode.TwoD;
+    EditorLevelManager.SaveCurrentLevel(path);EditorLevelManager.OpenLevel(path);
+    var small=Game.Instance.World.Find<ProjectShockGL.Placeables.AudioEmitter>()!;
+    Check(small.MinDistance==.1f && small.MaxDistance==.5f && small.SpatialMode==ProjectShockGL.Audio.AudioSpatialMode.TwoD);
+});
 RunScene("Light modes default to Realtime and survive maps, prefabs, duplication and inspector Undo/Redo", () =>
 {
     var light = (Light)SceneObjects.Create(PlaceableType.Entity, "Light");

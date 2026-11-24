@@ -12,9 +12,13 @@ public enum Plane
 public class Graphics
 { 
     private Camera _camera = null!;
+    
     private Renderer Renderer { get; }
+    
+    internal CameraFrustum Frustum { get; private set; }
     internal Vector3 CameraPosition => _camera.Transform.Position;
     internal Matrix4x4 BillboardModel(Vector3 position, Vector2 size) => CreateBillboardModel(_camera, position, size, BillboardMode.ViewAligned);
+    
     public RenderStatistics Statistics => Renderer.Statistics;
     
     public Graphics(Renderer renderer)
@@ -31,6 +35,7 @@ public class Graphics
     {
         _camera = camera;
         
+        Frustum = new CameraFrustum(camera.GetViewMatrix() * camera.GetProjectionMatrix());
         Renderer.BeginFrame(camera);
     }
 

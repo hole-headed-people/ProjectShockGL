@@ -1,3 +1,4 @@
+using AudioSystem = ProjectShockGL.Audio.Audio;
 using ProjectShockGL.Localization;
 using ProjectShockGL.Rendering;
 using ProjectShockGL.UI;
@@ -79,6 +80,7 @@ public class Game
         
         Layers.Load();
         Physics.Initialize();
+        if (!Application.IsEditor) AudioSystem.Initialize();
         
         PostProcessSettings.Apply(Settings.GetString("Game", "PostProcessingProfile", "Default"));
         
@@ -104,6 +106,7 @@ public class Game
             }
             
             UIManager.Update(deltaSeconds);
+            AudioSystem.Update(deltaSeconds);
         }
     }
     
@@ -132,7 +135,7 @@ public class Game
         Cleanup.Run(() =>
         {
             LevelManager.Unload(World);
-        }, UIManager.Destroy);
+        }, UIManager.Destroy, AudioSystem.Shutdown);
     }
 
     private void RenderUI(Graphics graphics)

@@ -10,8 +10,11 @@ public class Mesh : IDisposable
     private uint _vao;
     private uint _vbo;
     private uint _ebo;
+    
     private uint _lightmapVbo;
     private uint _colorVbo;
+    
+    private int _colorCapacity;
     
     private Vector2[] _lightmapUv = [];
 
@@ -184,8 +187,50 @@ public class Mesh : IDisposable
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer,_colorVbo);
         fixed(Vector4* data=colors)
             _gl.BufferData(BufferTargetARB.ArrayBuffer,(nuint)(colors.Length*sizeof(Vector4)),data,BufferUsageARB.DynamicDraw);
+        _colorCapacity = colors.Length;
         _gl.VertexAttribPointer(9,4,VertexAttribPointerType.Float,false,(uint)sizeof(Vector4),(void*)0);
         _gl.EnableVertexAttribArray(9);
+    }
+    // Transient particle geometry is consumed only by Draw: no CPU mesh copy,
+    // bounds scan or static-batch revision is needed for each camera pass.
+    internal unsafe void UpdateParticleVertices(ReadOnlySpan<float> vertices, ReadOnlySpan<Vector4> colors)
+    {
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        if (vertices.Length > _vertices.Length || vertices.Length % 32 != 0 || colors.Length != vertices.Length / 8)
+        {
+            throw new ArgumentException("Particle vertices and colors must fit the mesh and contain complete quads.");
+        }
+
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
+        fixed (float* data = vertices)
+        {
+            _gl.BufferSubData(BufferTargetARB.ArrayBuffer, 0, (nuint)(vertices.Length * sizeof(float)), data);
+        }
+
+        _gl.BindVertexArray(_vao);
+        if (_colorVbo == 0)
+        {
+            _colorVbo = _gl.GenBuffer();
+            _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _colorVbo);
+            _gl.VertexAttribPointer(9, 4, VertexAttribPointerType.Float, false, (uint)sizeof(Vector4), (void*)0);
+            _gl.EnableVertexAttribArray(9);
+        }
+        else
+        {
+            _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _colorVbo);
+        }
+
+        var capacity = _vertices.Length / 8;
+        if (_colorCapacity != capacity)
+        {
+            _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(capacity * sizeof(Vector4)), (void*)0, BufferUsageARB.DynamicDraw);
+            _colorCapacity = capacity;
+        }
+        fixed (Vector4* data = colors)
+        {
+            _gl.BufferSubData(BufferTargetARB.ArrayBuffer, 0, (nuint)(colors.Length * sizeof(Vector4)), data);
+        }
+        DrawIndexCount = (uint)(vertices.Length / 32 * 6);
     }
     public void Dispose()
     {

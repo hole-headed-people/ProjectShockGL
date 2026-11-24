@@ -40,6 +40,29 @@ public class ParticleSystemComponent : RenderComponent
     private float[] _vertices = [];
     
     private int _capacity;
+    private ParticleSortEntry[] _sortBuffer = [];
+    private readonly ShaderParameters _shaderParameters = new();
+    private int _parameterBlendMode = -1;
+    private ParticleCommand? _command;
+
+    private struct ParticleSortEntry
+    {
+        public int Index;
+        public float Distance;
+        public float Size;
+        public float Time;
+    }
+
+    private sealed class ParticleSortComparer : IComparer<ParticleSortEntry>
+    {
+        public static readonly ParticleSortComparer Instance = new();
+
+        public int Compare(ParticleSortEntry left, ParticleSortEntry right)
+        {
+            var distance = right.Distance.CompareTo(left.Distance);
+            return distance != 0 ? distance : left.Index.CompareTo(right.Index);
+        }
+    }
 
     private ParticleRange? _startSize, _startLifetime;
     private ParticleRange _startRotation, _rotationSpeed;
@@ -512,13 +535,11 @@ public class ParticleSystemComponent : RenderComponent
             return;
         }
         
-        queue.Add(new ParticleCommand(this)
-        {
-            SurfaceMode = Rendering.SurfaceMode.Transparent,
-            RenderOrder = RenderOrder
-        });
+        _command ??= new ParticleCommand(this);
+        _command.SurfaceMode = Rendering.SurfaceMode.Transparent;
+        _command.RenderOrder = RenderOrder;
+        queue.Add(_command);
     }
-
     private void DrawParticles(Graphics graphics)
     {
         if (IsDestroyed || _particles.Count == 0 || Texture is not { Handle: not 0 } texture)
@@ -526,17 +547,51 @@ public class ParticleSystemComponent : RenderComponent
             return;
         }
         
-        var ordered = _particles.OrderByDescending(p => Vector3.DistanceSquared(graphics.CameraPosition, p.Position)).ToArray();
-        
-        EnsureMesh(ordered.Length);
-        
-        for (var i = 0; i < ordered.Length; i++)
+        if (_sortBuffer.Length < _particles.Count)
         {
-            var particle = ordered[i];
-            var time = Math.Clamp(particle.Age / particle.Lifetime,0,1);
-            var size = particle.StartSize * (SizeOverLifetime ? ParticleAppearance.EvaluateSize(_sizeCurve,time) : 1);
+            Array.Resize(ref _sortBuffer, Math.Max(_particles.Count, Math.Max(16, _sortBuffer.Length * 2)));
+        }
+        var count = 0;
+        var cameraPosition = graphics.CameraPosition;
+        for (var i = 0; i < _particles.Count; i++)
+        {
+            var particle = _particles[i];
+            var time = Math.Clamp(particle.Age / particle.Lifetime, 0, 1);
+            var size = particle.StartSize * (SizeOverLifetime ? ParticleAppearance.EvaluateSize(_sizeCurve, time) : 1);
+            // A sphere encloses all four corners, including rotation around the view axis.
+            // Conservative overlap keeps partially visible quads at the screen edges.
+            if (!graphics.Frustum.IntersectsSphere(particle.Position, MathF.Abs(size) * .7071068f))
+            {
+                continue;
+            }
+            _sortBuffer[count++] = new ParticleSortEntry
+            {
+                Index = i,
+                Distance = Vector3.DistanceSquared(cameraPosition, particle.Position),
+                Size = size,
+                Time = time
+            };
+        }
+        if (count == 0)
+        {
+            if (_mesh != null) _mesh.DrawIndexCount = 0;
+            return;
+        }
+        EnsureMesh(count);
+        Array.Sort(_sortBuffer, 0, count, ParticleSortComparer.Instance);
+        var billboard = graphics.BillboardModel(Vector3.Zero, Vector2.One);
+
+        for (var i = 0; i < count; i++)
+        {
+            var particle = _particles[_sortBuffer[i].Index];
+            var time = _sortBuffer[i].Time;
+            var size = _sortBuffer[i].Size;
             var angle = (particle.Rotation + particle.RotationSpeed * particle.Age) * MathF.PI / 180;
-            var model = Matrix4x4.CreateRotationZ(angle) * graphics.BillboardModel(particle.Position, new Vector2(size));
+            var model = billboard;
+            model.M11 *= size; model.M12 *= size; model.M13 *= size;
+            model.M21 *= size; model.M22 *= size; model.M23 *= size;
+            model.Translation = particle.Position;
+            model = Matrix4x4.CreateRotationZ(angle) * model;
             var tint = ColorOverLifetime ? ParticleAppearance.EvaluateColor(_colorGradient,time) : Color.White;
             var color = particle.StartColor;
             var rgba = new Vector4(color.R*tint.R,color.G*tint.G,color.B*tint.B,color.A*tint.A);
@@ -561,15 +616,16 @@ public class ParticleSystemComponent : RenderComponent
             }
         }
         
-        _mesh!.UpdateVertices(_vertices);
-        _mesh.UpdateVertexColors(_colors);
-        
-        _mesh.DrawIndexCount = (uint)ordered.Length * 6;
-        
-        var parameters = new ShaderParameters();
-        parameters.Set("uParticleBlendMode", (int)BlendMode);
+        _mesh!.UpdateParticleVertices(_vertices.AsSpan(0, count * 32), _colors.AsSpan(0, count * 4));
+
+        if (_parameterBlendMode != (int)BlendMode)
+        {
+            _shaderParameters.Set("uParticleBlendMode", (int)BlendMode);
+            _parameterBlendMode = (int)BlendMode;
+        }
+
         graphics.DrawMesh(_mesh, Vector3.Zero, Quaternion.Identity, Vector3.One, texture, Color.White,
-            lit: false, ignoreDepth: false, shader: Content.LoadShaderProgram("Particle", "Particle"), shaderParameters: parameters, backfaceCulling: false, surfaceMode: Rendering.SurfaceMode.Transparent, particleBlendMode: BlendMode);
+            lit: false, ignoreDepth: false, shader: Content.LoadShaderProgram("Particle", "Particle"), shaderParameters: _shaderParameters, backfaceCulling: false, surfaceMode: Rendering.SurfaceMode.Transparent, particleBlendMode: BlendMode);
     }
 
     private void EnsureMesh(int count)
@@ -604,6 +660,7 @@ public class ParticleSystemComponent : RenderComponent
         _vertices = vertices;
         _colors = new Vector4[capacity * 4];
         _capacity = capacity;
+
     }
 
     public override void Destroy()
@@ -617,6 +674,8 @@ public class ParticleSystemComponent : RenderComponent
         _vertices = [];
         _colors = [];
         _capacity = 0;
+        _sortBuffer = [];
+        _command = null;
         
         base.Destroy();
     }
