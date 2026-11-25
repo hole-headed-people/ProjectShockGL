@@ -33,6 +33,37 @@ public static unsafe class Audio
     public static double TotalUpdateTimeMs => UpdateTimeMs + SpatialUpdateTimeMs;
     public static bool IsAvailable => _al != null;
 
+    private static ReverbProcessor? _reverb;
+    private static bool _reverbSendsActive;
+    private static ReverbTransition _reverbTransition = new();
+    public static bool IsReverbAvailable => _reverb != null;
+    internal static ReverbSettings CurrentReverb => _reverbTransition.Current;
+    internal static uint ReverbSlot => _reverb?.Slot ?? 0;
+
+    internal static void AttachReverb(AudioSource source)
+    {
+        if (source.Handle != 0) _reverb?.Attach(source.Handle, source.ReverbEnabled && _reverbSendsActive);
+    }
+
+    private static void InitializeReverb()
+    {
+        try
+        {
+            if (!_alc!.IsExtensionPresent(_device, "ALC_EXT_EFX"))
+                throw new NotSupportedException("ALC_EXT_EFX is unavailable.");
+            int sends = 0;
+            _alc.GetContextProperty(_device, (GetContextInteger)0x20003, 1, &sends); // ALC_MAX_AUXILIARY_SENDS
+            if (sends < 1) throw new NotSupportedException("No auxiliary effect sends are available.");
+            _reverb = new ReverbProcessor();
+        }
+        catch (Exception error)
+        {
+            _reverb = null;
+            while (Api.GetError() != AudioError.NoError) { }
+            Log.PrintWarning("Reverb is unavailable; normal audio will continue. " + error.Message);
+        }
+    }
+
     public static AudioGroup Master { get; } = new("Master", null);
     
     private static readonly Dictionary<string, AudioGroup> GroupLookup = new(StringComparer.OrdinalIgnoreCase)
@@ -146,6 +177,7 @@ public static unsafe class Audio
             _al.DistanceModel(DistanceModel.LinearDistanceClamped);
             _al.DopplerFactor(0);
             CheckError("initialize audio");
+            InitializeReverb();
             
             return true;
         }
@@ -174,6 +206,35 @@ public static unsafe class Audio
         return source;
     }
 
+    public static AudioSource PlayOneShot(AudioClip clip,
+        AudioSpatialMode spatialMode = AudioSpatialMode.TwoD, Vector3 position = default,
+        float volume = 1, string? groupName = null, bool reverbEnabled = true,
+        float minDistance = 1, float maxDistance = 20)
+    {
+        var source = CreateSource(clip);
+        try
+        {
+            source.SpatialMode = spatialMode;
+            source.Position = position;
+            source.Volume = volume;
+            source.GroupName = groupName ?? "";
+            source.ReverbEnabled = reverbEnabled;
+            source.MaxDistance = Math.Max(20, maxDistance);
+            source.MinDistance = minDistance;
+            source.MaxDistance = maxDistance;
+            source.DisposeWhenStopped = true;
+            source.Play();
+            // No device (or an already completed very short clip) must not leave an idle source registered.
+            if (source.State == AudioPlaybackState.Stopped) source.Dispose();
+            return source;
+        }
+        catch
+        {
+            source.Dispose();
+            throw;
+        }
+    }
+
     public static void Update(float unscaledDeltaSeconds)
     {
         if (!float.IsFinite(unscaledDeltaSeconds) || unscaledDeltaSeconds < 0)
@@ -192,6 +253,8 @@ public static unsafe class Audio
             foreach (var source in Sources.ToArray())
             {
                 source.Update(unscaledDeltaSeconds);
+                if (!source.IsDisposed && source.DisposeWhenStopped && source.State == AudioPlaybackState.Stopped)
+                    source.Dispose();
             }
         }
         finally
@@ -200,8 +263,10 @@ public static unsafe class Audio
         }
     }
 
-    internal static void SynchronizeSpatialAudio()
+    internal static void SynchronizeSpatialAudio(float unscaledDeltaSeconds = 0)
     {
+        if (!float.IsFinite(unscaledDeltaSeconds) || unscaledDeltaSeconds < 0)
+            throw new ArgumentOutOfRangeException(nameof(unscaledDeltaSeconds));
         SpatialUpdateTimeMs = 0;
 
         if (!IsAvailable)
@@ -218,6 +283,19 @@ public static unsafe class Audio
             var camera = Rendering.Camera.Active;
             
             var position = camera.Transform.Position;
+            if (_reverb != null)
+            {
+                var world = camera.Component?.Owner.OwningWorld ?? Core.Game.Instance?.World;
+                var zone = Placeables.AudioReverbZone.Find(world, position);
+                _reverbTransition.Update(zone, unscaledDeltaSeconds);
+                _reverb.Apply(_reverbTransition.Current);
+                var sendsActive = _reverbTransition.Current.Strength > 0;
+                if (_reverbSendsActive != sendsActive)
+                {
+                    _reverbSendsActive = sendsActive;
+                    foreach (var source in Sources) AttachReverb(source);
+                }
+            }
             var forward = camera.Transform.Forward;
             var up = camera.Transform.Up;
             
@@ -331,6 +409,10 @@ public static unsafe class Audio
 
     private static void ReleaseDevice()
     {
+        _reverb?.Dispose();
+        _reverb = null;
+        _reverbTransition = new ReverbTransition();
+        _reverbSendsActive = false;
         _al?.Dispose();
         _al = null;
         

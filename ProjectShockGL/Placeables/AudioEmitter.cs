@@ -34,6 +34,13 @@ public class AudioEmitter : Entity
     }
 
     [Editable]
+    public bool ReverbEnabled
+    {
+        get => Source.ReverbEnabled;
+        set => Source.ReverbEnabled = value;
+    }
+
+    [Editable]
     [AudioGroupName]
     public string GroupName
     {

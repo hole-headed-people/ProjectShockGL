@@ -4316,11 +4316,11 @@ RunScene("AudioEmitter properties survive maps, prefabs, duplication and inspect
     RecordInspector(emitter,"GroupName",()=>emitter.GroupName="Music");
     UndoRedo.Undo();Check(emitter.GroupName=="Environment");UndoRedo.Redo();Check(emitter.GroupName=="Music");
     emitter.ClipName="Ambience/Room";emitter.SpatialMode=ProjectShockGL.Audio.AudioSpatialMode.ThreeD;
-    emitter.Loop=true;emitter.PlayOnStart=false;emitter.MinDistance=30;emitter.MaxDistance=50;
+    emitter.ReverbEnabled=false;emitter.Loop=true;emitter.PlayOnStart=false;emitter.MinDistance=30;emitter.MaxDistance=50;
     RecordInspector(emitter,"Volume",()=>emitter.Volume=.35f);
     UndoRedo.Undo();Check(emitter.Volume==1);UndoRedo.Redo();Check(emitter.Volume==.35f);
     var editable=EditableProperties.Get(emitter.GetType());
-    foreach(var name in new[]{"ClipName","GroupName","SpatialMode","Volume","Loop","PlayOnStart","MinDistance","MaxDistance"})
+    foreach(var name in new[]{"ClipName","GroupName","ReverbEnabled","SpatialMode","Volume","Loop","PlayOnStart","MinDistance","MaxDistance"})
         Check(editable.Any(property=>property.Name==name));
     var clipProperty=editable.Single(property=>property.Name=="ClipName");
     var attribute=clipProperty.GetCustomAttributes(typeof(EditableAttribute),true).Cast<EditableAttribute>().Single();
@@ -4330,7 +4330,7 @@ RunScene("AudioEmitter properties survive maps, prefabs, duplication and inspect
     var loaded=Game.Instance.World.Find<ProjectShockGL.Placeables.AudioEmitter>()!;
     void Verify(ProjectShockGL.Placeables.AudioEmitter item)
     {
-        Check(item.GroupName=="Music");
+        Check(item.GroupName=="Music" && !item.ReverbEnabled);
         Check(item.ClipName=="Ambience/Room" && item.SpatialMode==ProjectShockGL.Audio.AudioSpatialMode.ThreeD);
         Check(item.Volume==.35f && item.Loop && !item.PlayOnStart && item.MinDistance==30 && item.MaxDistance==50);
         Check(item.Source.Clip==null && !item.Source.IsPlaying);
@@ -4343,6 +4343,39 @@ RunScene("AudioEmitter properties survive maps, prefabs, duplication and inspect
     var small=Game.Instance.World.Find<ProjectShockGL.Placeables.AudioEmitter>()!;
     Check(small.MinDistance==.1f && small.MaxDistance==.5f && small.SpatialMode==ProjectShockGL.Audio.AudioSpatialMode.TwoD);
 });
+RunScene("AudioReverbZone presets, Custom, bounds and priority survive Inspector Undo, maps and prefabs",()=>
+{
+    File.WriteAllText(Path.Combine(testRoot,"Entities","ReverbZone.json"),
+        JsonConvert.SerializeObject(new EntityData {Class=typeof(ProjectShockGL.Placeables.AudioReverbZone).AssemblyQualifiedName!}));
+    var zone=(ProjectShockGL.Placeables.AudioReverbZone)SceneObjects.Create(PlaceableType.Entity,"ReverbZone");
+    RecordInspector(zone,"Preset",()=>zone.Preset=ProjectShockGL.Placeables.ReverbPreset.Hall);
+    UndoRedo.Undo();Check(zone.Preset==ProjectShockGL.Placeables.ReverbPreset.Room);
+    UndoRedo.Redo();Check(zone.Preset==ProjectShockGL.Placeables.ReverbPreset.Hall && zone.DecayTime==3);
+    RecordInspector(zone,"DecayTime",()=>zone.DecayTime=2.5f);
+    Check(zone.Preset==ProjectShockGL.Placeables.ReverbPreset.Custom);
+    UndoRedo.Undo();Check(zone.Preset==ProjectShockGL.Placeables.ReverbPreset.Hall && zone.DecayTime==3);
+    UndoRedo.Redo();Check(zone.Preset==ProjectShockGL.Placeables.ReverbPreset.Custom && zone.DecayTime==2.5f);
+    zone.Shape=ProjectShockGL.Placeables.ReverbZoneShape.Sphere;zone.Radius=4;
+    zone.BoxSize=new Vector3(3,4,5);zone.Priority=7;zone.TransitionTime=2;
+    zone.Transform.Scale=new Vector3(2,1,1);zone.Transform.Rotation=Quaternion.CreateFromAxisAngle(Vector3.UnitY,.5f);
+    var path=Path.Combine(testRoot,"reverb-zone.map");
+    EditorLevelManager.SaveCurrentLevel(path);EditorLevelManager.OpenLevel(path);
+    void Verify(ProjectShockGL.Placeables.AudioReverbZone item)
+    {
+        Check(item.Shape==ProjectShockGL.Placeables.ReverbZoneShape.Sphere && item.Radius==4);
+        Check(item.BoxSize==new Vector3(3,4,5) && item.Priority==7 && item.TransitionTime==2);
+        Check(item.Preset==ProjectShockGL.Placeables.ReverbPreset.Custom && item.DecayTime==2.5f);
+    }
+    var loaded=Game.Instance.World.Find<ProjectShockGL.Placeables.AudioReverbZone>()!;
+    Verify(loaded);Verify((ProjectShockGL.Placeables.AudioReverbZone)EditorLevelManager.DuplicateObject(loaded));
+    var prefab="ReverbZone-"+Guid.NewGuid().ToString("N");PrefabTools.Save(loaded,prefab);
+    Verify((ProjectShockGL.Placeables.AudioReverbZone)Prefab.Instantiate(prefab));
+    loaded.Preset=ProjectShockGL.Placeables.ReverbPreset.Cave;
+    EditorLevelManager.SaveCurrentLevel(path);EditorLevelManager.OpenLevel(path);
+    loaded=Game.Instance.World.Find<ProjectShockGL.Placeables.AudioReverbZone>()!;
+    Check(loaded.Preset==ProjectShockGL.Placeables.ReverbPreset.Cave && loaded.DecayTime==4);
+});
+
 RunScene("Light modes default to Realtime and survive maps, prefabs, duplication and inspector Undo/Redo", () =>
 {
     var light = (Light)SceneObjects.Create(PlaceableType.Entity, "Light");

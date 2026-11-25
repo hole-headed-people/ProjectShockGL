@@ -127,7 +127,9 @@ if(args.Contains("--unavailable"))
     using var source=AudioSystem.CreateSource(Content.LoadAudioClip("UI/Test")!);
     source.Play(1);AudioSystem.Update(1);
     Check(!source.IsPlaying);
-    source.Stop();Content.UnloadAll();AudioSystem.Shutdown();
+    source.Stop();
+    var shot=AudioSystem.PlayOneShot(Content.LoadAudioClip("UI/Test")!);Check(shot.IsDisposed);
+    Content.UnloadAll();AudioSystem.Shutdown();
     Console.WriteLine("PASS: Missing audio output is logged and playback fails safely without stopping the game.");
     return;
 }
@@ -378,6 +380,90 @@ Run("Audio Groups JSON loads through Content, validates before replacing live gr
     Throws<InvalidOperationException>(()=>effects.Parent=AudioSystem.Master);
     Near(AudioSystem.Master.Volume,1);
 });
+Run("Reverb zones use oriented Box/Sphere bounds, priorities, active listener and smooth unscaled EFX transitions",()=>
+{
+    Check(AudioSystem.IsReverbAvailable);
+    var world=new World();var otherWorld=new World();
+    var low=world.Spawn<ProjectShockGL.Placeables.AudioReverbZone>();
+    low.Shape=ProjectShockGL.Placeables.ReverbZoneShape.Sphere;low.Radius=10;low.Preset=ProjectShockGL.Placeables.ReverbPreset.Room;
+    var high=world.Spawn<ProjectShockGL.Placeables.AudioReverbZone>();
+    high.BoxSize=new System.Numerics.Vector3(2);high.Priority=10;high.Preset=ProjectShockGL.Placeables.ReverbPreset.Cave;
+    high.Transform.Rotation=System.Numerics.Quaternion.CreateFromAxisAngle(System.Numerics.Vector3.UnitY,.7f);
+    high.Transform.Scale=new System.Numerics.Vector3(2,1,1);
+    var local=System.Numerics.Vector3.Transform(new System.Numerics.Vector3(1.9f,0,0),high.Transform.Rotation);
+    Check(high.Contains(local) && !high.Contains(local*2));
+    Check(high.Preset==ProjectShockGL.Placeables.ReverbPreset.Cave);
+    high.Priority=20;high.Radius=3;Check(high.Preset==ProjectShockGL.Placeables.ReverbPreset.Cave);
+    high.DecayTime=3;Check(high.Preset==ProjectShockGL.Placeables.ReverbPreset.Custom);
+    high.Preset=ProjectShockGL.Placeables.ReverbPreset.Cave;
+    var unrelated=otherWorld.Spawn<ProjectShockGL.Placeables.AudioReverbZone>();unrelated.Priority=100;
+    Check(ReferenceEquals(ProjectShockGL.Placeables.AudioReverbZone.Find(world,System.Numerics.Vector3.Zero),high));
+    var owner=world.Spawn<ProjectShockGL.Core.Object>();var camera=owner.AddComponent<CameraComponent>();
+    owner.Transform.Position=new System.Numerics.Vector3(20,0,0);Check(camera.MakeActive());
+    using var clip=Read(Wave());using var source=AudioSystem.CreateSource(clip);source.Loop=true;source.Play();
+    var scale=Time.TimeScale;
+    try
+    {
+        AudioSystem.SynchronizeSpatialAudio(1);Near(AudioSystem.CurrentReverb.Strength,0);
+        Time.TimeScale=0;owner.Transform.Position=System.Numerics.Vector3.Zero;camera.Synchronize();
+        AudioSystem.SynchronizeSpatialAudio(.5f);Near(AudioSystem.CurrentReverb.Strength,.35f);
+        AudioSystem.SynchronizeSpatialAudio(.5f);Near(AudioSystem.CurrentReverb.Strength,.7f);
+        unsafe
+        {
+            var get=(delegate* unmanaged[Cdecl]<uint,int,float*,void>)(void*)AudioSystem.Api.GetProcAddress("alGetAuxiliaryEffectSlotf");
+            float gain;get(AudioSystem.ReverbSlot,2,&gain);Near(gain,.7f);
+        }
+        source.ReverbEnabled=false;Check(source.IsPlaying && !source.ReverbEnabled);
+        source.ReverbEnabled=true;Check(source.IsPlaying);
+        using(var capture=ProjectShockGL.Rendering.Camera.Create())
+        {
+            capture.Transform.Position=new System.Numerics.Vector3(1000);
+            AudioSystem.SynchronizeSpatialAudio(1);Near(AudioSystem.CurrentReverb.Strength,.7f);
+        }
+        high.SetActive(false);AudioSystem.SynchronizeSpatialAudio(.5f);Near(AudioSystem.CurrentReverb.Strength,.6f);
+        AudioSystem.SynchronizeSpatialAudio(.5f);Near(AudioSystem.CurrentReverb.Strength,.5f);
+        world.Destroy(high);Check(ReferenceEquals(ProjectShockGL.Placeables.AudioReverbZone.Find(world,System.Numerics.Vector3.Zero),low));
+        owner.Transform.Position=new System.Numerics.Vector3(20,0,0);camera.Synchronize();
+        AudioSystem.SynchronizeSpatialAudio(.5f);Near(AudioSystem.CurrentReverb.Strength,.25f);
+        AudioSystem.SynchronizeSpatialAudio(.5f);Near(AudioSystem.CurrentReverb.Strength,0);
+        Check(source.IsPlaying);AudioSystem.CheckError("finish reverb checks");
+        Throws<ArgumentOutOfRangeException>(()=>low.DecayTime=0);
+        Throws<ArgumentOutOfRangeException>(()=>low.Strength=float.NaN);
+        Throws<ArgumentOutOfRangeException>(()=>AudioSystem.SynchronizeSpatialAudio(-1));
+    }
+    finally {Time.TimeScale=scale;ProjectShockGL.Rendering.Camera.UseDefault();world.Clear();otherWorld.Clear();}
+});
+Run("PlayOneShot applies settings, keeps paused sources, releases on completion/Stop and retains shared clips",()=>
+{
+    using var clip=Read(Wave());
+    var group=AudioSystem.GetGroup("OneShots") ?? AudioSystem.CreateGroup("OneShots");group.Volume=.5f;
+    var source=AudioSystem.PlayOneShot(clip,AudioSpatialMode.ThreeD,new System.Numerics.Vector3(1,2,3),
+        volume:.8f,groupName:"OneShots",reverbEnabled:false,minDistance:30,maxDistance:50);
+    Check(source.IsPlaying && !source.Loop && source.SpatialMode==AudioSpatialMode.ThreeD);
+    Check(source.Position==new System.Numerics.Vector3(1,2,3) && source.MinDistance==30 && source.MaxDistance==50);
+    Check(!source.ReverbEnabled && source.GroupName=="OneShots");Near(source.EffectiveVolume,.4f);
+    source.Pause();AudioSystem.Update(10);Check(source.IsPaused && !source.IsDisposed);
+    source.Resume();Check(source.IsPlaying);source.Stop();Check(source.IsDisposed && source.Handle==0 && !clip.IsDisposed);
+    var fading=AudioSystem.PlayOneShot(clip);fading.Stop(1);AudioSystem.Update(.5f);
+    Check(!fading.IsDisposed);AudioSystem.Update(.5f);Check(fading.IsDisposed && !clip.IsDisposed);
+    var paused=AudioSystem.PlayOneShot(clip);paused.Pause();paused.Stop();Check(paused.IsDisposed);
+    var manual=AudioSystem.CreateSource(clip);manual.Play();manual.Stop();Check(!manual.IsDisposed);manual.Dispose();
+    using var shortClip=Read(Wave(pcm:new byte[16]));
+    var completed=AudioSystem.PlayOneShot(shortClip);
+    var wait=System.Diagnostics.Stopwatch.StartNew();
+    while(!completed.IsDisposed && wait.Elapsed.TotalSeconds<2){Thread.Sleep(5);AudioSystem.Update(0);}
+    Check(completed.IsDisposed && !shortClip.IsDisposed);
+    var cached=Content.LoadAudioClip("UI/Test")!;var shared=AudioSystem.CreateSource(cached);shared.Loop=true;shared.Play();
+    var shot=AudioSystem.PlayOneShot(cached);shot.Stop();
+    Check(ReferenceEquals(cached,Content.LoadAudioClip("UI/Test")) && shared.IsPlaying && !cached.IsDisposed);shared.Dispose();
+    var flags=System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic;
+    var sources=(System.Collections.Generic.HashSet<AudioSource>)typeof(AudioSystem).GetField("Sources",flags)!.GetValue(null)!;
+    var count=sources.Count;
+    Throws<ArgumentOutOfRangeException>(()=>AudioSystem.PlayOneShot(clip,volume:2));
+    Throws<ArgumentOutOfRangeException>(()=>AudioSystem.PlayOneShot(clip,minDistance:5,maxDistance:2));
+    Check(sources.Count==count && !clip.IsDisposed);
+    AudioSystem.CheckError("finish one-shot checks");
+});
 Run("Natural completion, Content unload and context restart release sources and buffers safely",()=>
 {
     using(var shortClip=Read(Wave(pcm:new byte[16])))
@@ -391,7 +477,7 @@ Run("Natural completion, Content unload and context restart release sources and 
     Content.UnloadAll();Check(source.IsDisposed && clip.IsDisposed);
     source.Dispose();clip.Dispose();
     using var retained=Read(Wave());var old=AudioSystem.CreateSource(retained);old.Play();
-    AudioSystem.Shutdown();Check(old.IsDisposed && !AudioSystem.IsAvailable && !retained.IsDisposed);
+    AudioSystem.Shutdown();Check(old.IsDisposed && !AudioSystem.IsAvailable && !AudioSystem.IsReverbAvailable && AudioSystem.ReverbSlot==0 && !retained.IsDisposed);
     Check(AudioSystem.Initialize());using var fresh=AudioSystem.CreateSource(retained);fresh.Play();Check(fresh.IsPlaying);
     AudioSystem.CheckError("finish lifetime test");
 });

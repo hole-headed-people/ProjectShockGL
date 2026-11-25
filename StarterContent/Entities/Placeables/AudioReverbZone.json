@@ -1,0 +1,5 @@
+{
+  "AssetId": "bc7d1900-6735-4d13-94b0-c5c4d8cf1af4",
+  "Class": "ProjectShockGL.Placeables.AudioReverbZone, ProjectShockGL",
+  "Parameters": { "DebugBillboard": "Editor/Entity" }
+}

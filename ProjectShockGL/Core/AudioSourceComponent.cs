@@ -33,6 +33,18 @@ public class AudioSourceComponent : Component
         }
     }
 
+    private bool _reverbEnabled = true;
+    public bool ReverbEnabled
+    {
+        get => _reverbEnabled;
+        set
+        {
+            ObjectDisposedException.ThrowIf(IsDestroyed, this);
+            if (_source is { IsDisposed: false }) _source.ReverbEnabled = value;
+            _reverbEnabled = value;
+        }
+    }
+
     public AudioClip? Clip
     {
         get => _clip;
@@ -186,6 +198,7 @@ public class AudioSourceComponent : Component
             _source.SynchronizePosition();
         }
         
+        _source.ReverbEnabled = ReverbEnabled;
         _source.GroupName = GroupName;
         _source.Volume = Volume;
         _source.Loop = Loop;

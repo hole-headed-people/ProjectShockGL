@@ -264,7 +264,7 @@ public static class Application
         var renderStart = System.Diagnostics.Stopwatch.GetTimestamp();
         
         Camera.SynchronizeComponents();
-        AudioSystem.SynchronizeSpatialAudio();
+        AudioSystem.SynchronizeSpatialAudio((float)deltaTime);
         
         RenderCaptures?.Invoke();
         _graphics.BeginDraw(Camera.Active);

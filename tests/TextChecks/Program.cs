@@ -668,6 +668,23 @@ void Render()
         finally {dynamicWorld.Clear();ProjectShockGL.Environment.Apply(dynamicEnvironment);}
     }
     {
+        var world=new World();using var camera=Camera.Create();
+        var zone=world.Spawn<ProjectShockGL.Placeables.AudioReverbZone>();
+        zone.Transform.Position=new Vector3(0,0,-4);zone.Transform.Scale=new Vector3(2,1,1);
+        zone.Transform.Rotation=Quaternion.CreateFromAxisAngle(Vector3.UnitY,.4f);zone.BoxSize=new Vector3(2);
+        try
+        {
+            graphics.BeginDraw(camera);zone.DebugRenderSelected(new DebugDraw(graphics));
+            Check(graphics.Statistics.DrawCalls==12);graphics.EndDraw();
+            zone.Shape=ProjectShockGL.Placeables.ReverbZoneShape.Sphere;zone.Radius=1;
+            graphics.BeginDraw(camera);zone.DebugRenderSelected(new DebugDraw(graphics));
+            Check(graphics.Statistics.DrawCalls==96);graphics.EndDraw();
+            Check(gl.GetError()==GLEnum.NoError);
+            Console.WriteLine("PASS: Selected reverb zones draw rotated/scaled Box and Sphere wire shapes without GPU errors");
+        }
+        finally {world.Clear();}
+    }
+    {
         var particleEnvironment = ProjectShockGL.Environment.Capture();
         var particleWorld = new World();
         var emitter = particleWorld.Spawn<ProjectShockGL.Core.Object>();

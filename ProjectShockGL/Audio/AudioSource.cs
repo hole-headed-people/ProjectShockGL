@@ -34,6 +34,7 @@ public sealed partial class AudioSource : IDisposable
     
     internal float EffectiveVolume => _volume * _fade * (Audio.GetGroup(GroupName) ?? Audio.Master).EffectiveVolume;
     internal uint Handle => _handle;
+    internal bool DisposeWhenStopped { get; set; }
 
     internal AudioSource(AudioClip clip)
     {
@@ -62,6 +63,20 @@ public sealed partial class AudioSource : IDisposable
 
     public bool IsPlaying => State == AudioPlaybackState.Playing;
     public bool IsPaused => State == AudioPlaybackState.Paused;
+
+    private bool _reverbEnabled = true;
+    public bool ReverbEnabled
+    {
+        get => _reverbEnabled;
+        set
+        {
+            ObjectDisposedException.ThrowIf(IsDisposed, this);
+            Audio.RequireGroupThread();
+            if (_reverbEnabled == value) return;
+            _reverbEnabled = value;
+            Audio.AttachReverb(this);
+        }
+    }
 
     private string _groupName = "";
     public string GroupName
@@ -147,6 +162,7 @@ public sealed partial class AudioSource : IDisposable
                 
                 SynchronizePosition();
                 ApplySpatialSettings();
+                Audio.AttachReverb(this);
                 Audio.CheckError("create audio source");
             }
             catch
@@ -239,6 +255,7 @@ public sealed partial class AudioSource : IDisposable
         _fade = 0;
         
         ApplyGain();
+        if (DisposeWhenStopped) Dispose();
     }
 
     private void SetFade(float target, float seconds, bool stop)
