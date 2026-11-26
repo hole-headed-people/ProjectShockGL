@@ -182,13 +182,13 @@ public class Game : ProjectShockGL.Core.Game
 
     private static Type GetGameStateType()
     {
-        var name = Settings.GetString("Game", "GameStateClass", typeof(GameState).AssemblyQualifiedName!);
+        var name = Settings.GetString("Game", "StateClass", typeof(GameState).AssemblyQualifiedName!);
         var type = Type.GetType(name);
 
         if (type == null || !typeof(GameState).IsAssignableFrom(type) ||
             type.IsAbstract || type.ContainsGenericParameters || type.GetConstructor(Type.EmptyTypes) == null)
         {
-            throw new InvalidOperationException($"GameStateClass '{name}' must be a concrete OxygenGL GameState with a public parameterless constructor.");
+            throw new InvalidOperationException($"StateClass '{name}' must be a concrete OxygenGL GameState with a public parameterless constructor.");
         }
 
         return type;

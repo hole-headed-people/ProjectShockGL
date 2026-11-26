@@ -8,6 +8,113 @@ using Silk.NET.Maths;
 using Silk.NET.OpenGL;
 using Silk.NET.Windowing;
 
+Run("Horizontal and vertical layouts arrange children with padding, spacing, alignment and cross-axis stretch", () =>
+{
+    var canvas = new Canvas();
+    canvas.Resize(new Vector2(400, 300));
+    var layout = canvas.Add<HorizontalLayout>();
+    layout.Rect.Position = new Vector2(10, 20);
+    layout.Rect.Size = new Vector2(300, 160);
+    layout.Padding = new Vector4(10, 20, 30, 40);
+    layout.Spacing = 5;
+    var first = layout.Add<MouseProbe>();
+    first.Rect.Position = new Vector2(999);
+    first.Rect.Anchor = first.Rect.Pivot = new Vector2(.5f);
+    first.Rect.Size = new Vector2(50, 30);
+    var second = layout.Add<MouseProbe>();
+    second.Rect.Size = new Vector2(70, 40);
+    Check(first.Rect.AbsolutePosition == new Vector2(20, 40));
+    Check(second.Rect.AbsolutePosition == new Vector2(75, 40));
+    layout.HorizontalAlignment = HorizontalAlignment.Right;
+    layout.VerticalAlignment = VerticalAlignment.Bottom;
+    Check(first.Rect.AbsolutePosition == new Vector2(155, 110));
+    Check(second.Rect.AbsolutePosition == new Vector2(210, 100));
+    layout.StretchChildren = true;
+    Check(first.Rect.Size == new Vector2(50, 100) && second.Rect.Size == new Vector2(70, 100));
+    Check(first.Rect.AbsolutePosition.Y == 40);
+    layout.StretchChildren = false;
+    Check(first.Rect.Size.Y == 30);
+    layout.HorizontalAlignment = HorizontalAlignment.Left;
+    layout.VerticalAlignment = VerticalAlignment.Top;
+    second.SortOrder = -10;
+    Check(second.Rect.Position.X == 65); // Draw order must not change layout order.
+    second.SetAsFirstSibling();
+    Check(first.Rect.Position.X == 85 && second.Rect.Position.X == 10);
+    second.Visible = false;
+    Check(first.Rect.Position.X == 10);
+    second.Visible = true;
+    second.IsEnabled = false;
+    Check(first.Rect.Position.X == 85); // Disabled widgets still occupy space.
+    var pointer = new Pointer(canvas);
+    pointer.Update(first.Rect.AbsolutePosition + new Vector2(2), canvas.Size, Array.Empty<MouseButton>());
+    Check(pointer.HoveredWidget == first);
+    layout.Spacing = 15;
+    pointer.Update(first.Rect.AbsolutePosition + new Vector2(2), canvas.Size, Array.Empty<MouseButton>());
+    Check(pointer.HoveredWidget == first);
+    var vertical = canvas.Add<VerticalLayout>();
+    vertical.Rect.Size = new Vector2(200, 240);
+    vertical.Padding = new Vector4(10);
+    vertical.Spacing = 8;
+    first.SetParent(vertical);
+    first.Rect.Position = Vector2.Zero;
+    first.Rect.Anchor = first.Rect.Pivot = Vector2.Zero;
+    Check(first.Rect.Position == new Vector2(10));
+    var nested = vertical.Add<HorizontalLayout>();
+    nested.Rect.Size = new Vector2(100, 60);
+    var inner = nested.Add<Widget>();
+    inner.Rect.Size = new Vector2(20);
+    vertical.StretchChildren = true;
+    Check(nested.Rect.Position.Y == 48 && nested.Rect.Size.X == 180);
+    nested.StretchChildren = true;
+    Check(inner.Rect.Size.Y == 60);
+    vertical.Rect.Size = new Vector2(300, 240);
+    Check(nested.Rect.Size.X == 280);
+    nested.Destroy();
+    vertical.VerticalAlignment = VerticalAlignment.Bottom;
+    Check(first.Rect.Position.Y == 200);
+    first.SetParent(null);
+    Check(first.Rect.Size == new Vector2(50, 30) && first.Rect.Position == Vector2.Zero);
+    Throws<ArgumentOutOfRangeException>(() => layout.Spacing = -1);
+    Throws<ArgumentOutOfRangeException>(() => layout.Padding = new Vector4(float.NaN));
+    canvas.Destroy();
+});
+
+Run("Layout JSON preserves defaults, preferred child rects and independent loaded instances", () =>
+{
+    var canvas = new Canvas();
+    canvas.Resize(new Vector2(500, 300));
+    var root = canvas.Add<Widget>();
+    var vertical = root.Add<VerticalLayout>();
+    vertical.Name = "List";
+    vertical.FillCanvas = true;
+    vertical.Padding = new Vector4(5, 10, 15, 20);
+    vertical.Spacing = 7;
+    vertical.StretchChildren = true;
+    vertical.HorizontalAlignment = HorizontalAlignment.Center;
+    vertical.VerticalAlignment = VerticalAlignment.Center;
+    var child = vertical.Add<Widget>();
+    child.Name = "Item";
+    child.Rect.Size = new Vector2(40, 30);
+    child.Rect.Position = new Vector2(3, 4);
+    var overlay = vertical.Add<Widget>();
+    overlay.FillCanvas = true; // FillCanvas keeps its existing screen-space meaning.
+    Check(overlay.Rect.Size == canvas.Size && child.Rect.Size.X == 480);
+    var json = Newtonsoft.Json.JsonConvert.SerializeObject(UIAsset.Capture(root), ProjectShockGL.Tools.JsonHelper.GetSettings());
+    var asset = Newtonsoft.Json.JsonConvert.DeserializeObject<UIAsset>(json, ProjectShockGL.Tools.JsonHelper.GetSettings())!;
+    Check(asset.Root.Children[0].Children[0].Size == new Vector2(40, 30));
+    var loaded = asset.Instantiate(canvas);
+    var list = loaded.Find<VerticalLayout>("List")!;
+    var item = loaded.Find<Widget>("Item")!;
+    Check(list.Spacing == 7 && list.Padding == new Vector4(5, 10, 15, 20) && list.StretchChildren);
+    Check(item.Rect.Size == new Vector2(480, 30) && item.Rect.Position == new Vector2(5, 130));
+    list.StretchChildren = false;
+    Check(item.Rect.Size == new Vector2(40, 30));
+    canvas.Resize(new Vector2(600, 400));
+    Check(list.Rect.Size == canvas.Size && item.Rect.Position == new Vector2(275, 180));
+    Check(child.Rect.Size.X == 580); // Original instance is independent.
+    canvas.Destroy();
+});
+
 Run("Widget SortOrder and sibling changes agree for drawing and pointer selection at root and nested levels", () =>
 {
     var canvas = new Canvas();
@@ -529,6 +636,27 @@ Run("Settings creates one custom canvas, initialized once with its size", () =>
     manager.Destroy();
 });
 
+Run("Editor ignores the game canvas class and creates an empty base canvas", () =>
+{
+    Configure("ThrowingEditorCanvas, UIChecks");
+    var mode = typeof(Application).GetProperty(nameof(Application.IsEditor))!;
+    var previous = Application.IsEditor;
+    var manager = new UIManager();
+    try
+    {
+        mode.SetValue(null, true);
+        manager.Initialize();
+        Check(manager.Canvas.GetType() == typeof(Canvas) && manager.Canvas.Children.Count == 0);
+        Check(manager.Canvas.Size == new Vector2(800, 600));
+        manager.Update(0);
+    }
+    finally
+    {
+        manager.Destroy();
+        mode.SetValue(null, previous);
+    }
+});
+
 Run("Missing or invalid settings use a default canvas", () =>
 {
     foreach (var type in new[] { "", "Missing.Canvas, Missing", "System.String, System.Private.CoreLib" })
@@ -654,7 +782,8 @@ Run("Destroyed canvas prevents additions and destroys descendants once", () =>
 Run("Game loads, updates and destroys its configured UI", () =>
 {
     Configure("ConfiguredCanvas, UIChecks");
-    File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "Layers.ini"), "[Layers]\n0=Default\n");
+    File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "DefaultSettings.ini"), "\n[Layers]\n0=Default\n");
+    Settings.Initialize();
     // Game.Load applies the postprocess profile, so Content needs a live GL context first.
     var options = WindowOptions.Default;
     options.Size = new Vector2D<int>(800, 600);
@@ -901,7 +1030,7 @@ static void Mouse(ProjectShockGL.UI.Pointer pointer, Vector2 position, params Mo
 
 static void Configure(string canvasClass)
 {
-    File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "GameSettings.ini"),
+    File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "DefaultSettings.ini"),
         $"[Window]\nWidth=800\nHeight=600\n[Game]\nUICanvasClass={canvasClass}\n[Content]\nPath=TestContent\n");
     Settings.Initialize();
 }
@@ -968,4 +1097,8 @@ public static class UIActionFixtures
     [UIAction("Unsupported/Generic")] public static void Generic<T>() { }
     [UIAction("Unsupported/Ref")] public static void ByReference(ref int value) { }
     public static void Unmarked() => Values.Add("unmarked");
+}
+public sealed class ThrowingEditorCanvas : Canvas
+{
+    public ThrowingEditorCanvas() => throw new Exception("The editor must not construct the game canvas.");
 }

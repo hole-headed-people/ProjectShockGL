@@ -25,7 +25,7 @@ foreach (var file in Directory.GetFiles(Path.Combine(root, "StarterContent/Shade
     File.Copy(file, Path.Combine(fixture, "Shaders", Path.GetFileName(file)), overwrite: true);
 File.Copy(Path.Combine(root, "StarterContent/PostProcessProfiles/Default.json"),
     Path.Combine(profiles, "Default.json"), overwrite: true);
-File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "GameSettings.ini"), "[Content]\nCustomPath=" + fixture + "\n");
+File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "DefaultSettings.ini"), "[Content]\nCustomPath=" + fixture + "\n");
 Settings.Initialize();
 Content.Initialize(gl);
 Camera.Initialize(window);
@@ -175,6 +175,136 @@ File.WriteAllText(Path.Combine(detailAssets, "Culled.json"),
 File.WriteAllText(Path.Combine(detailAssets, "MissingModel.json"),
     "{\"Mesh\":\"MissingInstanceModel\",\"Lit\":false}");
 
+Run("Detail CastBakedShadow excludes direct and GI ray hits while preserving lightmap reception", () =>
+{
+    var oldAmbient = ProjectShockGL.Environment.AmbientColor;
+    try
+    {
+        ProjectShockGL.Environment.AmbientColor = new Color(.05f, .05f, .05f);
+        foreach (var casts in new[] { true, false })
+        {
+            var name = casts ? "Casts" : "ReceivesOnly";
+            File.WriteAllText(Path.Combine(detailAssets, name + ".json"), new JObject
+            {
+                ["Mesh"] = "InstancePlane", ["Texture"] = "WhitePixel", ["Lit"] = true,
+                ["BackfaceCulling"] = false, ["CastBakedShadow"] = casts
+            }.ToString());
+            using var scene = new PbrScene();
+            var detail = new DetailPlacement
+            {
+                AssetPath = "InstanceTests/" + name, Position = new Vector3(0, 1, 0),
+                Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitX, -MathF.PI / 2)
+            };
+            scene.World.Details.Add(detail);
+            var light = scene.World.Spawn<ProjectShockGL.Core.Light>();
+            light.Mode = ProjectShockGL.Core.LightMode.Baked;
+            light.Type = ProjectShockGL.Core.LightType.Directional;
+            light.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitX, -MathF.PI / 2);
+            light.Intensity = 1;
+            var geometry = scene.World.PrepareLightmapGeometry(new LightmapPreparationOptions { AtlasSize = 64, SurfaceSize = 32, Padding = 1 });
+            Check(geometry.Surfaces.Count == 1 && geometry.Surfaces[0].Id.IsDetail);
+            Check(geometry.Surfaces[0].Materials[0].ReceivesLight && geometry.Surfaces[0].Materials[0].CastBakedShadow == casts);
+            var input = DirectLightBaker.Capture(scene.World, geometry);
+            var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static;
+            var sample = (Vector3)typeof(DirectLightBaker).GetMethod("Sample", flags)!.Invoke(null,
+                new object[] { input, Vector3.Zero, Vector3.UnitY, .001f })!;
+            Check(casts ? sample.X < .051f : sample.X > 1);
+            var triangles = geometry.WorldTriangles();
+            var sceneType = typeof(DirectLightBaker).Assembly.GetType("ProjectShockGL.Rendering.LightmapOcclusion")!;
+            var alphaType = typeof(DirectLightBaker).Assembly.GetType("ProjectShockGL.Rendering.LightmapAlpha")!;
+            var occlusion = Activator.CreateInstance(sceneType, flags, null,
+                new object[] { triangles, Array.CreateInstance(alphaType, triangles.Length), default(CancellationToken) }, null)!;
+            var nearest = sceneType.GetMethod("Nearest", flags)!;
+            var arguments = new object?[] { Vector3.Zero, Vector3.UnitY, -1, .001f, null };
+            Check((bool)nearest.Invoke(occlusion, arguments)! == casts);
+            var baked = DirectLightBaker.Bake(input, new DirectLightBakeOptions { IndirectSamples = 8 });
+            Check(baked.Pages[0].Coverage.Span.Contains((byte)1));
+            Check(baked.Pages[0].Pixels.ToArray().Any(pixel => pixel.X > .1f));
+        }
+        Check(new ProjectShockGL.Core.DetailAsset { Mesh = "InstancePlane" }.CastBakedShadow);
+    }
+    finally { ProjectShockGL.Environment.AmbientColor = oldAmbient; }
+});
+Run("Custom Detail shaders preserve instancing, isolate parameters and animate with game time", () =>
+{
+    var detailPreview = new RenderPreviewSettings();
+    using var detailRenderer = new Renderer(gl, 640, 240, detailPreview);
+    var detailGraphics = new Graphics(detailRenderer);
+    var time = Time.ElapsedTime;
+    var unscaled = Time.UnscaledElapsedTime;
+    var environment = ProjectShockGL.Environment.Capture();
+    try
+    {
+        ProjectShockGL.Environment.IsFogEnabled = false;
+        ProjectShockGL.Environment.AmbientColor = Color.White;
+        foreach (var (name, strength) in new[] { ("Wind", .5f), ("Still", 0f) })
+        {
+            File.WriteAllText(Path.Combine(detailAssets, name + ".json"), new JObject
+            {
+                ["Mesh"] = "InstancePlane", ["Texture"] = "WhitePixel", ["Lit"] = false,
+                ["BackfaceCulling"] = false, ["Shader"] = "InstancedWind", ["Color"] = new JArray(.2, .7, .3, 1),
+                ["ShaderParameters"] = new JObject
+                {
+                    ["uWindStrength"] = strength, ["uWindSpeed"] = 2,
+                    ["uWindBase"] = -.5, ["uWindHeight"] = 1,
+                    ["uWindDirection"] = new JArray(1, 0), ["uWindFrequency"] = 0
+                }
+            }.ToString());
+        }
+        using var scene = new PbrScene();
+        var world = scene.World;
+        foreach (var (name, x) in new[] { ("Wind", -1.5f), ("Wind", -.3f), ("Still", 1.3f) })
+            world.Details.Add(new DetailPlacement { AssetPath = "InstanceTests/" + name, Position = new Vector3(x, 0, -3) });
+        world.Update(0);
+        byte[] Draw(double gameTime, double realTime)
+        {
+            Time.ElapsedTime = gameTime;
+            Time.UnscaledElapsedTime = realTime;
+            detailGraphics.BeginDraw(Camera.Active);
+            var queue = new RenderQueue();
+            world.Render(queue, false);
+            queue.Flush(detailGraphics);
+            var pixels = new byte[640 * 240 * 4];
+            unsafe { fixed (byte* data = pixels) gl.ReadPixels(0, 0, 640, 240, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+            detailGraphics.EndDraw();
+            Check(detailGraphics.Statistics.DrawCalls == 2 && gl.GetError() == GLEnum.NoError);
+            return pixels;
+        }
+        var start = Draw(0, 0);
+        var moving = Draw(Math.PI / 4, 0);
+        Check(!start.SequenceEqual(moving));
+        Check(moving.SequenceEqual(Draw(Math.PI / 4, 100))); // uTime must ignore unscaled changes.
+        Check(start.SequenceEqual(Draw(0, 100))); // Cached groups still get fresh uniforms.
+        for (var y = 0; y < 240; y++)
+        for (var x = 440; x < 640; x++)
+        for (var channel = 0; channel < 4; channel++)
+            Check(start[(y * 640 + x) * 4 + channel] == moving[(y * 640 + x) * 4 + channel]);
+        detailPreview.Unlit = true;
+        Draw(Math.PI / 4, 100);
+        detailPreview.Unlit = false;
+        Content.LoadShaderProgram("InstancedWind", "Lit");
+        File.WriteAllText(Path.Combine(detailAssets, "BadShader.json"),
+            """{"Mesh":"InstancePlane","Shader":"Lit","Lit":true}""");
+        using var invalidScene = new PbrScene();
+        invalidScene.World.Details.Add(new DetailPlacement { AssetPath = "InstanceTests/BadShader" });
+        var rejected = false;
+        try { invalidScene.World.Render(new RenderQueue(), false); }
+        catch (InvalidDataException error) { rejected = error.Message.Contains("aInstanceModel"); }
+        Check(rejected);
+        new DetailAsset { Mesh = "InstancePlane" }.Validate();
+        var reserved = false;
+        try { new DetailAsset { Mesh = "InstancePlane", ShaderParameters = new() { ["uTime"] = 1 } }.Validate(); }
+        catch (InvalidDataException) { reserved = true; }
+        Check(reserved);
+    }
+    finally
+    {
+        Time.ElapsedTime = time;
+        Time.UnscaledElapsedTime = unscaled;
+        ProjectShockGL.Environment.Apply(environment);
+        detailPreview.Unlit = false;
+    }
+});
 Run("Details use instancing with matching Lit/Unlit, normals, UVs, lights, fog, statistics and full-resolution UI", () =>
 {
     using var scene = new PbrScene();
@@ -406,6 +536,7 @@ Run("Static Geometry and BrushBox share cached batches with matching lighting, f
             brush.Transform.Position = new Vector3(i * 2 - 1, -.8f, -4);
             brush.Transform.Rotation = Quaternion.CreateFromYawPitchRoll(.4f, .2f, -.1f);
             brush.Transform.Scale = new Vector3(1.2f, .8f, 1.5f);
+            brush.SurfaceMode = SurfaceMode.Opaque; // Match Geometry for a single compatible batch.
             brush.GetComponent<MeshComponent>()!.BackfaceCulling = false;
             brushes.Add(brush);
         }
@@ -673,7 +804,7 @@ Run("Mesh backfaces are optional, Lit reverses their normals and CullFace is res
 });
 Run("Resolution scale preserves full-resolution UI, depth and viewport with Linear/Nearest and effects on/off", () =>
 {
-    var settingsPath = Path.Combine(AppContext.BaseDirectory, "GameSettings.ini");
+    var settingsPath = Path.Combine(AppContext.BaseDirectory, "DefaultSettings.ini");
     var originalSettings = File.ReadAllText(settingsPath);
     var originalEffects = PostProcessSettings.Enabled;
     try

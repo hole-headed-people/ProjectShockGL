@@ -7,7 +7,37 @@ public sealed class AudioGroup
     private AudioGroup? _parent;
 
     public string Name { get; }
-    public float EffectiveVolume => Volume * (Parent?.EffectiveVolume ?? 1);
+    private bool _muted;
+    private bool _paused;
+    public bool EffectiveMuted => Muted || Parent?.EffectiveMuted == true;
+    public bool EffectivePaused => Paused || Parent?.EffectivePaused == true;
+    public float EffectiveVolume => Muted ? 0 : Volume * (Parent?.EffectiveVolume ?? 1);
+
+    public bool Muted
+    {
+        get => _muted;
+        set
+        {
+            Audio.RequireGroupThread();
+            Audio.RequireRegisteredGroup(this);
+            if (_muted == value) return;
+            _muted = value;
+            Audio.RefreshGroupVolumes();
+        }
+    }
+
+    public bool Paused
+    {
+        get => _paused;
+        set
+        {
+            Audio.RequireGroupThread();
+            Audio.RequireRegisteredGroup(this);
+            if (_paused == value) return;
+            _paused = value;
+            Audio.RefreshGroupVolumes();
+        }
+    }
 
     internal AudioGroup(string name, AudioGroup? parent)
     {

@@ -6,7 +6,7 @@ using Silk.NET.Windowing;
 
 WindowOptions Options(string settings)
 {
-    File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "GameSettings.ini"), settings);
+    File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "DefaultSettings.ini"), settings);
     Settings.Initialize();
     var method = typeof(Application).GetMethod("CreateWindowOptions", BindingFlags.NonPublic | BindingFlags.Static)!;
     try { return (WindowOptions)method.Invoke(null, null)!; }
@@ -17,7 +17,7 @@ WindowOptions Options(string settings)
     }
 }
 void Check(bool condition) { if (!condition) throw new Exception("Window mode check failed."); }
-File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "GameSettings.ini"), "[Game]\nName=Game configuration\n");
+File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "DefaultSettings.ini"), "[Game]\nName=Game configuration\n");
 File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "EditorSettings.ini"), "[Game]\nName=Editor configuration\n");
 Settings.Initialize(isEditor: true);
 Check(Settings.GetString("Game", "Name", "") == "Editor configuration");

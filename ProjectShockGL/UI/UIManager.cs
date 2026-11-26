@@ -36,6 +36,11 @@ public sealed class UIManager
 
     private static Canvas CreateCanvas()
     {
+        if (Application.IsEditor)
+        {
+            return new Canvas();
+        }
+
         var name = Settings.GetString("Game", "UICanvasClass", "");
 
         if (string.IsNullOrEmpty(name))

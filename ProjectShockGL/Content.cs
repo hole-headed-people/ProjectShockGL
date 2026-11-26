@@ -51,25 +51,10 @@ public static class Content
         _gl = gl;
         _isInitialized = true;
         
-        var basePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, Settings.GetString("Content", "Path", "Content"));
-        var customPath = Settings.GetString("Content", "CustomPath", string.Empty);
+        var basePath = Settings.GetPath("Content", "Path", "Content");
+        var customPath = Settings.GetPath("Content", "CustomPath", string.Empty);
+        Path = string.IsNullOrEmpty(customPath) ? basePath : customPath;
 
-        if (string.IsNullOrEmpty(customPath))
-        {
-            Path = basePath;
-        }
-        else
-        {
-            if (System.IO.Path.IsPathRooted(customPath))
-            {
-                Path = customPath;
-            }
-            else
-            {
-                Path = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, customPath));
-            }
-        }
-        
         Log.Print($"Content directory: {Path}");
     }
     
@@ -373,6 +358,21 @@ public static class Content
             Log.PrintError($"LoadMesh failed for '{name}'.", error);
             throw;
         }
+    }
+
+    public static UserSettingsProfile LoadUserSettingsProfile(string name)
+    {
+        DetailAsset.ValidateReference(name, nameof(name));
+        
+        var root = System.IO.Path.GetFullPath(Path);
+        var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(root, name + ".json"));
+
+        if (!path.StartsWith(root + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("User settings profiles must be inside Content.");
+        }
+        
+        return UserSettingsProfile.Read(path);
     }
 
     public static AudioGroupsAsset LoadAudioGroups(string name)
@@ -722,7 +722,7 @@ public static class Content
                 return level;
             }
         
-            var path = System.IO.Path.Combine(Path, "Levels", name + ".map");
+            var path = System.IO.Path.Combine(Path, "Levels", name + ".level");
 
             if (!File.Exists(path))
             {

@@ -1,0 +1,16 @@
+{
+  "Mesh": "Examples/GrassBlade",
+  "Texture": "WhitePixel",
+  "Color": [0.25, 0.6, 0.2, 1.0],
+  "Lit": true,
+  "BackfaceCulling": false,
+  "Shader": "InstancedWind",
+  "ShaderParameters": {
+    "uWindStrength": 0.15,
+    "uWindSpeed": 2.0,
+    "uWindBase": 0.0,
+    "uWindHeight": 1.0,
+    "uWindFrequency": 0.8,
+    "uWindDirection": [1.0, 0.3]
+  }
+}

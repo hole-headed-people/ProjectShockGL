@@ -23,7 +23,8 @@
         <CopyToPublishDirectory>Always</CopyToPublishDirectory>
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </None>
-      <None Update="Layers.ini">
+      <None Update="DefaultSettings.ini">
+        <CopyToPublishDirectory>Always</CopyToPublishDirectory>
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </None>
       <None Update="Icons\**\*">

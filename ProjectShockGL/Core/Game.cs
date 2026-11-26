@@ -20,7 +20,7 @@ public class Game
     {
         try
         {
-            InitializeGame();
+            CreateAndInitialize();
         }
         catch (Exception error)
         {
@@ -30,7 +30,7 @@ public class Game
         }
     }
 
-    private static void InitializeGame()
+    private static void CreateAndInitialize()
     {
         if (_isInitialized)
         {
@@ -81,7 +81,11 @@ public class Game
         Layers.Load();
         Physics.Initialize();
         AudioSystem.LoadGroupsFromSettings();
-        if (!Application.IsEditor) AudioSystem.Initialize();
+        
+        if (!Application.IsEditor)
+        {
+            AudioSystem.Initialize();
+        }
         
         PostProcessSettings.Apply(Settings.GetString("Game", "PostProcessingProfile", "Default"));
         

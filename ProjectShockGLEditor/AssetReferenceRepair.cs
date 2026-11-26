@@ -146,7 +146,7 @@ public static class AssetReferenceRepair
             }
         }
 
-        Scan("Levels", "*.map", path => FixPlacements(Read(path), prefab: false));
+        Scan("Levels", "*.level", path => FixPlacements(Read(path), prefab: false));
         Scan("Prefabs", "*.json", path => FixPlacements(Read(path), prefab: true));
 
         if (report.Errors.Count != 0)

@@ -178,6 +178,16 @@ public class Mesh : IDisposable
         Revision++;
     }
 
+    internal unsafe void UpdateQuadVertices(ReadOnlySpan<float> vertices)
+    {
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        if (vertices.Length > _vertices.Length || vertices.Length % 32 != 0)
+            throw new ArgumentException("Vertices must fit the mesh and contain complete quads.", nameof(vertices));
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
+        fixed (float* data = vertices)
+            _gl.BufferSubData(BufferTargetARB.ArrayBuffer, 0, (nuint)(vertices.Length * sizeof(float)), data);
+        DrawIndexCount = (uint)(vertices.Length / 32 * 6);
+    }
     internal unsafe void UpdateVertexColors(Vector4[] colors)
     {
         ObjectDisposedException.ThrowIf(IsDisposed,this);

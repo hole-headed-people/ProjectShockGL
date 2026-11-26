@@ -39,14 +39,21 @@ public sealed partial class AudioSource
                 if ((uint)current != buffer)
                 {
                     var state = State;
-                    Audio.Api.GetSourceProperty(_handle, SourceFloat.SecOffset, out float offset);
+                    float offset = _resumeOffset ?? 0;
+                    if (_nativeStarted) Audio.Api.GetSourceProperty(_handle, SourceFloat.SecOffset, out offset);
                     Audio.Api.SourceStop(_handle);
+                    _nativeStarted = false;
                     Audio.Api.SetSourceProperty(_handle, SourceInteger.Buffer, buffer);
                     if (state != AudioPlaybackState.Stopped)
                     {
-                        Audio.Api.SetSourceProperty(_handle, SourceFloat.SecOffset, offset);
-                        Audio.Api.SourcePlay(_handle);
-                        if (state == AudioPlaybackState.Paused) Audio.Api.SourcePause(_handle);
+                        _resumeOffset = offset;
+                        if (state == AudioPlaybackState.Playing)
+                        {
+                            Audio.Api.SetSourceProperty(_handle, SourceFloat.SecOffset, offset);
+                            _resumeOffset = null;
+                            Audio.Api.SourcePlay(_handle);
+                            _nativeStarted = true;
+                        }
                     }
                 }
             }

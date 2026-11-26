@@ -21,7 +21,7 @@ public sealed class LightmapPreparationOptions
 
 public readonly record struct LightmapSurfaceId(Guid ObjectId, int SurfaceIndex, bool IsDetail);
 public sealed record LightmapMaterial(Texture? Texture, Color Color, SurfaceMode SurfaceMode, float AlphaCutoff,
-    bool BackfaceCulling, bool ReceivesLight);
+    bool BackfaceCulling, bool ReceivesLight, bool CastBakedShadow = true);
 
 public sealed record LightmapSurface(LightmapSurfaceId Id, LightmapUvMesh Mesh, Matrix4x4 Model,
     int Page, Vector4 ScaleOffset, IReadOnlyList<LightmapMaterial> Materials, IReadOnlyList<int> TriangleMaterials)
@@ -253,7 +253,7 @@ public sealed class LightmapGeometry
                 Matrix4x4.CreateTranslation(detail.Position);
             
             Add(new LightmapSurfaceId(detail.Id, 0, true), mesh, model,
-                [new(TextureFor(asset.Texture, asset.TextureFormat), asset.Color, SurfaceMode.Cutout, .5f, asset.BackfaceCulling, asset.Lit)],
+                [new(TextureFor(asset.Texture, asset.TextureFormat), asset.Color, SurfaceMode.Cutout, .5f, asset.BackfaceCulling, asset.Lit, asset.CastBakedShadow)],
                 new int[mesh.Indices.Length / 3]);
         }
 

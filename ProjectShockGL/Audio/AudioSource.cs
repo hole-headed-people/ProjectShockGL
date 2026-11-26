@@ -27,6 +27,11 @@ public sealed partial class AudioSource : IDisposable
     private bool _loop;
     
     private AudioPlaybackState _state;
+    private bool _manualPaused;
+    private bool _availabilityPaused;
+    private bool _playRequested;
+    private bool _nativeStarted;
+    private float? _resumeOffset;
     
     public AudioClip Clip { get; }
     
@@ -45,7 +50,7 @@ public sealed partial class AudioSource : IDisposable
     {
         get
         {
-            if (!IsDisposed && _handle != 0)
+            if (!IsDisposed && _handle != 0 && _nativeStarted)
             {
                 Audio.RequireThread();
                 Audio.Api.GetSourceProperty(_handle, GetSourceInteger.SourceState, out int state);
@@ -53,6 +58,10 @@ public sealed partial class AudioSource : IDisposable
                 if ((SourceState)state == SourceState.Stopped)
                 {
                     _state = AudioPlaybackState.Stopped;
+                    _playRequested = false;
+                    _nativeStarted = false;
+                    _manualPaused = false;
+
                     _duration = 0;
                 }
             }
@@ -89,13 +98,15 @@ public sealed partial class AudioSource : IDisposable
             value = value?.Trim() ?? "";
             if (_groupName == value) return;
             _groupName = value;
-            ApplyGain();
+            RefreshGain();
         }
     }
 
     internal void RefreshGain()
     {
-        if (!IsDisposed) ApplyGain();
+        if (IsDisposed) return;
+        ApplyGain();
+        SynchronizePlayback();
     }
 
     public float Volume
@@ -180,6 +191,8 @@ public sealed partial class AudioSource : IDisposable
         if (!continuing)
         {
             Audio.Api.SourceStop(_handle);
+            _nativeStarted = false;
+            _resumeOffset = null;
             
             _fade = fadeIn > 0 ? 0 : 1;
         }
@@ -188,42 +201,59 @@ public sealed partial class AudioSource : IDisposable
         
         ApplyGain();
 
-        if (!continuing)
-        {
-            Audio.Api.SourcePlay(_handle);
-        }
-        
-        Audio.CheckError("play source");
-        
+        _manualPaused = false;
+        _playRequested = true;
         _state = AudioPlaybackState.Playing;
+        SynchronizePlayback();
+        Audio.CheckError("play source");
     }
 
     public void Pause()
     {
         ObjectDisposedException.ThrowIf(IsDisposed, this);
-
-        if (!IsPlaying)
-        {
-            return;
-        }
-        
-        Audio.Api.SourcePause(_handle);
-        
-        _state = AudioPlaybackState.Paused;
+        if (State == AudioPlaybackState.Stopped) return;
+        _manualPaused = true;
+        SynchronizePlayback();
     }
 
     public void Resume()
     {
         ObjectDisposedException.ThrowIf(IsDisposed, this);
+        _manualPaused = false;
+        SynchronizePlayback();
+    }
 
-        if (!IsPaused)
+    internal void SetAvailabilityPaused(bool paused)
+    {
+        if (IsDisposed || _availabilityPaused == paused) return;
+        _availabilityPaused = paused;
+        SynchronizePlayback();
+    }
+
+    private void SynchronizePlayback()
+    {
+        if (!_playRequested || IsDisposed || _handle == 0 || State == AudioPlaybackState.Stopped) return;
+        Audio.RequireThread();
+        var group = Audio.GetGroup(GroupName) ?? Audio.Master;
+        if (_manualPaused || _availabilityPaused || group.EffectivePaused)
         {
-            return;
+            if (_nativeStarted && _state == AudioPlaybackState.Playing) Audio.Api.SourcePause(_handle);
+            _state = AudioPlaybackState.Paused;
         }
-        
-        Audio.Api.SourcePlay(_handle);
-        
-        _state = AudioPlaybackState.Playing;
+        else
+        {
+            if (!_nativeStarted || _state == AudioPlaybackState.Paused)
+            {
+                if (_resumeOffset is { } offset)
+                {
+                    Audio.Api.SetSourceProperty(_handle, SourceFloat.SecOffset, offset);
+                    _resumeOffset = null;
+                }
+                Audio.Api.SourcePlay(_handle);
+                _nativeStarted = true;
+            }
+            _state = AudioPlaybackState.Playing;
+        }
     }
 
     public void Stop(float fadeOut = 0)
@@ -250,6 +280,10 @@ public sealed partial class AudioSource : IDisposable
         }
 
         _state = AudioPlaybackState.Stopped;
+        _playRequested = false;
+        _nativeStarted = false;
+        _manualPaused = false;
+        _resumeOffset = null;
         
         _duration = 0;
         _fade = 0;
@@ -336,6 +370,10 @@ public sealed partial class AudioSource : IDisposable
         }
 
         _state = AudioPlaybackState.Stopped;
+        _playRequested = false;
+        _nativeStarted = false;
+        _manualPaused = false;
+        _resumeOffset = null;
         _duration = 0;
         
         PositionProvider = null;

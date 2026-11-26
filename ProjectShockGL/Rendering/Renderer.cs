@@ -55,6 +55,8 @@ public class Renderer : IDisposable
     private readonly int _litPointLightConeCosines;
 
     private readonly Mesh _quadMesh;
+    private Mesh? _textMesh;
+    private int _textQuadCapacity;
     
     private Matrix4x4 _frameProjection;
     private Matrix4x4 _frameView;
@@ -496,6 +498,35 @@ public class Renderer : IDisposable
         }
     }
 
+    internal void DrawUIText(ReadOnlySpan<float> vertices, Texture texture, Color color)
+    {
+        if (!_isUI) throw new InvalidOperationException("Text requires an active UI pass.");
+        var quads = vertices.Length / 32;
+        if (quads == 0) return;
+        if (_textMesh == null || quads > _textQuadCapacity)
+        {
+            var capacity = Math.Max(quads, Math.Max(32, checked(_textQuadCapacity * 2)));
+            var indices = new uint[checked(capacity * 6)];
+            for (var i = 0; i < capacity; i++)
+            {
+                var vertex = (uint)(i * 4);
+                var index = i * 6;
+                indices[index] = vertex;
+                indices[index + 1] = vertex + 1;
+                indices[index + 2] = vertex + 2;
+                indices[index + 3] = vertex;
+                indices[index + 4] = vertex + 2;
+                indices[index + 5] = vertex + 3;
+            }
+            var mesh = new Mesh(_gl, new float[checked(capacity * 32)], indices);
+            _textMesh?.Dispose();
+            _textMesh = mesh;
+            _textQuadCapacity = capacity;
+        }
+        _textMesh.UpdateQuadVertices(vertices);
+        DrawMesh(_textMesh, texture, Matrix4x4.Identity, color, backfaceCulling: false,
+            surfaceMode: SurfaceMode.Transparent);
+    }
     public void DrawMesh(Mesh mesh, Texture texture, Matrix4x4 model, Color color, bool lit = false, bool ignoreDepth = false,
         ShaderProgram? shader = null, ShaderParameters? shaderParameters = null, bool backfaceCulling = true,
         SurfaceMode surfaceMode = SurfaceMode.Cutout, float alphaCutoff = 0.5f, Texture? lightmap = null, Vector4? lightmapRect = null, bool dynamicAmbient = false, ParticleBlendMode particleBlendMode = ParticleBlendMode.Alpha)
@@ -528,7 +559,7 @@ public class Renderer : IDisposable
         }
     }
 
-    internal void DrawInstances(InstancedMesh instances, Texture texture, Color color, bool lit, bool backfaceCulling, Texture? lightmap = null)
+    internal void DrawInstances(InstancedMesh instances, Texture texture, Color color, bool lit, bool backfaceCulling, Texture? lightmap = null, ShaderProgram? customShader = null, ShaderParameters? parameters = null)
     {
         if (ReferenceEquals(texture, ExcludedTexture)) return;
         if (_frameForceUnlit)
@@ -536,7 +567,7 @@ public class Renderer : IDisposable
             lit = false;
         }
         
-        var shader = Content.LoadShaderProgram(lit ? "InstancedLit" : "InstancedUnlit", lit ? "Lit" : "Unlit");
+        var shader = customShader ?? Content.LoadShaderProgram(lit ? "InstancedLit" : "InstancedUnlit", lit ? "Lit" : "Unlit");
         
         var cull = _gl.IsEnabled(EnableCap.CullFace);
         var depth = _gl.IsEnabled(EnableCap.DepthTest);
@@ -555,7 +586,7 @@ public class Renderer : IDisposable
             _gl.Enable(EnableCap.DepthTest);
             _gl.UseProgram(shader.Handle);
             
-            shader.Apply(null);
+            shader.Apply(parameters);
             SetCustomFrameUniforms(shader, null);
             shader.Write("uColor", new Vector4(color.R, color.G, color.B, color.A));
             using var bakedBinding = new LightmapDrawBinding(_gl, shader.Handle, lit ? lightmap : null, new Vector4(1,1,0,0));
@@ -637,7 +668,8 @@ public class Renderer : IDisposable
                     else if (particleBlendMode == ParticleBlendMode.Multiply)
                         _gl.BlendFuncSeparate(BlendingFactor.DstColor, BlendingFactor.OneMinusSrcAlpha, BlendingFactor.Zero, BlendingFactor.One);
                     else
-                        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                        _gl.BlendFuncSeparate(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha,
+                            BlendingFactor.One, BlendingFactor.OneMinusSrcAlpha);
                 }
             }
             DrawMeshSurface(mesh, texture, model, color, lit, ignoreDepth, uvRect, shader, shaderParameters, surfaceMode, alphaCutoff, lightmap, lightmapRect, dynamicAmbient);
@@ -856,7 +888,8 @@ public class Renderer : IDisposable
         
         _unlitProgram = _litProgram = 0;
         
-        Cleanup.Run(() => _postProcessor?.Dispose(), () => _gridRenderer?.Dispose(), () => _selectionBounds?.Dispose(), _quadMesh.Dispose,
+        Cleanup.Run(() => _postProcessor?.Dispose(), () => _gridRenderer?.Dispose(), () => _selectionBounds?.Dispose(),
+            () => _textMesh?.Dispose(), _quadMesh.Dispose,
             () =>
             {
                 if (unlit != 0)

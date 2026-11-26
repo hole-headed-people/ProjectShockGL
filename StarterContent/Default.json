@@ -1,0 +1,8 @@
+{
+  "Options": [
+    { "Name": "MasterVolume", "Type": "Float", "DefaultValue": 1.0 },
+    { "Name": "Language", "Type": "String", "DefaultValue": "en" },
+    { "Name": "Fullscreen", "Type": "Bool", "DefaultValue": false },
+    { "Name": "Quality", "Type": "Int", "DefaultValue": 2 }
+  ]
+}

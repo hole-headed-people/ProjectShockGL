@@ -5,7 +5,7 @@ namespace ProjectShockGL.Rendering;
 
 internal sealed class DetailRenderer
 {
-    private readonly record struct GroupKey(Mesh Mesh, Texture Texture, Color Color, bool Lit, bool BackfaceCulling, Texture? Lightmap = null);
+    private readonly record struct GroupKey(Mesh Mesh, Texture Texture, Color Color, bool Lit, bool BackfaceCulling, Texture? Lightmap = null, ShaderProgram? Shader = null, ShaderParameters? Parameters = null);
     private sealed record Group(GroupKey Key, InstancedMesh Instances);
     
     private List<Group> _groups = [];
@@ -30,7 +30,8 @@ internal sealed class DetailRenderer
             queue.Add(new InstancedMeshCommand
             {
                 Instances = group.Instances, Texture = group.Key.Texture, Color = group.Key.Color,
-                Lit = group.Key.Lit, BackfaceCulling = group.Key.BackfaceCulling, Lightmap = group.Key.Lightmap
+                Lit = group.Key.Lit, BackfaceCulling = group.Key.BackfaceCulling, Lightmap = group.Key.Lightmap,
+                Shader = group.Key.Shader, ShaderParameters = group.Key.Parameters
             });
         }
     }
@@ -64,10 +65,18 @@ internal sealed class DetailRenderer
                             ?? throw new FileNotFoundException($"Detail texture '{asset.Texture}' was not found.");
                     
                     key = new GroupKey(mesh, texture, asset.Color, asset.Lit, asset.BackfaceCulling);
+                    if (asset.Shader != null || asset.FragmentShader != null || asset.ShaderParameters.Count > 0)
+                    {
+                        var shader = Content.LoadShaderProgram(asset.Shader ?? (asset.Lit ? "InstancedLit" : "InstancedUnlit"),
+                            asset.FragmentShader ?? (asset.Lit ? "Lit" : "Unlit"));
+                        shader.RequireInstancing();
+                        key = key with { Shader = shader, Parameters = shader.ConvertParameters(asset.ShaderParameters) };
+                    }
                     assets.Add(detail.AssetPath, key);
                 }
 
                 var region = new Vector4(1,1,0,0);
+                
                 if (key.Lit && lightmaps?.Detail(detail, key.Mesh, out var mappedMesh, out var lightmap, out region) ==
                     true)
                 {

@@ -12,6 +12,8 @@ public enum Plane
 public class Graphics
 { 
     private Camera _camera = null!;
+    private Vector2 _uiSize;
+    private float[] _textVertices = [];
     
     private Renderer Renderer { get; }
     
@@ -26,9 +28,9 @@ public class Graphics
         Renderer = renderer;
     }
 
-    internal void DrawInstances(InstancedMesh instances, Texture texture, Color color, bool lit, bool backfaceCulling, Texture? lightmap = null)
+    internal void DrawInstances(InstancedMesh instances, Texture texture, Color color, bool lit, bool backfaceCulling, Texture? lightmap = null, ShaderProgram? shader = null, ShaderParameters? parameters = null)
     {
-        Renderer.DrawInstances(instances, texture, color, lit, backfaceCulling, lightmap);
+        Renderer.DrawInstances(instances, texture, color, lit, backfaceCulling, lightmap, shader, parameters);
     }
 
     public void BeginDraw(Camera camera)
@@ -248,6 +250,7 @@ public class Graphics
     public void BeginUI(Vector2 size)
     {
         Renderer.BeginUI(size);
+        _uiSize = size;
     }
 
     public void EndUI()
@@ -255,6 +258,66 @@ public class Graphics
         Renderer.EndUI();
     }
     
+    internal void DrawUIText(TextLayout layout, Texture texture, Vector2 origin, Vector2 size,
+        UI.HorizontalAlignment horizontalAlignment, float verticalOffset, Color color, bool clipToRect)
+    {
+        var clipMin = Vector2.Zero;
+        var clipMax = _uiSize;
+        if (UIClip is { } parent)
+        {
+            clipMin = Vector2.Max(clipMin, parent.Min);
+            clipMax = Vector2.Min(clipMax, parent.Max);
+        }
+        if (clipToRect)
+        {
+            clipMin = Vector2.Max(clipMin, origin);
+            clipMax = Vector2.Min(clipMax, origin + size);
+        }
+        if (clipMax.X <= clipMin.X || clipMax.Y <= clipMin.Y) return;
+
+        var range = layout.LineIndex.VisibleGlyphs(clipMin.Y - origin.Y - verticalOffset,
+            clipMax.Y - origin.Y - verticalOffset);
+        var used = 0;
+        for (var i = range.Start; i < range.End; i++)
+        {
+            var placed = layout.Glyphs[i];
+            var horizontal = horizontalAlignment switch
+            {
+                UI.HorizontalAlignment.Center => (size.X - layout.LineWidths[placed.Line]) * .5f,
+                UI.HorizontalAlignment.Right => size.X - layout.LineWidths[placed.Line],
+                _ => 0
+            };
+            var position = origin + placed.Position + new Vector2(horizontal, verticalOffset);
+            var glyphSize = placed.Glyph.Size;
+            var min = Vector2.Max(position, clipMin);
+            var max = Vector2.Min(position + glyphSize, clipMax);
+            if (max.X <= min.X || max.Y <= min.Y) continue;
+            var from = (min - position) / glyphSize;
+            var to = (max - position) / glyphSize;
+            var uv = placed.Glyph.UvRect;
+            var uvMin = new Vector2(uv.X, uv.Y) + new Vector2(uv.Z, uv.W) * from;
+            var uvMax = new Vector2(uv.X, uv.Y) + new Vector2(uv.Z, uv.W) * to;
+            if (_textVertices.Length - used < 32)
+                Array.Resize(ref _textVertices, Math.Max(128, checked(_textVertices.Length * 2)));
+            Vertex(min.X, max.Y, uvMin.X, uvMax.Y);
+            Vertex(max.X, max.Y, uvMax.X, uvMax.Y);
+            Vertex(max.X, min.Y, uvMax.X, uvMin.Y);
+            Vertex(min.X, min.Y, uvMin.X, uvMin.Y);
+        }
+        if (used > 0) Renderer.DrawUIText(_textVertices.AsSpan(0, used), texture, color);
+
+        void Vertex(float x, float y, float u, float v)
+        {
+            _textVertices[used++] = x;
+            _textVertices[used++] = y;
+            _textVertices[used++] = 0;
+            _textVertices[used++] = 0;
+            _textVertices[used++] = 0;
+            _textVertices[used++] = 1;
+            _textVertices[used++] = u;
+            _textVertices[used++] = v;
+        }
+    }
     public void DrawUIRect(Vector2 position, Vector2 size, Color color, Texture? texture = null)
     {
         if (UIClip.HasValue)

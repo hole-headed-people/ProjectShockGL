@@ -26,7 +26,8 @@ internal sealed partial class LightmapOcclusion
         _alpha = alpha;
         
         _order = Enumerable.Range(0, triangles.Length)
-            .Where(index => triangles[index].Material.SurfaceMode != SurfaceMode.Transparent).ToArray();
+            .Where(index => triangles[index].Material.CastBakedShadow &&
+                triangles[index].Material.SurfaceMode != SurfaceMode.Transparent).ToArray();
         
         if (_order.Length != 0)
         {

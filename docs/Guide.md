@@ -98,9 +98,9 @@ public class Game : ProjectShockGL.Core.Game
 }
 ```
 
-Карту Content/Levels/FirstRoom.map предварительно создайте редактором. Ядро не создаёт персонажа автоматически: его и активную камеру определяет ваша игра или OxygenGL.
+Карту Content/Levels/FirstRoom.level предварительно создайте редактором. Ядро не создаёт персонажа автоматически: его и активную камеру определяет ваша игра или OxygenGL.
 
-GameSettings.ini возле exe:
+DefaultSettings.ini возле exe:
 
 ```ini
 [Window]
@@ -125,7 +125,7 @@ Groups=Mixer
 
 В Class указаны полное имя типа и имя сборки. Тип должен иметь конструктор без параметров. Groups=Mixer предполагает Content/Audio/Mixer.json из StarterContent; без этой настройки остаётся Master.
 
-Рядом нужен Layers.ini:
+В этот же DefaultSettings.ini добавьте слои с прежними номерами:
 
 ```ini
 [Layers]
@@ -138,7 +138,7 @@ Groups=Mixer
 
 ```xml
 <ItemGroup>
-  <None Update="GameSettings.ini;Layers.ini">
+  <None Update="DefaultSettings.ini">
     <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     <CopyToPublishDirectory>Always</CopyToPublishDirectory>
   </None>
@@ -149,19 +149,22 @@ Content тоже копируется с сохранением структур
 
 ### 2.3. Редактор своей игры
 
-В EditorSettings.ini задайте Class редактора и тот же Content:
+В EditorSettings.ini задайте ссылку на общий файл и отличия редактора:
 
 ```ini
+[Settings]
+DefaultPath=D:\Games\DemoGame\DefaultSettings.ini
 [Game]
-Name=DemoGame Editor
 Class=ProjectShockGLEditor.Game, ProjectShockGLEditor
-PostProcessingProfile=Default
-[Content]
-Path=Content
-CustomPath=D:\Games\DemoGame\Content
-[Audio]
-Groups=Mixer
+[Window]
+Icon=Icons/Editor.png
+Mode=Windowed
+StartMaximized=true
+[Application]
+IsDebug=true
 ```
+
+DefaultPath может быть абсолютным или относительным к EditorSettings.ini рядом с exe. При разработке путь должен вести к исходному DefaultSettings.ini игры. В опубликованном комплекте оба ini находятся рядом, поэтому используется DefaultPath=DefaultSettings.ini. Игровые классы, слои, Content и аудиогруппы наследуются; повторять их не нужно.
 
 ```powershell
 dotnet run --project ProjectShockGLEditor/ProjectShockGLEditor.csproj
@@ -269,7 +272,7 @@ if (World.Find("MovingBox") is { } box)
 Detach();
 ```
 
-Attach сохраняет мировую позицию и вращение, затем следует за позицией и вращением цели. Масштаб не наследуется. Есть Inputs AttachTo с именем цели и Detach без параметров. Объекты должны принадлежать одному World, циклы запрещены. Это не физическое соединение Rigidbody. Связь не записывается в .map: при необходимости её создаёт логика уровня.
+Attach сохраняет мировую позицию и вращение, затем следует за позицией и вращением цели. Масштаб не наследуется. Есть Inputs AttachTo с именем цели и Detach без параметров. Объекты должны принадлежать одному World, циклы запрещены. Это не физическое соединение Rigidbody. Связь не записывается в .level: при необходимости её создаёт логика уровня.
 
 У Entity ниже World.KillY вызывается Kill; по умолчанию он уничтожает объект. Kill можно переопределить. KillY настраивается для уровня в Environment.
 
@@ -280,9 +283,9 @@ Attach сохраняет мировую позицию и вращение, з�
 
 ### 5.1. Пути и загрузка
 
-Settings.Initialize(false) читает GameSettings.ini, true — EditorSettings.ini. Файлы находятся возле exe. Переданный флаг определяет Application.IsEditor; ключ IsEditor в INI не требуется.
+Settings.Initialize(false) читает только DefaultSettings.ini возле exe. Settings.Initialize(true) читает EditorSettings.ini возле exe и общий DefaultSettings.ini по [Settings] DefaultPath. Без DefaultPath общий файл ищется рядом с exe. Явная ссылка на отсутствующий файл вызывает ошибку. Для каждого ключа значение редактора имеет приоритет; отсутствующий ключ наследуется из общего файла, а пустая строка явно замещает базовую. GetInt/GetFloat/GetBool при пустой строке используют переданный в метод дефолт. Переданный флаг определяет Application.IsEditor; ключ IsEditor в INI не требуется. Старые GameSettings.ini и Layers.ini больше не читаются: перенесите параметры в DefaultSettings.ini, включая секцию [Layers].
 
-Content выбирает непустой CustomPath, иначе Path. Относительные пути вычисляются от папки приложения, не от рабочего каталога IDE. В релизе обычно используются Path=Content и пустой CustomPath.
+Content выбирает непустой CustomPath, иначе Path. Settings.GetPath(section, key, defaultValue) вычисляет относительный путь от папки ini-файла, который предоставил значение. Так разрешаются Content Path/CustomPath, Window Icon и устаревший SavePath. Унаследованный путь считается от общего DefaultSettings.ini, переопределённый — от EditorSettings.ini; рабочая папка IDE не участвует. Имена ресурсов вроде StartupLevel и Audio Groups остаются именами внутри Content. SaveDirectory по-прежнему относится к LocalAppData/<имя игры>, если не задан абсолютным путём. В релизе обычно используются Path=Content и пустой CustomPath.
 
 | Папка | Содержимое / пример |
 | --- | --- |
@@ -292,7 +295,7 @@ Content выбирает непустой CustomPath, иначе Path. Отно�
 | Fonts | TTF: Content.LoadFont("NotoSans-Regular", 24) |
 | Shaders | GLSL .vert / .frag: Content.LoadShaderProgram("Lit", "Lit") |
 | Entities / Geometry / Details | JSON ассетов соответствующих объектов |
-| Prefabs / Levels | JSON префабов / карты .map |
+| Prefabs / Levels | JSON префабов / карты .level |
 | UI / Particles | JSON дерева виджетов / настройки частиц |
 | Audio | WAV и JSON групп |
 | PostProcessProfiles / Lightmaps | Профили постобработки / результаты запекания |
@@ -328,10 +331,10 @@ Rendering/ResolutionScale: 0.1–1. ResolutionFilter: Linear / Nearest. Меня
 
 ### 6.1. Первый уровень
 
-1. Укажите Content игры в EditorSettings.ini.
+1. Укажите путь к DefaultSettings.ini игры в [Settings] DefaultPath редактора; Content наследуется из него.
 2. Создайте File → New, добавьте BrushBox для пола и стен, затем свет.
 3. Для OxygenGL разместите PlayerStart. В собственной архитектуре появление игрока определяете вы.
-4. Настройте Edit → Environment и сохраните Content/Levels/FirstRoom.map.
+4. Настройте Edit → Environment и сохраните Content/Levels/FirstRoom.level.
 5. Загрузите LevelManager.Load("FirstRoom") либо задайте StartupLevel при использовании OxygenGL.
 
 Карта — данные размещения и окружения, не сохранение прохождения. Она хранит Placeables, Details, папки, группы и привязку lightmap.
@@ -615,14 +618,14 @@ LinearVelocity управляет линейной скоростью, AngularVe
 
 ### 11.2. Слои и запросы
 
-Layer — бит слоя, CollidesWith — маска, не индекс строки Layers.ini:
+Layer — бит слоя, CollidesWith — маска, не индекс строки в секции [Layers]:
 
 ```csharp
 CollidesWith = ProjectShockGL.Layers.Get("Default")
              | ProjectShockGL.Layers.Get("Player");
 ```
 
-В Inspector Layer выбирается списком, CollidesWith — галочками. Данные карты применяются после Create и могут переопределить его настройки. Layers.ini находится возле exe; индексы игры и редактора должны совпадать.
+В Inspector Layer выбирается списком, CollidesWith — галочками. Данные карты применяются после Create и могут переопределить его настройки. Секция [Layers] находится в DefaultSettings.ini. Редактор наследует её через DefaultPath; номера слоёв менять после создания карт нельзя без переноса сохранённых масок.
 
 Запрос внутри объекта:
 
@@ -673,7 +676,7 @@ camera.LocalPosition = new System.Numerics.Vector3(0, 1.6f, 0);
 
 В Palette есть CameraEntity с Inputs MakeActive / ReleaseActive и CameraCaptureEntity с Width / Height / Filter. Захват рисует мир в RenderTexture без смены Camera.Active и слушателя аудио. UI основной игры туда не входит. Каждая камера добавляет проход мира.
 
-Monitor — односторонний Unlit-квад без коллайдера. CameraName — имя CameraCapture на уровне; Setup меняет подключение кодом или Input. Transform.Scale задаёт размер поверхности независимо от разрешения захвата. Лицевая сторона монитора направлена по локальной +Z. Без камеры экран чёрный; отключённый захват оставляет последний кадр.
+Monitor — односторонний непрозрачный Unlit-квад без коллайдера. Он выводит RGB захвата как сплошной экран и принудительно использует Opaque, включая старые карты с сохранённым Cutout/Transparent. CameraName — имя CameraCapture на уровне; Setup меняет подключение кодом или Input. Transform.Scale задаёт размер поверхности независимо от разрешения захвата. Лицевая сторона монитора направлена по локальной +Z. Без камеры экран чёрный; отключённый захват оставляет последний кадр.
 
 Для собственного экрана создайте RenderTexture через Content.CreateRenderTexture, вызовите Capture с отдельной камерой и используйте Texture. Ресурс принадлежит создателю и требует Dispose; компонент захвата освобождает свой автоматически.
 
@@ -739,7 +742,7 @@ Environment задаёт AmbientColor, туман и SkyColor. При SkyColorEn
 3. В Edit → Bake Lighting выберите качество, атлас и GI, нажмите Bake.
 4. Дождитесь успешного результата и сохраните карту. Clear снимает привязку результата.
 
-Создаются отдельные UV lightmap, обычная развёртка остаётся. Рассчитываются прямой свет, перекрытие геометрией и один диффузный отскок с цветом поверхностей. Результат записывается в Content/Lightmaps, ссылка — в .map. Отмена не заменяет предыдущий результат незавершённым.
+Создаются отдельные UV lightmap, обычная развёртка остаётся. Рассчитываются прямой свет, перекрытие геометрией и один диффузный отскок с цветом поверхностей. Результат записывается в Content/Lightmaps, ссылка — в .level. Отмена не заменяет предыдущий результат незавершённым.
 
 Статичная Lit-поверхность использует lightmap вместо повторного Ambient и добавляет Realtime. Динамические объекты получают Ambient / DynamicAmbient и Realtime, не получают Baked напрямую и не используют Light Probes.
 
@@ -831,13 +834,41 @@ Text использует Font из TTF и растрового атласа з�
 
 Для локализации настройте Localization/Tables и Language, затем Text.Table, Key и Localize=true. LocalizationManager.SetLanguage обновляет подписанные тексты. Предпросмотр редактора пока не переводит их автоматически. Формат таблиц: [LocalizationData](../ProjectShockGL/Localization/LocalizationData.cs).
 
-TextScrollView содержит Body типа Text и прокрутку колесом. Это не общий ScrollView для произвольных дочерних Image/Widget; ползунка нет.
+TextScrollView содержит Body типа Text и прокрутку колесом. Text кэширует перенос и размещение символов; индекс строк позволяет двоичным поиском выбрать видимый диапазон без полного перебора документа при каждой прокрутке. Видимые символы одного Text объединяются в одну отрисовку с общей текстурой шрифта. Частично видимые символы обрезаются с корректировкой UV по Rect текста и области родителя; пустой или полностью скрытый текст не создаёт вызова отрисовки. CPU-буфер и GPU-меш переиспользуются, GPU-меш освобождается вместе с Renderer. При изменении текста, шрифта или ширины раскладка и индекс строятся заново. Это не общий ScrollView для произвольных дочерних Image/Widget; ползунка нет.
+
+### Горизонтальная и вертикальная раскладка
+
+HorizontalLayout и VerticalLayout — контейнеры для любых дочерних виджетов, в том числе других Layout. HorizontalLayout размещает детей слева направо, VerticalLayout — сверху вниз. Добавляются кодом или кнопками в Widgets UI Editor.
+
+```csharp
+var menu = canvas.Add<VerticalLayout>();
+menu.Rect.Position = new Vector2(40, 60);
+menu.Rect.Size = new Vector2(300, 240);
+menu.Padding = new Vector4(12, 16, 12, 16); // Left, Top, Right, Bottom
+menu.Spacing = 8;
+menu.HorizontalAlignment = HorizontalAlignment.Center;
+menu.VerticalAlignment = VerticalAlignment.Top;
+menu.StretchChildren = true;
+
+var first = menu.Add<Button>();
+first.Rect.Size = new Vector2(100, 40);
+var second = menu.Add<Button>();
+second.Rect.Size = new Vector2(100, 40);
+```
+
+Здесь кнопки имеют высоту 40, ширину 276 и расстояние 8 между ними. StretchChildren растягивает только поперёк раскладки: ширину у VerticalLayout и высоту у HorizontalLayout. Выравнивание по этой оси при растягивании не влияет на положение. Без растягивания сохраняется собственный размер ребёнка; HorizontalAlignment и VerticalAlignment определяют выравнивание внутри доступного прямоугольника. При нехватке места содержимое продолжается вправо/вниз; Layout сам не обрезает его и не меняет свой размер.
+
+Порядок раскладки соответствует порядку детей в иерархии и SetSiblingIndex. SortOrder меняет отрисовку и приоритет мыши, но не порядок раскладки. Невидимые дети не занимают место, выключенные IsEnabled продолжают занимать. FillCanvas сохраняет прежний смысл заполнения всего Canvas и исключает ребёнка из раскладки; обычно для элементов Layout этот флаг не нужен.
+
+Раскладка вычисляется при обращении к Rect, поэтому отрисовка и проверка мыши используют одинаковые актуальные границы без ожидания следующего Update. Размеры, заданные вручную, хранятся отдельно от вычисленных: снятие StretchChildren возвращает исходный поперечный размер. После смены родителя обычные настройки Rect снова работают. Сохранение JSON записывает исходный Rect и настройки Layout, а не временно растянутые размеры.
+
+В UI Editor у ребёнка Layout блокируются перемещение/resize мышью, Position, Anchor и Pivot. Size остаётся предпочитаемым размером: управляемая StretchChildren поперечная составляющая будет рассчитана родителем. Сами контейнеры редактируются как обычные виджеты, если их положение не управляется внешним Layout. Свойства Layout сохраняются в UI JSON и участвуют в существующем Undo/Redo. Автоматическое подстраивание контейнера под содержимое, гибкие веса и Grid пока не добавлены.
 
 ### 15.5. UI Editor и JSON
 
 Edit → UI Editor: дерево слева, предпросмотр в центре, Inspector справа. В Widgets создаются элементы. Есть мышиное перемещение/resize, дублирование, удаление, смена порядка и родителя drag-and-drop, Undo/Redo. При смене родителя сохраняется положение на экране, циклы запрещены.
 
-Корень UIAsset — экран: нулевые Position/Anchor/Pivot, размер следует Preview size и игровому Canvas. Его ручки заблокированы, вложенные панели редактируются. New / Open / Save сохраняют JSON отдельно от .map; закрытие изменённого экрана запрашивает решение.
+Корень UIAsset — экран: нулевые Position/Anchor/Pivot, размер следует Preview size и игровому Canvas. Его ручки заблокированы, вложенные панели редактируются. New / Open / Save сохраняют JSON отдельно от .level; закрытие изменённого экрана запрашивает решение.
 
 ```csharp
 var canvas = ProjectShockGL.Core.Game.Instance.UIManager.Canvas;
@@ -959,6 +990,27 @@ Edit → Audio Groups Editor редактирует JSON через New / Open /
 
 В игре AudioSystem.GetGroup("Music") возвращает группу для изменения Volume. Изменение не переписывает JSON, пользовательские настройки нужно сохранять отдельно. После замены конфигурации ссылки на удалённые группы получите заново. Кодовая регистрация CreateGroup также доступна.
 
+У AudioGroup есть runtime-флаги Muted и Paused. Они наследуются всеми дочерними группами. Muted обнуляет итоговую громкость без изменения Volume, позиции записи и хода Fade. Paused приостанавливает воспроизведение и Fade; новый источник в этой ветке сразу ожидает снятия паузы. Muted/Paused — отдельные состояния, снятие одного не отменяет другое. В Mixer.json и Audio Groups Editor сейчас сохраняются определения групп, родители и Volume, а эти флаги задаются игровым кодом.
+
+```csharp
+using AudioSystem = ProjectShockGL.Audio.Audio;
+
+var gameplay = AudioSystem.GetGroup("Gameplay");
+if (gameplay != null)
+{
+    gameplay.Paused = true;
+    // При продолжении:
+    gameplay.Paused = false;
+    // Независимое отключение звука категории:
+    gameplay.Muted = true;
+    gameplay.Muted = false;
+}
+```
+
+Для выборочной игровой паузы сначала создайте Gameplay в Audio Groups Editor, поместите под неё игровые группы, а Interface оставьте отдельной веткой Master. Если Interface остаётся дочерней Effects, пауза Effects затронет и UI. Иерархия не меняется автоматически; TimeScale также не включает групповую паузу сам.
+
+Ручной Source.Pause, групповая пауза и недоступность владельца/компонента учитываются независимо. Resume снимает только ручную причину; включение объекта — только его недоступность. Пока остаётся хотя бы одна причина, звук не продолжается. После Stop изменение группы не перезапускает звук. Приостановленный PlayOneShot сохраняется, приглушённый продолжает играть и может закончиться/очиститься в тишине. Смена GroupName, родителя или конфигурации сразу пересчитывает причины паузы. Уже возникший хвост общего EFX-эффекта может продолжать звучать: групповой Mute/Pause не является раздельным микшером хвостов реверберации.
+
 ### 17.4. Реверберация
 
 AudioReverbZone имеет Box / Sphere, Priority, TransitionTime и Room / Hall / Cave / Custom. BoxSize — полный размер; коробка учитывает поворот и абсолютный масштаб. Сфера использует Radius и максимальную компоненту абсолютного масштаба. При выделении показывается каркас.
@@ -1006,7 +1058,7 @@ public override void OnRestoreState(ProjectShockGL.Core.IObjectStateReader state
 
 Не сохраняйте живую C#-ссылку вместо идентификатора. Компоненты не сохраняют автоматически всё своё внутреннее состояние: скорости Rigidbody, прогресс механизма и другие необходимые данные нужно включить явно.
 
-GUID объектов карты должны быть записаны в .map; старый уровень перед использованием сохранений пересохраните редактором. Динамические Saveable-объекты пересоздаются по происхождению: ассет, член префаба либо класс World.Spawn. Тип должен быть доступен и создаваться без параметров. Произвольные изменения после спавна без записи состояния не восстановятся автоматически.
+GUID объектов карты должны быть записаны в .level; старый уровень перед использованием сохранений пересохраните редактором. Динамические Saveable-объекты пересоздаются по происхождению: ассет, член префаба либо класс World.Spawn. Тип должен быть доступен и создаваться без параметров. Произвольные изменения после спавна без записи состояния не восстановятся автоматически.
 
 ### 18.3. Слоты
 
@@ -1079,7 +1131,7 @@ dotnet publish .\DemoGame\DemoGame.csproj -c Release -r win-x64 --self-contained
 
 Редактор публикуется своим проектом/точкой входа в отдельную временную папку. Для общей поставки затем объедините приложения и один Content. В репозитории движка универсального Publish.ps1 нет; автоматизация комплекта относится к вашему игровому проекту.
 
-SingleFile упаковывает подходящие зависимости; нативные библиотеки имеют отдельные правила доставки/извлечения. Контент не обязан быть внутри exe. INI, Layers.ini и Content должны находиться в согласованной структуре. Сохраняйте сведения о лицензиях библиотек, включая OpenAL Soft.
+SingleFile упаковывает подходящие зависимости; нативные библиотеки имеют отдельные правила доставки/извлечения. Контент не обязан быть внутри exe. DefaultSettings.ini, EditorSettings.ini и Content должны находиться в согласованной структуре. Сохраняйте сведения о лицензиях библиотек, включая OpenAL Soft.
 
 Проверьте комплект без исходных каталогов и SDK: CustomPath пуст, Content внутри своей папки, оба exe работают, уровни и сохранения загружаются после перезапуска. OutputType=WinExe убирает консоль игры; редактор может оставаться Exe с консолью. Ошибки игры без консоли ищите в Log.
 
@@ -1100,3 +1152,117 @@ SingleFile упаковывает подходящие зависимости; �
 | Частицы | [ParticleSystemComponent](../ProjectShockGL/Core/ParticleSystemComponent.cs), [ParticleAsset](../ProjectShockGL/Core/ParticleAsset.cs) |
 | Сохранения | [SaveManager](../ProjectShockGL/SaveManager.cs), [SaveHelper](../ProjectShockGL/SaveHelper.cs) |
 | Игровая архитектура | [OxygenGL/Core](../ProjectOxygenGL/Core) |
+
+### Пользовательские настройки
+
+Описание профиля находится в `Content/<имя>.json`. Пример — `StarterContent/Default.json`:
+
+```json
+{
+  "Options": [
+    { "Name": "MasterVolume", "Type": "Float", "DefaultValue": 1.0 },
+    { "Name": "Language", "Type": "String", "DefaultValue": "en" },
+    { "Name": "Fullscreen", "Type": "Bool", "DefaultValue": false },
+    { "Name": "Quality", "Type": "Int", "DefaultValue": 2 }
+  ]
+}
+```
+
+В `DefaultSettings.ini`, в секции `[Game]`, укажите:
+
+```ini
+UserSettingsDefaultProfile=Default
+UserSettingsProfile=UserSettings
+```
+
+При указанном профиле Application загружает настройки после инициализации Content, до событий загрузки игры. Без указанного профиля существующие проекты запускаются как прежде. Можно вызвать `UserSettings.Initialize()` самостоятельно после инициализации Content; повторный вызов ничего не меняет.
+
+Пользовательский файл находится в родительской папке настроенного каталога сохранений: при стандартном `SaveDirectory=Saves` это `LocalAppData/<Game/Name>/UserSettings.json`, рядом с папкой `Saves`. Для абсолютного SaveDirectory используется его родительская папка. UserSettingsDefaultProfile задаёт имя профиля дефолтов в Content. UserSettingsProfile задаёт имя пользовательского файла без пути и расширения; .json добавляется автоматически.
+
+```csharp
+var volume = UserSettings.Profile.Get("MasterVolume");
+float current = volume.Get<float>();
+volume.Set(0.7f);
+
+UserSettings.ProfileChanged += changes =>
+{
+    if (changes.TryGetValue("MasterVolume", out var option))
+    {
+        // Игра самостоятельно применяет option.Get<float>().
+    }
+};
+
+UserSettings.Save();
+UserSettings.Reset(); // Сброс в памяти; для записи вызвать Save().
+```
+
+Поддерживаются int, float, string и bool. Имена чувствительны к регистру. Неверное имя, неверный тип в Get/Set и нечисловые float вызывают исключение. Неизменившееся значение не вызывает ProfileChanged. Reset отправляет одно уведомление со словарём действительно изменённых записей по имени. ProfileChanged передаёт IReadOnlyDictionary<string, UserSettingsOption>; нужную запись можно получить через TryGetValue без перебора. Save не вызывает ProfileChanged. Начальная загрузка не отправляет уведомление: при запуске игра читает готовый Profile и применяет его сама.
+
+При отсутствии пользовательского файла используются дефолты. Новые параметры получают дефолты, неизвестные сохранённые параметры игнорируются, несовместимые значения заменяются дефолтами с предупреждением в логе. Повреждённый пользовательский файл оставляет профиль на дефолтах; запись происходит только по Save. Ошибки самого описания профиля сообщаются при загрузке. Save записывает через временный файл и сообщает о невозможности записи исключением.
+
+Движок не применяет настройки к окну, аудио или локализации автоматически. Редактор дефолтных профилей находится в Edit → UserSettings Editor. Таблица содержит Name, Type и Default Value; Add Setting добавляет строку, Delete удаляет её. При изменении типа дефолт сбрасывается в 0, пустую строку или false. New создаёт пустой профиль, Open открывает JSON из Content, Save сохраняет текущий файл, Save As сохраняет копию и переключается на неё. Несохранённые изменения требуют Save / Discard / Cancel при закрытии, New или Open. Пользовательский файл рядом с Saves это окно не открывает и не изменяет; изменение дефолтов не перезаписывает уже сохранённый выбор игрока.
+
+### Типы поверхностей коллайдеров
+
+`Collider.SurfaceType` — строковое описание поверхности, по умолчанию `Default`. Значение сохраняется в .level и префабах и само по себе не меняет физику или звук. В Properties Inspector доступны ручной ввод и список, задаваемый в настройках редактора:
+
+```ini
+[Physics]
+Surfaces=Default, Concrete, Metal, Wood
+```
+
+Surfaces в секции [Physics] можно задать в общем DefaultSettings.ini либо переопределить в EditorSettings.ini; используется итоговое значение Settings. Пробелы вокруг имён, пустые элементы и точные повторы игнорируются. Default доступен всегда. Список служит подсказкой и не ограничивает значения, заданные кодом или загруженные из карты. Имена чувствительны к регистру. Изменение списка не переименовывает уже назначенные поверхности.
+### Локализация текста
+
+В DefaultSettings.ini секция [Localization] задаёт Tables (имена таблиц через запятую) и Language. JSON находится в Content/Localization/<таблица>.json. Загрузка выполняется один раз; после неё SetLanguage меняет язык и вызывает LanguageChanged.
+
+```json
+{
+  "Languages": {
+    "en": { "Translations": { "Ammo": ["Ammo: {0,4}"], "Chance": ["Chance: {0:P0}"] } },
+    "ru": { "Translations": { "Ammo": ["Патроны: {0,4}"], "Chance": ["Шанс: {0:P0}"] } }
+  }
+}
+```
+
+```csharp
+var text = LocalizationManager.GetStringFormat("Ammo", "UI", 12);
+var chance = LocalizationManager.GetStringFormat("Chance", "UI", 0.5f);
+```
+
+GetString возвращает текст без форматирования. GetStringFormat использует стандартные правила string.Format: {0}, {0:F2}, {0,10}, {{ и }} для буквальных скобок. Числа и даты используют текущую культуру приложения; SetLanguage сам её не меняет. При ошибке формата или нехватке аргументов исходная строка возвращается без изменения, а ошибка с таблицей, ключом и языком записывается через Log.
+
+Имена структурных полей Languages/Translations принимаются без учёта регистра, включая существующие languages/translations. Таблица требует непустой объект Languages. Для каждого языка нужен объект Translations, для каждого непустого ключа — непустой массив строк без null. Пустая строка перевода допустима. Повторные JSON-свойства и повторные обозначения языка без учёта регистра отклоняются. Таблица с ошибкой целиком пропускается, остальные продолжают загружаться. Отсутствие таблицы и ошибки чтения попадают в Log, включая лог-файл.
+
+GetString и GetStringFormat всегда используют первый вариант массива (индекс 0). GetRandomString и GetRandomStringFormat явно выбирают случайный вариант; форматирование, резервный язык и диагностика у них работают так же, как у обычных методов. Если нужного перевода нет, используется en, затем сам ключ. Отсутствующие переводы и ошибки форматирования сообщаются один раз для соответствующей таблицы, ключа и языка; отсутствие загруженной таблицы — один раз на её имя.
+
+### Шейдеры Details с instancing
+
+DetailAsset поддерживает необязательные Shader, FragmentShader и ShaderParameters. Shader — имя вершинного шейдера без расширения в Content/Shaders; он должен использовать `layout(location = 3) in mat4 aInstanceModel`. Это проверяется по активному атрибуту программы. Обычный вершинный шейдер меша с uModel не подходит. FragmentShader задаёт фрагментный шейдер; если он отсутствует, используется Lit либо Unlit по флагу Lit ассета. Без новых полей старые Details рисуются прежними стандартными InstancedLit / InstancedUnlit.
+
+```json
+{
+  "Mesh": "Examples/GrassBlade",
+  "Texture": "WhitePixel",
+  "Color": [0.25, 0.6, 0.2, 1.0],
+  "Lit": true,
+  "BackfaceCulling": false,
+  "Shader": "InstancedWind",
+  "ShaderParameters": {
+    "uWindStrength": 0.15,
+    "uWindSpeed": 2.0,
+    "uWindBase": 0.0,
+    "uWindHeight": 1.0,
+    "uWindFrequency": 0.8,
+    "uWindDirection": [1.0, 0.3]
+  }
+}
+```
+
+Для своей растительности назначьте меш, текстуру и Shader=InstancedWind в DetailAsset. InstancedWind.vert использует локальную высоту над uWindBase, делённую на uWindHeight: основание неподвижно, верх колышется сильнее. uWindDirection задаёт локальное направление X/Z, uWindStrength — амплитуду, uWindSpeed — скорость, uWindFrequency — различие фаз по мировому положению экземпляров. Нормали корректируются для изгиба, затем преобразуются матрицей экземпляра.
+
+Параметры преобразуются по типам uniform, как у пользовательских шейдеров мешей; зарезервированные параметры движка нельзя задавать через ShaderParameters. Время uTime поступает из Time.ElapsedTime, uUnscaledTime — из Time.UnscaledElapsedTime. Пример использует uTime и при остановке игрового времени замирает. Для пользовательской анимации в режиме редактора требуется выбранный источник времени; сам шейдер не запускает игровые Update.
+
+Размещения одного ассета продолжают объединяться в instanced-группу. Различающиеся программы или наборы параметров разделяются; параметры не перетекают между группами. Стандартные свет, туман, lightmap и переключатели предпросмотра сохраняются при использовании совместимых стандартных фрагментных шейдеров. Запечённый свет остаётся рассчитанным для исходной формы: деформация не пересчитывает GI и не меняет физическую геометрию. Настройки хранятся в DetailAsset; .level и префабы размещений продолжают ссылаться на ассет без копирования его шейдерных параметров.
+
+DetailAsset.CastBakedShadow по умолчанию true. При значении false размещения ассета не перекрывают лучи запекателя и не служат поверхностями отскока GI. При Lit=true они продолжают получать прямой запечённый свет и GI от других поверхностей. Lightmap UV и области атласа сохраняются. Для Unlit флаг не включает приём освещения. После изменения требуется повторное запекание. Ассеты без нового поля сохраняют прежнее поведение.

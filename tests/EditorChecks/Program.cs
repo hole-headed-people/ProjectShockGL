@@ -14,12 +14,12 @@ using Environment = ProjectShockGL.Environment;
 
 var testRoot = Path.Combine(AppContext.BaseDirectory, "EditorCheckData", Guid.NewGuid().ToString("N"));
 var saveDirectory = Path.Combine(testRoot, $"SaveCheck-{Guid.NewGuid():N}");
-var settingsPath = Path.Combine(AppContext.BaseDirectory, "GameSettings.ini");
+var settingsPath = Path.Combine(AppContext.BaseDirectory, "DefaultSettings.ini");
 var gameSettings = $"[Game]\nName=EditorChecks\nClass=CheckGame, EditorChecks\nSaveDirectory={saveDirectory}\n[Content]\nCustomPath={testRoot}\n[Localization]\nTables=TextChecks\nLanguage=en\n";
 Directory.CreateDirectory(Path.Combine(testRoot, "Entities"));
 Directory.CreateDirectory(Path.Combine(testRoot, "Geometry"));
 File.WriteAllText(settingsPath, gameSettings);
-File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "Layers.ini"), "[Layers]\n0=Default\n");
+File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "DefaultSettings.ini"), "\n[Layers]\n0=Default\n");
 File.WriteAllText(Path.Combine(testRoot, "Entities", "Check.json"),
     "{\"Class\":\"CheckEntity, EditorChecks\",\"Parameters\":{}}");
 File.WriteAllText(Path.Combine(testRoot, "Entities", "Broken.json"),
@@ -290,7 +290,7 @@ RunScene("ParticleEmitter persists its asset through Inspector Undo, maps and pr
     Check(property.GetCustomAttributes(typeof(EditableAttribute),true).Cast<EditableAttribute>().Single().ContentDirectory=="Particles");
     var inputs=InputInvoker.GetInputNames(emitter.GetType());
     Check(inputs.Contains("Play") && inputs.Contains("Stop") && inputs.Contains("Clear"));
-    var map=Path.Combine(testRoot,"particle-emitter.map");
+    var map=Path.Combine(testRoot,"particle-emitter.level");
     EditorLevelManager.SaveCurrentLevel(map);
     var placement=EditorLevelManager.CaptureLevel([emitter]).Placeables.Single();
     var template=JsonConvert.DeserializeObject<Placeable>(JsonConvert.SerializeObject(placement,JsonHelper.GetSettings()),JsonHelper.GetSettings())!;
@@ -807,7 +807,7 @@ RunScene("Runtime attachment links are not saved in map properties", () =>
     var child = SceneObjects.Create(PlaceableType.Entity, "Check");
     child.Transform.Position = Vector3.One;
     child.AttachTo(parent);
-    var path = Path.Combine(testRoot, "without-attachments.map");
+    var path = Path.Combine(testRoot, "without-attachments.level");
     EditorLevelManager.SaveCurrentLevel(path);
     Check(!File.ReadAllText(path).Contains("AttachmentTarget"));
     EditorLevelManager.OpenLevel(path);
@@ -976,9 +976,9 @@ Run("SaveHelper restores the active map by GUID before Start and keeps other map
     var menuLevel = name + "-Menu";
     var levelsDirectory = Path.Combine(testRoot, "Levels");
     Directory.CreateDirectory(levelsDirectory);
-    var mapA = Path.Combine(levelsDirectory, levelA + ".map");
-    var mapB = Path.Combine(levelsDirectory, levelB + ".map");
-    var menuMap = Path.Combine(levelsDirectory, menuLevel + ".map");
+    var mapA = Path.Combine(levelsDirectory, levelA + ".level");
+    var mapB = Path.Combine(levelsDirectory, levelB + ".level");
+    var menuMap = Path.Combine(levelsDirectory, menuLevel + ".level");
     var definition = Path.Combine(testRoot, "Entities", name + ".json");
     var door = Guid.NewGuid();
     var inactive = Guid.NewGuid();
@@ -1067,7 +1067,7 @@ Run("SaveHelper restores the active map by GUID before Start and keeps other map
         try
         {
             File.WriteAllText(settingsPath, gameSettings.Replace("[Game]\n",
-                "[Game]\nGameStateClass=SessionCheckState, EditorChecks\n" +
+                "[Game]\nStateClass=SessionCheckState, EditorChecks\n" +
                 "PlayerCharacterClass=SessionCheckCharacter, EditorChecks\n"));
             Settings.Initialize();
             ((SaveCheckEntity)world.Find("door")!).Progress = 11;
@@ -1143,7 +1143,7 @@ Run("SaveHelper recreates prefab members, entity assets and spawned classes with
 {
     var name = $"DynamicSave-{Guid.NewGuid():N}";
     var levelsDirectory = Path.Combine(testRoot, "Levels");
-    var map = Path.Combine(levelsDirectory, name + ".map");
+    var map = Path.Combine(levelsDirectory, name + ".level");
     var asset = Path.Combine(testRoot, "Entities", name + ".json");
     var prefab = Content.GetPrefabPath(name);
     var singlePrefab = Content.GetPrefabPath(name + "-Single");
@@ -1529,7 +1529,7 @@ RunScene("Details survive editor map capture, JSON roundtrip and dirty tracking 
     });
     EditorLevelManager.RefreshDirty();
     Check(EditorLevelManager.IsDirty && snapshot.Details[0].Position == new Vector3(2, 3, 4));
-    var path = Path.Combine(testRoot, "detail-roundtrip.map");
+    var path = Path.Combine(testRoot, "detail-roundtrip.level");
     EditorLevelManager.SaveCurrentLevel(path);
     Check(!EditorLevelManager.IsDirty);
     EditorLevelManager.OpenLevel(path);
@@ -1541,7 +1541,7 @@ RunScene("Details survive editor map capture, JSON roundtrip and dirty tracking 
     Check(data.Details.Single().Id == placement.Id);
     var levels = Path.Combine(testRoot, "Levels");
     Directory.CreateDirectory(levels);
-    File.Copy(path, Path.Combine(levels, "DetailsViaContent.map"), true);
+    File.Copy(path, Path.Combine(levels, "DetailsViaContent.level"), true);
     Check(Content.LoadLevel("DetailsViaContent")!.Details.Single().Id == placement.Id);
 });
 
@@ -1683,7 +1683,7 @@ RunScene("Detail gizmos translate, rotate, scale, snap, cancel and retain transf
         UndoRedo.Undo(); Check(TransformState.Capture(target.Transform) == mirrored);
         UndoRedo.Redo();
         var scaled = TransformState.Capture(target.Transform);
-        var path = Path.Combine(testRoot, "detail-gizmo.map");
+        var path = Path.Combine(testRoot, "detail-gizmo.level");
         EditorLevelManager.SaveCurrentLevel(path);
         EditorLevelManager.OpenLevel(path);
         var loaded = world.Details.Find(detail.Id)!;
@@ -1850,7 +1850,7 @@ RunScene("Detail and Object groups share assignment, removal, visibility, deleti
     UndoRedo.Undo();
     Check(!obj.IsEditorVisible && !EditorSelectionTarget.ForDetail(world, detail.Id).IsEditorVisible &&
           world.Details.Find(detail.Id)!.EditorGroups.Contains("other"));
-    var path = Path.Combine(testRoot, "detail-groups.map");
+    var path = Path.Combine(testRoot, "detail-groups.level");
     EditorLevelManager.SaveCurrentLevel(path); EditorLevelManager.OpenLevel(path);
     Check(Game.Instance.World.Details.Find(detail.Id)!.EditorGroups.Contains("room") &&
           SceneGroups.Capture().Single(group => group.Id == "room").Visible == false &&
@@ -1940,7 +1940,7 @@ RunScene("Monitor stores camera names in maps and supports Setup, scale, duplica
     var duplicate = (MonitorEntity)SceneObjects.Duplicate(monitor);
     Check(duplicate.CameraName == "CameraC" && duplicate.Screen != monitor.Screen &&
         duplicate.Transform.Scale == new Vector3(3, 2, 1));
-    var path = Path.Combine(testRoot, "monitors.map");
+    var path = Path.Combine(testRoot, "monitors.level");
     EditorLevelManager.SaveCurrentLevel(path);
     EditorLevelManager.OpenLevel(path);
     var loaded = Game.Instance.World.GetAllObjects(true).OfType<MonitorEntity>().ToArray();
@@ -1983,7 +1983,7 @@ RunScene("Placeable cameras preserve lens/resolution settings through map loadin
         !duplicate.IsActive && duplicate.Capture != capture.Capture);
     var oldCamera = camera.Camera;
     var oldCaptureCamera = capture.Camera;
-    var path = Path.Combine(testRoot, "cameras.map");
+    var path = Path.Combine(testRoot, "cameras.level");
     EditorLevelManager.SaveCurrentLevel(path);
     EditorLevelManager.OpenLevel(path);
     Check(oldCamera.IsDisposed && oldCaptureCamera.IsDisposed);
@@ -2094,7 +2094,7 @@ Run("BackfaceCulling survives map, Inspector snapshots, duplication and prefab p
     var duplicate = EditorLevelManager.DuplicateObject(geometry);
     Check(!duplicate.GetComponent<MeshComponent>()!.BackfaceCulling);
     var level = EditorLevelManager.CaptureCurrentLevel();
-    var path = Path.Combine(testRoot, "culling.map");
+    var path = Path.Combine(testRoot, "culling.level");
     EditorLevelManager.SaveLevel(level, path);
     EditorLevelManager.OpenLevel(path);
     Check(Game.Instance.World.GetAllObjects(true).All(obj => !obj.GetComponent<MeshComponent>()!.BackfaceCulling));
@@ -2116,7 +2116,7 @@ Run("Map roundtrip restores transforms, editable properties, outputs and geometr
             Outputs = [new OutputData { Event = "Use", TargetName = "door", Input = "Open" }] },
         new Placeable { Path = "Box", Type = PlaceableType.Geometry, Name = "floor" }
     ] };
-    var path = Path.Combine(testRoot, "roundtrip.map");
+    var path = Path.Combine(testRoot, "roundtrip.level");
     EditorLevelManager.SaveLevel(level, path);
     EditorLevelManager.OpenLevel(path);
     var objects = Game.Instance.World.GetAllObjects(true);
@@ -2163,7 +2163,7 @@ Run("Invalid editable data or transform does not clear the current scene", () =>
 
 Run("Serialization failure leaves an existing map untouched", () =>
 {
-    var path = Path.Combine(testRoot, "protected.map");
+    var path = Path.Combine(testRoot, "protected.level");
     File.WriteAllText(path, "previous contents");
     Throws(() => EditorLevelManager.SaveLevel(new Level { Placeables = [new Placeable { Properties = new() {
         ["Bad"] = new ThrowingValue() } }] }, path));
@@ -2181,7 +2181,7 @@ Run("Dirty state reflects edits, undo, successful save, and empty maps", () =>
     before.Apply(obj.Transform);
     EditorLevelManager.RefreshDirty();
     Check(!EditorLevelManager.IsDirty);
-    EditorLevelManager.SaveCurrentLevel(Path.Combine(testRoot, "saved.map"));
+    EditorLevelManager.SaveCurrentLevel(Path.Combine(testRoot, "saved.level"));
     Check(!EditorLevelManager.IsDirty);
     LevelManager.Load(new Level());
     Check(Game.Instance.World.GetAllObjects(true).Length == 0);
@@ -2190,7 +2190,7 @@ Run("Dirty state reflects edits, undo, successful save, and empty maps", () =>
 Run("Malformed JSON does not change the document path or scene", () =>
 {
     var previousPath = EditorLevelManager.CurrentPath;
-    var path = Path.Combine(testRoot, "broken.map");
+    var path = Path.Combine(testRoot, "broken.level");
     File.WriteAllText(path, "{ definitely invalid json");
     Throws(() => EditorLevelManager.OpenLevel(path));
     Check(EditorLevelManager.CurrentPath == previousPath);
@@ -2208,7 +2208,7 @@ Run("Environment is captured independently and survives a saved map roundtrip", 
     var snapshot = EditorLevelManager.CaptureCurrentLevel();
     Environment.Reset();
     Check(snapshot.Environment!.IsFogEnabled && snapshot.Environment.FogNear == 4);
-    var path = Path.Combine(testRoot, "environment.map");
+    var path = Path.Combine(testRoot, "environment.level");
     EditorLevelManager.SaveLevel(snapshot, path);
     Check(File.ReadAllText(path).Contains("\"Environment\""));
     EditorLevelManager.OpenLevel(path);
@@ -2228,7 +2228,7 @@ Run("Environment changes mark the map dirty; reverting or saving clears it", () 
     EditorLevelManager.RefreshDirty();
     Check(!EditorLevelManager.IsDirty);
     Environment.FogNear += 1;
-    EditorLevelManager.SaveCurrentLevel(Path.Combine(testRoot, "environment-edited.map"));
+    EditorLevelManager.SaveCurrentLevel(Path.Combine(testRoot, "environment-edited.level"));
     Check(!EditorLevelManager.IsDirty);
     var saved = EditorLevelManager.ReadLevel(EditorLevelManager.CurrentPath!);
     Check(saved.Environment!.FogNear == Environment.FogNear);
@@ -2251,7 +2251,7 @@ Run("KillY roundtrips per level, participates in history and rejects invalid val
     Check(world.KillY == -45f);
     EditorLevelManager.RefreshDirty();
     Check(EditorLevelManager.IsDirty);
-    var path = Path.Combine(testRoot, "kill-y.map");
+    var path = Path.Combine(testRoot, "kill-y.level");
     EditorLevelManager.SaveCurrentLevel(path);
     Check(EditorLevelManager.ReadLevel(path).KillY == -45f && !EditorLevelManager.IsDirty);
     world.KillY = -5f;
@@ -2285,7 +2285,7 @@ Run("Save Level State is enabled by default and roundtrips through editor histor
     Check(world.SaveLevelState);
     UndoRedo.Redo();
     Check(!world.SaveLevelState);
-    var path = Path.Combine(testRoot, "save-level-state.map");
+    var path = Path.Combine(testRoot, "save-level-state.level");
     EditorLevelManager.SaveCurrentLevel(path);
     Check(!EditorLevelManager.ReadLevel(path).SaveLevelState);
     EditorLevelManager.NewLevel();
@@ -2383,7 +2383,7 @@ Run("Repeated duplication reserves unique pending names and retains undo history
     Check(Selection.Object!.Name == "switch_4");
     var objects = Game.Instance.World.GetAllObjects(true);
     Check(objects.Length == 4 && objects.Select(obj => obj.Name).Distinct().Count() == 4);
-    var path = Path.Combine(testRoot, "duplicates.map");
+    var path = Path.Combine(testRoot, "duplicates.level");
     EditorLevelManager.SaveCurrentLevel(path);
     EditorLevelManager.OpenLevel(path);
     objects = Game.Instance.World.GetAllObjects(true);
@@ -2569,7 +2569,7 @@ Run("Inactive entities survive save/load and defer Start while static Geometry s
     geometry.Transform.Position = new Vector3(10, 0, 0);
     var snapshot = EditorLevelManager.CaptureCurrentLevel();
     Check(snapshot.Placeables.Length == 2 && !snapshot.Placeables[0].IsActive && snapshot.Placeables[1].IsActive);
-    var path = Path.Combine(testRoot, "inactive.map");
+    var path = Path.Combine(testRoot, "inactive.level");
     EditorLevelManager.SaveLevel(snapshot, path);
     EditorLevelManager.OpenLevel(path);
     var loaded = Game.Instance.World.Find<CheckEntity>()!;
@@ -2725,7 +2725,7 @@ RunScene("Brush faces survive map, prefab, duplication and Inspector undo with i
     Check(brush.Faces.Count == 0);
     UndoRedo.Redo();
     Check(brush.Faces[BrushFace.PositiveZ] == face);
-    var path = Path.Combine(testRoot, "brush-faces.map");
+    var path = Path.Combine(testRoot, "brush-faces.level");
     EditorLevelManager.SaveCurrentLevel(path);
     EditorLevelManager.OpenLevel(path);
     var loaded = Game.Instance.World.Find<BrushBox>()!;
@@ -2827,7 +2827,7 @@ RunScene("Surface modes persist per mesh and billboard through maps, prefabs and
     var instance = (SurfaceProbe)Prefab.Instantiate(template, Game.Instance.World);
     Check(instance.First.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Transparent &&
         instance.Second.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Cutout && instance.Billboard.AlphaCutoff == 0.8f);
-    var path = Path.Combine(testRoot, "surfaces.map");
+    var path = Path.Combine(testRoot, "surfaces.level");
     EditorLevelManager.SaveCurrentLevel(path);
     EditorLevelManager.OpenLevel(path);
     var loaded = Game.Instance.World.Find<SurfaceProbe>()!;
@@ -2856,7 +2856,7 @@ RunScene("Brush surface defaults and face overrides survive map, prefab and undo
     Check(brush.SurfaceMode == ProjectShockGL.Rendering.SurfaceMode.Cutout && brush.AlphaCutoff == 0.5f);
     UndoRedo.Redo();
     UndoRedo.Redo();
-    var path = Path.Combine(testRoot, "brush-surfaces.map");
+    var path = Path.Combine(testRoot, "brush-surfaces.level");
     EditorLevelManager.SaveCurrentLevel(path);
     EditorLevelManager.OpenLevel(path);
     var loaded = Game.Instance.World.Find<BrushBox>()!;
@@ -2895,10 +2895,10 @@ Run("Indexed level entrances select PlayerStart before Start, reset between tran
         Properties = new Dictionary<string, object> { ["Index"] = index, ["Priority"] = priority }
     };
     EditorLevelManager.SaveLevel(new Level { Placeables = [Start(1, 1, new Vector3(1, 2, 3))] },
-        Path.Combine(testRoot, "Levels", levelA + ".map"));
+        Path.Combine(testRoot, "Levels", levelA + ".level"));
     EditorLevelManager.SaveLevel(new Level { Placeables =
         [Start(1, 100, new Vector3(10, 2, 3)), Start(2, 1, new Vector3(20, 2, 3)), Start(2, 5, new Vector3(25, 2, 3))] },
-        Path.Combine(testRoot, "Levels", levelB + ".map"));
+        Path.Combine(testRoot, "Levels", levelB + ".level"));
     LevelManager.Loaded += onLoaded;
     Vector3? atBeginPlay = null;
     oxygen.BeginPlay += () => atBeginPlay = oxygen.GetPlayerCharacter()?.Transform.Position;
@@ -3238,7 +3238,7 @@ RunScene("Entity asset GUIDs survive moves in maps, prefabs, duplication and Und
     var asset = Path.Combine(testRoot, "Entities", name + ".json");
     var movedName = "Moved/" + name;
     var moved = Path.Combine(testRoot, "Entities", movedName + ".json");
-    var map = Path.Combine(testRoot, name + ".map");
+    var map = Path.Combine(testRoot, name + ".level");
     var prefab = Content.GetPrefabPath(name);
     var id = Guid.NewGuid();
     File.WriteAllText(asset, JsonConvert.SerializeObject(new EntityData
@@ -3304,7 +3304,7 @@ RunScene("Saving legacy entity references assigns a persistent asset GUID withou
 {
     var name = "LegacyGuid-" + Guid.NewGuid().ToString("N");
     var asset = Path.Combine(testRoot, "Entities", name + ".json");
-    var map = Path.Combine(testRoot, name + ".map");
+    var map = Path.Combine(testRoot, name + ".level");
     var prefab = Content.GetPrefabPath(name);
     var text = JsonConvert.SerializeObject(new
     {
@@ -3377,7 +3377,7 @@ Run("Fix Asset References updates legacy maps and both prefab formats, backs up 
         ["Guid"] = objectId, ["Extra"] = "placement",
         ["Outputs"] = new Newtonsoft.Json.Linq.JArray(new Newtonsoft.Json.Linq.JObject { ["TargetName"] = "Door", ["Input"] = "SetActive", ["Parameter"] = "true" })
     };
-    var map = Path.Combine(root, "Levels/Test.map");
+    var map = Path.Combine(root, "Levels/Test.level");
     var multi = Path.Combine(root, "Prefabs/Multi.json");
     var single = Path.Combine(root, "Prefabs/Single.json");
     File.WriteAllText(map, new Newtonsoft.Json.Linq.JObject { ["Placeables"] = new Newtonsoft.Json.Linq.JArray(placement.DeepClone()), ["Extra"] = 19 }.ToString());
@@ -3432,7 +3432,7 @@ Run("Fix Asset References writes nothing on bad JSON, missing targets, invalid o
         }
         if (problem == "duplicate-id") File.WriteAllText(Path.Combine(root, "Entities/Copy.json"), known.ToString());
         if (problem == "backup") File.WriteAllText(Path.Combine(parent, "AssetReferenceBackups"), "blocks directory creation");
-        File.WriteAllText(Path.Combine(root, "Levels/Test.map"), new Newtonsoft.Json.Linq.JObject
+        File.WriteAllText(Path.Combine(root, "Levels/Test.level"), new Newtonsoft.Json.Linq.JObject
         {
             ["Placeables"] = new Newtonsoft.Json.Linq.JArray(
                 new Newtonsoft.Json.Linq.JObject { ["Type"] = (int)PlaceableType.Entity, ["Path"] = "Legacy" },
@@ -3666,7 +3666,7 @@ Run("Lightmap packages preserve HDR pixels, UV templates, identities and map ref
     var world = new World();
     var ambient = Environment.AmbientColor;
     string? first = null; string? second = null;
-    var map = Path.Combine(testRoot, "BakedReference.map");
+    var map = Path.Combine(testRoot, "BakedReference.level");
     try
     {
         Environment.AmbientColor = new Color(2, .3f, .1f);
@@ -3823,7 +3823,7 @@ RunScene("Lighting bake settings roundtrip in maps and old maps get safe default
         IndirectEnabled=false,IndirectSamples=32,IndirectStrength=.5f,IndirectFilterRadius=2
     };
     world.LightmapSettings=settings;
-    var path=Path.Combine(testRoot,"BakeSettings.map");
+    var path=Path.Combine(testRoot,"BakeSettings.level");
     try
     {
         EditorLevelManager.SaveCurrentLevel(path);
@@ -3886,7 +3886,7 @@ Run("Lighting bake sessions cancel, reject changed snapshots and report worker e
 RunScene("Dynamic ambient settings roundtrip in maps, preserve legacy defaults and never enter baked lighting", () =>
 {
     var before=Environment.Capture();
-    var path=Path.Combine(testRoot,"DynamicAmbient.map");
+    var path=Path.Combine(testRoot,"DynamicAmbient.level");
     try
     {
         Environment.AmbientColor=new Color(.1f,0,0);
@@ -3940,7 +3940,7 @@ Run("BrushBox roundtrip and duplication preserve independent size, material, tra
     brush.Transform.Position = new Vector3(2, 3, 4);
     brush.Transform.Scale = new Vector3(2, 1, 3);
     brush.SetActive(false);
-    var path = Path.Combine(testRoot, "brush.map");
+    var path = Path.Combine(testRoot, "brush.level");
     EditorLevelManager.SaveCurrentLevel(path);
     EditorLevelManager.OpenLevel(path);
     var loaded = Game.Instance.World.Find<BrushBox>()!;
@@ -4227,7 +4227,7 @@ Run("An entity with simulation disabled supports a box until an Output enables i
         Check(body.IsEnabled);
         UndoRedo.Undo();
 
-        var path = Path.Combine(testRoot, "physics-platform.map");
+        var path = Path.Combine(testRoot, "physics-platform.level");
         EditorLevelManager.SaveCurrentLevel(path);
         Check(EditorLevelManager.ReadLevel(path).Placeables.Single().SimulatePhysics == false);
         EditorLevelManager.OpenLevel(path);
@@ -4294,7 +4294,7 @@ Run("Spotlight map roundtrip and duplication preserve full cone angles and orien
     light.Radius = 8;
     light.Transform.Rotation = Quaternion.CreateFromYawPitchRoll(0.6f, -0.3f, 0);
     var rotation = light.Transform.Rotation;
-    var path = Path.Combine(testRoot, "spot.map");
+    var path = Path.Combine(testRoot, "spot.level");
     EditorLevelManager.SaveCurrentLevel(path);
     EditorLevelManager.OpenLevel(path);
     var loaded = Game.Instance.World.Find<Light>()!;
@@ -4325,7 +4325,7 @@ RunScene("AudioEmitter properties survive maps, prefabs, duplication and inspect
     var clipProperty=editable.Single(property=>property.Name=="ClipName");
     var attribute=clipProperty.GetCustomAttributes(typeof(EditableAttribute),true).Cast<EditableAttribute>().Single();
     Check(attribute.ContentDirectory=="Audio" && attribute.ContentPattern=="*.wav");
-    var path=Path.Combine(testRoot,"audio-emitter.map");
+    var path=Path.Combine(testRoot,"audio-emitter.level");
     EditorLevelManager.SaveCurrentLevel(path);EditorLevelManager.OpenLevel(path);
     var loaded=Game.Instance.World.Find<ProjectShockGL.Placeables.AudioEmitter>()!;
     void Verify(ProjectShockGL.Placeables.AudioEmitter item)
@@ -4358,7 +4358,7 @@ RunScene("AudioReverbZone presets, Custom, bounds and priority survive Inspector
     zone.Shape=ProjectShockGL.Placeables.ReverbZoneShape.Sphere;zone.Radius=4;
     zone.BoxSize=new Vector3(3,4,5);zone.Priority=7;zone.TransitionTime=2;
     zone.Transform.Scale=new Vector3(2,1,1);zone.Transform.Rotation=Quaternion.CreateFromAxisAngle(Vector3.UnitY,.5f);
-    var path=Path.Combine(testRoot,"reverb-zone.map");
+    var path=Path.Combine(testRoot,"reverb-zone.level");
     EditorLevelManager.SaveCurrentLevel(path);EditorLevelManager.OpenLevel(path);
     void Verify(ProjectShockGL.Placeables.AudioReverbZone item)
     {
@@ -4391,7 +4391,7 @@ RunScene("Light modes default to Realtime and survive maps, prefabs, duplication
     Throws(() => light.Mode = (LightMode)99);
     Check(light.Mode == LightMode.Baked);
 
-    var path = Path.Combine(testRoot, "LightMode.map");
+    var path = Path.Combine(testRoot, "LightMode.level");
     var prefabName = "LightMode-" + Guid.NewGuid().ToString("N");
     try
     {
@@ -4690,7 +4690,7 @@ Run("Undoing Inspector data restores the saved dirty state and does not resurrec
 {
     EditorLevelManager.NewLevel();
     var obj = (CheckEntity)Entity.Create("Check")!;
-    var path = Path.Combine(testRoot, "inspector-undo.map");
+    var path = Path.Combine(testRoot, "inspector-undo.level");
     EditorLevelManager.SaveCurrentLevel(path);
     RecordInspector(obj, "IsActive", () => obj.SetActive(false));
     EditorLevelManager.RefreshDirty();
@@ -4751,7 +4751,7 @@ RunScene("Delete undo keeps order, dirty state and deferred Start for active and
         middle.Transform.Position = new Vector3(2,3,4);
         middle.Transform.Rotation = Quaternion.CreateFromYawPitchRoll(0.2f,0.3f,0.4f);
         if (activate) world.Update(0,simulate:false);
-        var path = Path.Combine(testRoot, "delete-order-" + activate + ".map");
+        var path = Path.Combine(testRoot, "delete-order-" + activate + ".level");
         EditorLevelManager.SaveCurrentLevel(path);
         var before = JsonConvert.SerializeObject(EditorLevelManager.CaptureCurrentLevel(),JsonHelper.GetSettings());
         SceneObjects.Delete(middle);
@@ -4822,7 +4822,7 @@ RunScene("Older Inspector and gizmo actions follow the restored instance through
 
 RunScene("Map GUIDs survive reopening, and legacy maps get distinct IDs", () =>
 {
-    var path = Path.Combine(testRoot, $"ObjectIds-{Guid.NewGuid():N}.map");
+    var path = Path.Combine(testRoot, $"ObjectIds-{Guid.NewGuid():N}.level");
     try
     {
         File.WriteAllText(path, """
@@ -5002,7 +5002,7 @@ RunScene("Groups preserve activity, membership, visibility and scene undo", () =
     var level = EditorLevelManager.CaptureCurrentLevel();
     Check(level.Groups.Single().Id == "room" && !level.Groups.Single().Visible);
     Check(level.Placeables.All(p => p.EditorGroups.Contains("room")));
-    var path = Path.Combine(AppContext.BaseDirectory, $"groups-{Guid.NewGuid():N}.map");
+    var path = Path.Combine(AppContext.BaseDirectory, $"groups-{Guid.NewGuid():N}.level");
     try
     {
         EditorLevelManager.SaveCurrentLevel(path);
@@ -5247,7 +5247,7 @@ Run("Dynamic prefab sets retain remapped names and links after save capture and 
 {
     var world = Game.Instance.World;
     var name = "LinksSave-" + Guid.NewGuid().ToString("N");
-    var map = Path.Combine(testRoot, "Levels", name + ".map");
+    var map = Path.Combine(testRoot, "Levels", name + ".level");
     EditorLevelManager.SaveLevel(new Level(), map);
     var template = new PrefabData { Placeables =
     [
@@ -5313,7 +5313,7 @@ RunScene("Scene folders organize mixed objects and Details, roundtrip and preser
     var folders = SceneFolders.Capture();
     folders.Single(folder => folder.Id == first).Expanded = false;
     SceneFolders.Load(folders);
-    var path = Path.Combine(testRoot, "scene-folders.map");
+    var path = Path.Combine(testRoot, "scene-folders.level");
     EditorLevelManager.SaveCurrentLevel(path);
     EditorLevelManager.OpenLevel(path);
     var loaded = SceneFolders.Capture();
@@ -5584,6 +5584,75 @@ Run("Audio Groups document opens and saves atomically, preserves dirty edits on 
     document.New();Check(document.FilePath==null && !document.IsDirty && document.Asset.Groups.Single().Name=="Master");
 });
 
+Run("UserSettings document preserves typed defaults, validates saves and isolates user values", () =>
+{
+    var directory = testRoot;
+    var document = new UserSettingsDocument(directory);
+    var path = Path.Combine(directory, "Defaults.json");
+    Check(!document.IsDirty && document.FilePath == null);
+    document.Options.Add(new UserSettingsDefaultOption { Name = "Count", Type = UserSettingsOptionType.Int, DefaultValue = 7 });
+    document.Options.Add(new UserSettingsDefaultOption { Name = "Volume", Type = UserSettingsOptionType.Float, DefaultValue = .75f });
+    document.Options.Add(new UserSettingsDefaultOption { Name = "Enabled", Type = UserSettingsOptionType.Bool, DefaultValue = true });
+    document.Options.Add(new UserSettingsDefaultOption { Name = "Caption", Type = UserSettingsOptionType.String, DefaultValue = "2026-11-25T12:00:00Z" });
+    Check(document.IsDirty);
+    document.Save(path);
+    var saved = File.ReadAllText(path);
+    Check(!document.IsDirty && !saved.Contains("\"Value\""));
+    var runtime = UserSettingsProfile.Read(path);
+    Check(runtime.Get("Count").Get<int>() == 7 && runtime.Get("Volume").Get<float>() == .75f && runtime.Get("Enabled").Get<bool>());
+    runtime.Get("Volume").Set(.1f);
+    Check((float)document.Options[1].DefaultValue == .75f);
+    document.Options[1].Name = "Count";
+    Throws(() => document.Save(path));
+    Check(File.ReadAllText(path) == saved && document.IsDirty);
+    document.Open(path);
+    Check(!document.IsDirty && document.Options.Count == 4 && (string)document.Options[3].DefaultValue == "2026-11-25T12:00:00Z");
+    document.Options[1].DefaultValue = float.NaN;
+    Throws(() => document.Save(path));
+    Check(File.ReadAllText(path) == saved);
+    document.Options[1].DefaultValue = .4f;
+    var copy = Path.Combine(directory, "Copy.json");
+    document.Save(copy);
+    Check(document.FilePath == copy && !document.IsDirty && File.ReadAllText(path) == saved);
+    var broken = Path.Combine(directory, "Broken.json");
+    File.WriteAllText(broken, "{}");
+    Throws(() => document.Open(broken));
+    Check(document.FilePath == copy && document.Options.Count == 4);
+    Throws(() => document.Save(Path.Combine(testRoot, "..", "UserValues.json")));
+    Check(!Directory.GetFiles(directory, "*.tmp").Any());
+    document.New();
+    Check(document.Options.Count == 0 && document.FilePath == null && !document.IsDirty);
+});
+
+RunScene("Collider SurfaceType persists through maps, prefab insertion and inspector undo", () =>
+{
+    var brush = (BrushBox)SceneObjects.Create(PlaceableType.BrushBox);
+    Check(brush.Collider!.SurfaceType == "Default");
+    var before = InspectorState.Capture(brush);
+    brush.Collider.SurfaceType = "Metal";
+    var after = InspectorState.Capture(brush);
+    InspectorState.Apply(brush, before);
+    Check(brush.Collider.SurfaceType == "Default");
+    InspectorState.Apply(brush, after);
+    Check(brush.Collider.SurfaceType == "Metal");
+    var level = EditorLevelManager.CaptureLevel(new[] { brush });
+    var json = Newtonsoft.Json.JsonConvert.SerializeObject(level, ProjectShockGL.Tools.JsonHelper.GetSettings());
+    var restored = Newtonsoft.Json.JsonConvert.DeserializeObject<Level>(json, ProjectShockGL.Tools.JsonHelper.GetSettings())!;
+    var placement = restored.Placeables.Single();
+    Check(placement.SurfaceType == "Metal");
+    var instance = LevelManager.CreateObject(Game.Instance.World, placement);
+    Check(instance.Collider!.SurfaceType == "Metal");
+    var prefab = new PrefabData { Placeables = new[] { placement } };
+    var copies = Prefab.InstantiateAll(prefab, Game.Instance.World);
+    Check(copies.Single().Collider!.SurfaceType == "Metal");
+    var legacy = LevelManager.CreateObject(Game.Instance.World, new Placeable
+    {
+        Type = PlaceableType.BrushBox, Path = "BrushBox", Name = "LegacySurface"
+    });
+    Check(legacy.Collider!.SurfaceType == "Default");
+    Check(new SphereCollider().SurfaceType == "Default" && new CapsuleCollider().SurfaceType == "Default");
+});
+
 if (args.Contains("--imgui"))
 {
     var context = ImGuiNET.ImGui.CreateContext();
@@ -5605,6 +5674,82 @@ if (args.Contains("--imgui"))
             draw();
             ImGuiNET.ImGui.Render();
         }
+        Run("UI Editor supports layout creation, property controls, duplication and undo", () =>
+        {
+            var flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+            var editor = typeof(UIEditor);
+            var assetField = editor.GetField("_asset", flags)!;
+            var selectedField = editor.GetField("_selected", flags)!;
+            var previousAsset = assetField.GetValue(null);
+            var previousSelection = selectedField.GetValue(null);
+            try
+            {
+                foreach (var name in new[] { "HorizontalLayout", "VerticalLayout" })
+                {
+                    var layout = (ProjectShockGL.UI.WidgetData)editor.GetMethod("Create", flags)!.Invoke(null, new object[] { name })!;
+                    layout.Properties["Spacing"] = 12;
+                    layout.Properties["StretchChildren"] = true;
+                    var child = new ProjectShockGL.UI.WidgetData { Name = "Child" };
+                    layout.Children.Add(child);
+                    var asset = new ProjectShockGL.UI.UIAsset();
+                    asset.Root.Children.Add(layout);
+                    assetField.SetValue(null, asset);
+                    selectedField.SetValue(null, layout);
+                    editor.GetMethod("ResetHistory", flags)!.Invoke(null, null);
+                    Frame(() =>
+                    {
+                        ImGuiNET.ImGui.Begin("Layout properties");
+                        editor.GetMethod("DrawProperties", flags)!.Invoke(null, new object[] { layout });
+                        editor.GetMethod("DrawProperties", flags)!.Invoke(null, new object[] { child });
+                        ImGuiNET.ImGui.End();
+                    });
+                    Check(ImGuiNET.ImGui.GetDrawData().TotalVtxCount > 0);
+                    Check((bool)editor.GetMethod("LayoutControlled", flags)!.Invoke(null, new object[] { child })!);
+                    Check(!(bool)editor.GetMethod("CanResize", flags)!.Invoke(null, new object[] { child })!);
+                    UIEditor.DuplicateSelected();
+                    Check(((ProjectShockGL.UI.UIAsset)assetField.GetValue(null)!).Root.Children.Count == 2);
+                    UIEditor.Undo();
+                    Check(((ProjectShockGL.UI.UIAsset)assetField.GetValue(null)!).Root.Children.Count == 1);
+                    UIEditor.Redo();
+                    var restored = ((ProjectShockGL.UI.UIAsset)assetField.GetValue(null)!).Root.Children;
+                    Check(restored.Count == 2 && restored.All(node => node.Type == name && node.Properties.Value<int>("Spacing") == 12));
+                }
+            }
+            finally
+            {
+                assetField.SetValue(null, previousAsset);
+                selectedField.SetValue(null, previousSelection);
+                editor.GetMethod("ResetHistory", flags)!.Invoke(null, null);
+            }
+        });
+        Run("Real UserSettings Editor draws all default types and protects unsaved changes", () =>
+        {
+            UserSettingsEditor.Open = true;
+            try
+            {
+                Frame(UserSettingsEditor.Draw);
+                var flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+                var document = (UserSettingsDocument)typeof(UserSettingsEditor).GetField("_document", flags)!.GetValue(null)!;
+                foreach (var type in Enum.GetValues<UserSettingsOptionType>())
+                {
+                    object value = type switch
+                    {
+                        UserSettingsOptionType.Float => (object).5f,
+                        UserSettingsOptionType.String => "Text",
+                        UserSettingsOptionType.Bool => true,
+                        _ => 1
+                    };
+                    document.Options.Add(new UserSettingsDefaultOption { Name = type.ToString(), Type = type, DefaultValue = value });
+                }
+                Frame(UserSettingsEditor.Draw);
+                Check(ImGuiNET.ImGui.GetDrawData().TotalVtxCount > 0);
+                Check(!UserSettingsEditor.AllowClose() && UserSettingsEditor.Open);
+                Frame(UserSettingsEditor.Draw);
+                Check(ImGuiNET.ImGui.GetDrawData().TotalVtxCount > 0);
+                document.New();
+            }
+            finally { UserSettingsEditor.Dispose(); }
+        });
         Run("Real Audio Groups Editor opens configured JSON, saves and applies groups, and protects unsaved changes",()=>
         {
             var originalSettings=File.ReadAllText(settingsPath);

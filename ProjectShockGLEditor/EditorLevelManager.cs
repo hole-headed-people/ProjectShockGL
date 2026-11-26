@@ -11,7 +11,7 @@ public static class EditorLevelManager
     private static string _savedState = "";
     public static string? CurrentPath { get; private set; }
     public static bool IsDirty { get; private set; }
-    public static string DisplayName => CurrentPath == null ? "Untitled.map" : Path.GetFileName(CurrentPath);
+    public static string DisplayName => CurrentPath == null ? "Untitled.level" : Path.GetFileName(CurrentPath);
 
     public static void Initialize()
     {
@@ -71,6 +71,7 @@ public static class EditorLevelManager
                 IsActive = obj.IsActive,
                 Layer = obj.Layer,
                 CollidesWith = obj.CollidesWith,
+                SurfaceType = obj.Collider is { IsDestroyed: false } collider ? collider.SurfaceType : null,
                 SimulatePhysics = (obj as Entity)?.Rigidbody?.IsEnabled,
                 RigidbodyMass = obj.GetComponent<Rigidbody>() is { IsDestroyed: false } body ? body.Mass : null,
                 RenderSurfaces = RenderSurfaceData.Capture(obj),

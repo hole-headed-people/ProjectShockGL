@@ -18,6 +18,15 @@ public class Text : Widget
     
     private TextLayout? _layout;
     
+    
+    private bool _localize;
+    
+    private string _key = "";
+    private string _table = "";
+    
+    private bool _created;
+    private bool _localizationSubscribed;
+    
     public string Content { get; set; } = string.Empty;
     
     public Font? Font { get; set; }
@@ -29,20 +38,19 @@ public class Text : Widget
     public HorizontalAlignment HorizontalAlignment { get; set; } = HorizontalAlignment.Left;
     public VerticalAlignment VerticalAlignment { get; set; } = VerticalAlignment.Top;
 
-    private bool _localize;
-    private string _key = "";
-    private string _table = "";
-    private bool _created;
-    private bool _localizationSubscribed;
-
     [Editable]
     public bool Localize
     {
         get => _localize;
         set
         {
-            if (_localize == value) return;
+            if (_localize == value)
+            {
+                return;
+            }
+            
             _localize = value;
+            
             UpdateLocalization();
         }
     }
@@ -118,21 +126,9 @@ public class Text : Widget
             _ => 0
         };
         
-        foreach (var placed in layout.Glyphs)
-        {
-            var horizontal = HorizontalAlignment switch
-            {
-                HorizontalAlignment.Center => (Rect.Size.X - layout.LineWidths[placed.Line]) * 0.5f,
-                HorizontalAlignment.Right => Rect.Size.X - layout.LineWidths[placed.Line],
-                _ => 0
-            };
-            
-            graphics.DrawUIRegion(origin + placed.Position + new Vector2(horizontal, vertical),
-                placed.Glyph.Size, Font.Texture, placed.Glyph.UvRect, Color,
-                ClipToRect ? origin : null, ClipToRect ? Rect.Size : null);
-        }
+        graphics.DrawUIText(layout, Font.Texture, origin, Rect.Size, horizontalAlignment: HorizontalAlignment,
+            verticalOffset: vertical, Color, ClipToRect);
     }
-
     protected override void OnDestroy()
     {
         _layout = null;

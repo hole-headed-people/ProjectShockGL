@@ -104,6 +104,8 @@ public sealed class WidgetData
     public Type GetWidgetType() => Type switch
     {
         "Widget" => typeof(Widget),
+        "HorizontalLayout" => typeof(HorizontalLayout),
+        "VerticalLayout" => typeof(VerticalLayout),
         "Image" => typeof(Image),
         "Text" => typeof(Text),
         "Button" => typeof(Button),
@@ -124,13 +126,17 @@ public sealed class WidgetData
     {
         var nodes = Traverse().ToArray();
         var ids = nodes.ToDictionary(node => node.Id, _ => Guid.NewGuid());
+        
         foreach (var node in nodes)
         {
             node.Id = ids[node.Id];
+            
             foreach (var action in node.ClickActions)
             {
                 if (action.Target == UIActionTarget.Widget && ids.TryGetValue(action.TargetId, out var replacement))
+                {
                     action.TargetId = replacement;
+                }
             }
         }
     }
@@ -151,7 +157,9 @@ public sealed class WidgetData
             "Texture", "Region", "Font", "Text", "Body", "Canvas", "Parent", "Children",
             "IsMouseOver", "IsDestroyed", "SortOrder"
         };
+        
         reserved.UnionWith(PropertyNames(type));
+        
         return EditableProperties.Get(type).Where(property =>
             property.GetMethod is { IsPublic: true, IsStatic: false } &&
             property.SetMethod is { IsPublic: true, IsStatic: false } &&
@@ -163,6 +171,7 @@ public sealed class WidgetData
         return PropertyNames(widget.GetType()).Concat(GetAdditionalEditableProperties(widget.GetType())
             .Select(property => property.Name)).Distinct(StringComparer.Ordinal);
     }
+    
     internal static JObject CaptureProperties(Widget widget)
     {
         var properties = new JObject();

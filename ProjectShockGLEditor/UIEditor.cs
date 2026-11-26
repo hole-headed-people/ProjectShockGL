@@ -14,7 +14,7 @@ namespace ProjectShockGLEditor;
 
 public static class UIEditor
 {
-    private static readonly string[] Types = ["Widget", "Image", "Text", "Button", "TextScrollView"];
+    private static readonly string[] Types = ["Widget", "Image", "Text", "Button", "TextScrollView", "HorizontalLayout", "VerticalLayout"];
     
     private static GL? _gl;
     
@@ -531,7 +531,7 @@ public static class UIEditor
                 if (hit != null)
                 {
                     _selected = hit;
-                    _dragged = hit == _asset.Root || hit.FillCanvas ? null : hit;
+                    _dragged = hit == _asset.Root || hit.FillCanvas || LayoutControlled(hit) ? null : hit;
                     _dragStartMouse = mouse;
                     _dragStartPosition = hit.Position;
                     _dragStartSize = hit.Size;
@@ -693,9 +693,12 @@ public static class UIEditor
         Changed();
     }
 
+    private static bool LayoutControlled(WidgetData data) => !data.FillCanvas &&
+        FindParent(_asset.Root, data)?.Type is "HorizontalLayout" or "VerticalLayout";
+
     private static bool CanResize(WidgetData data)
     {
-        if (data == _asset.Root || data.FillCanvas || !PreviewWidgets.TryGetValue(data, out var widget)) return false;
+        if (data == _asset.Root || data.FillCanvas || LayoutControlled(data) || !PreviewWidgets.TryGetValue(data, out var widget)) return false;
         return widget.Parent is not ProjectShockGL.UI.Button
             && !(widget.Parent is TextScrollView scroll && scroll.Body == widget);
     }
@@ -942,12 +945,14 @@ public static class UIEditor
         ImGui.BeginDisabled(data == _asset.Root || data.FillCanvas);
         var position = data.Position;
 
+        ImGui.BeginDisabled(LayoutControlled(data));
         if (ImGui.DragFloat2("Position", ref position))
         {
             data.Position = position; 
             Changed();
         }
         
+        ImGui.EndDisabled();
         var size = data.Size;
 
         if (ImGui.DragFloat2("Size", ref size, 1, 0, 10000))
@@ -956,6 +961,7 @@ public static class UIEditor
             Changed();
         }
         
+        ImGui.BeginDisabled(LayoutControlled(data));
         var anchor = data.Anchor;
 
         if (ImGui.DragFloat2("Anchor", ref anchor, 0.01f))
@@ -973,6 +979,8 @@ public static class UIEditor
         }
         
         ImGui.EndDisabled();
+        ImGui.EndDisabled();
+        if (LayoutControlled(data)) ImGui.TextWrapped("Parent layout controls placement. Size is the preferred size; cross-axis size is overridden when StretchChildren is enabled.");
         var visible = data.Visible;
 
         if (ImGui.Checkbox("Visible", ref visible))
@@ -1084,6 +1092,8 @@ public static class UIEditor
                 
                 break;
         }
+        if (data.Type is "HorizontalLayout" or "VerticalLayout")
+            ImGui.TextWrapped("Padding: Left, Top, Right, Bottom. StretchChildren fills the cross axis.");
         DrawEditableProperties(data);
     }
 

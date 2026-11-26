@@ -15,6 +15,7 @@ public static class InspectorState
         public bool IsActive { get; set; }
         public int Layer { get; set; }
         public int CollidesWith { get; set; }
+        public string? SurfaceType { get; set; }
         public bool? SimulatePhysics { get; set; }
         public float? RigidbodyMass { get; set; }
         public bool? BackfaceCulling { get; set; }
@@ -33,6 +34,7 @@ public static class InspectorState
         {
             Name = obj.Name, IsActive = obj.IsActive, Transform = TransformState.Capture(obj.Transform),
             Layer = obj.Layer, CollidesWith = obj.CollidesWith,
+            SurfaceType = obj.Collider is { IsDestroyed: false } collider ? collider.SurfaceType : null,
             RenderSurfaces = RenderSurfaceData.Capture(obj),
                 BackfaceCulling = obj.GetComponent<MeshComponent>() is { IsDestroyed: false } mesh ? mesh.BackfaceCulling : null,
             SimulatePhysics = (obj as Entity)?.Rigidbody?.IsEnabled,
@@ -130,6 +132,10 @@ public static class InspectorState
         RenderSurfaceData.Apply(obj, state.RenderSurfaces);
         obj.Layer = state.Layer;
         obj.CollidesWith = state.CollidesWith;
+        if (state.SurfaceType != null && obj.Collider is { IsDestroyed: false } collider)
+        {
+            collider.SurfaceType = state.SurfaceType;
+        }
         obj.SetActive(state.IsActive);
     }
 }

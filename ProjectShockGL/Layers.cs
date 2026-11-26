@@ -1,4 +1,3 @@
-﻿using IniParser;
 
 namespace ProjectShockGL;
 
@@ -13,25 +12,10 @@ public static class Layers
 
     public static void Load()
     {
-        var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Layers.ini");
-        
         Reset();
-
-        if (!File.Exists(path))
-        {
-            throw new FileNotFoundException($"Layers file not found: {path}");
-        }
         
-        var parser = new FileIniDataParser();
-        var data = parser.ReadFile(path);
+        var layersSection = Settings.GetSection("Layers");
 
-        var layersSection = data["Layers"];
-
-        if (layersSection == null)
-        {
-            throw new InvalidOperationException("Section Layers not found");
-        }
-        
         var entries = new List<(int index, string name)>();
 
         foreach (var key in layersSection)
@@ -43,7 +27,7 @@ public static class Layers
                 continue;
             }
             
-            var indexStr = new string(key.KeyName.Where(char.IsDigit).ToArray());
+            var indexStr = new string(key.Key.Where(char.IsDigit).ToArray());
 
             if (!int.TryParse(indexStr, out var index))
             {
@@ -57,7 +41,7 @@ public static class Layers
         
         foreach (var (index, name) in entries)
         {
-            if (index >= 32)
+            if (index < 0 || index >= 32)
             {
                 throw new InvalidOperationException($"Layer index out of range: {index}");
             }

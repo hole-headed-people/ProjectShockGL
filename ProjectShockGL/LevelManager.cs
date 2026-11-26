@@ -293,6 +293,10 @@ public static class LevelManager
         
         obj.Layer = placeable.Layer ?? obj.Layer;
         obj.CollidesWith = placeable.CollidesWith ?? obj.CollidesWith;
+        if (placeable.SurfaceType != null && obj.Collider is { IsDestroyed: false } collider)
+        {
+            collider.SurfaceType = placeable.SurfaceType;
+        }
         
         obj.SetActive(placeable.IsActive);
         obj.CompletePlacement();

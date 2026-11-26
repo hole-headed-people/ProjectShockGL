@@ -15,6 +15,6 @@
 dotnet build ProjectShockGL.sln
 ```
 
-Перед запуском редактора укажите StarterContent или Content своей игры в EditorSettings.ini. Порядок настройки — в [начале руководства](docs/Guide.md#start).
+Перед запуском задайте Content в DefaultSettings.ini, а в EditorSettings.ini укажите [Settings] DefaultPath к общему файлу своей игры. Порядок настройки — в [начале руководства](docs/Guide.md#start).
 
 [Отложенные задачи](TODO.md)

@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 
 namespace ProjectShockGL.Core;
 
@@ -16,6 +16,8 @@ public abstract class Collider : Component
         }
     }
     
+    public string SurfaceType { get; set; } = "Default";
+
     public bool IsTrigger { get; set; }
 
     protected static float NonNegative(float value, string name)

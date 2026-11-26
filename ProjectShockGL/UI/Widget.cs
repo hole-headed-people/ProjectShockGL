@@ -98,6 +98,8 @@ public class Widget
     {
         Children = _children.AsReadOnly();
         Rect = new RectTransform(GetParentBounds);
+        Rect.LayoutBounds = () => Parent is LayoutGroup layout && !FillCanvas && Visible && !IsDestroyed
+            ? layout.Arrange(this) : null;
     }
 
     internal void Initialize(Canvas canvas, Widget? parent)

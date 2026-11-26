@@ -20,7 +20,7 @@ if(System.Environment.GetEnvironmentVariable("ALSOFT_DRIVERS")!=driver)
 }
 var root=Path.Combine(AppContext.BaseDirectory,"AudioCheckData",Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(Path.Combine(root,"Audio","UI"));
-File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"GameSettings.ini"),"[Content]\nCustomPath="+root);
+File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"DefaultSettings.ini"),"[Content]\nCustomPath="+root);
 Settings.Initialize();Content.Initialize(null!);
 
 byte[] Wave(int channels=1,int bits=16,ushort encoding=1,byte[]? pcm=null,bool dataFirst=false,bool junk=false)
@@ -113,7 +113,7 @@ Run("Game and editor load the same configured Audio Groups without opening a sou
     var path=Content.GetAudioGroupsPath("StartupMixer");
     File.WriteAllText(path,"""{"Groups":[{"Name":"Music","Volume":0.6},{"Name":"Effects","Volume":0.8}]}""");
     var ini="[Content]\nCustomPath="+root+"\n[Audio]\nGroups=StartupMixer\n";
-    File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"GameSettings.ini"),ini);
+    File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"DefaultSettings.ini"),ini);
     File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"EditorSettings.ini"),ini);
     Settings.Initialize();AudioSystem.LoadGroupsFromSettings();
     Near(AudioSystem.GetGroup("Music")!.Volume,.6f);Check(!AudioSystem.IsAvailable);
@@ -194,14 +194,16 @@ Run("3D sources use world position, linear distance attenuation and mono buffers
         AudioSystem.Api.SetSourceProperty(source.Handle,SourceFloat.SecOffset,.5f);
         source.Pause();source.SpatialMode=AudioSpatialMode.ThreeD;
         Check(source.IsPaused);
-        AudioSystem.Api.GetSourceProperty(source.Handle,SourceFloat.SecOffset,out float offset);Near(offset,.5f);
+        // A paused buffer switch queues the seek without briefly starting the source. Verify it after Resume.
         AudioSystem.Api.GetSourceProperty(source.Handle,SourceBoolean.SourceRelative,out bool relative);Check(!relative);
         AudioSystem.Api.GetSourceProperty(source.Handle,SourceVector3.Position,out System.Numerics.Vector3 position);Check(position==source.Position);
         AudioSystem.Api.GetSourceProperty(source.Handle,SourceFloat.ReferenceDistance,out float min);Near(min,2);
         AudioSystem.Api.GetSourceProperty(source.Handle,SourceFloat.MaxDistance,out float max);Near(max,12);
         AudioSystem.Api.GetSourceProperty(source.Handle,SourceFloat.RolloffFactor,out float rolloff);Near(rolloff,1);
         AudioSystem.Api.GetBufferProperty(clip.GetBuffer(true),GetBufferInteger.Channels,out int mono);Check(mono==1);
-        source.Resume();source.SpatialMode=AudioSpatialMode.TwoD;Check(source.IsPlaying);
+        source.Resume();
+        AudioSystem.Api.GetSourceProperty(source.Handle,SourceFloat.SecOffset,out float offset);Check(offset>=.5f && offset<.65f);
+        source.SpatialMode=AudioSpatialMode.TwoD;Check(source.IsPlaying);
         AudioSystem.Api.GetSourceProperty(source.Handle,SourceBoolean.SourceRelative,out relative);Check(relative);
         AudioSystem.Api.GetSourceProperty(source.Handle,SourceVector3.Position,out position);Check(position==System.Numerics.Vector3.Zero);
         AudioSystem.Api.GetSourceProperty(source.Handle,SourceFloat.RolloffFactor,out rolloff);Near(rolloff,0);
@@ -350,6 +352,53 @@ Run("Listener follows only active camera and components follow owners even with 
         AudioSystem.CheckError("finish audio group checks");
     }
     finally {AudioSystem.Master.Volume=1;}
+});
+Run("Group Mute/Pause inherit independently, preserve manual/owner pauses and affect new one-shots",()=>
+{
+    var gameplay=AudioSystem.CreateGroup("CheckGameplayPause");
+    var environment=AudioSystem.CreateGroup("CheckEnvPause",gameplay);
+    var ui=AudioSystem.CreateGroup("CheckUIUnpaused");
+    using var clip=Read(Wave());using var source=AudioSystem.CreateSource(clip);
+    using var interfaceSource=AudioSystem.CreateSource(clip);
+    source.GroupName=environment.Name;source.Loop=true;source.Volume=.8f;source.Play();
+    interfaceSource.GroupName=ui.Name;interfaceSource.Loop=true;interfaceSource.Play();
+    source.Pause();gameplay.Paused=true;gameplay.Paused=false;Check(source.IsPaused);
+    source.Resume();Check(source.IsPlaying);source.Play();Check(source.IsPlaying); // Explicit replay of an existing live source.
+    gameplay.Paused=true;source.Resume();Check(source.IsPaused && interfaceSource.IsPlaying);
+    environment.Paused=true;gameplay.Paused=false;Check(source.IsPaused);
+    environment.Paused=false;Check(source.IsPlaying);
+    gameplay.Muted=true;Check(source.IsPlaying);Near(source.EffectiveVolume,0);Near(source.Volume,.8f);
+    environment.Muted=true;gameplay.Muted=false;Near(source.EffectiveVolume,0);
+    environment.Muted=false;Near(source.EffectiveVolume,.8f);
+    gameplay.Paused=true;source.GroupName=ui.Name;Check(source.IsPlaying);
+    source.GroupName=environment.Name;Check(source.IsPaused);
+    environment.Parent=ui;Check(source.IsPlaying);environment.Parent=gameplay;Check(source.IsPaused);
+    var fresh=AudioSystem.PlayOneShot(clip,groupName:environment.Name);
+    Check(fresh.IsPaused && !fresh.IsDisposed);AudioSystem.Update(10);Check(!fresh.IsDisposed);
+    AudioSystem.Api.GetSourceProperty(fresh.Handle,GetSourceInteger.SourceState,out int native);
+    Check((SourceState)native!=SourceState.Playing); // Never starts audibly in a paused group.
+    fresh.Pause();gameplay.Paused=false;Check(fresh.IsPaused);fresh.Resume();Check(fresh.IsPlaying);fresh.Stop();Check(fresh.IsDisposed);
+    var world=new World();var owner=world.Spawn<ProjectShockGL.Core.Object>();
+    var component=owner.AddComponent<AudioSourceComponent>();component.Clip=clip;component.GroupName=environment.Name;component.Loop=true;
+    world.Update(0);Check(component.IsPlaying);
+    gameplay.Paused=true;owner.SetActive(false);gameplay.Paused=false;Check(component.IsPaused);
+    owner.SetActive(true);Check(component.IsPlaying);
+    owner.SetActive(false);component.Pause();owner.SetActive(true);Check(component.IsPaused);
+    gameplay.Paused=true;component.Resume();Check(component.IsPaused);gameplay.Paused=false;Check(component.IsPlaying);
+    world.Clear();
+    gameplay.Paused=true;var stopped=AudioSystem.PlayOneShot(clip,groupName:environment.Name);stopped.Stop();
+    gameplay.Paused=false;Check(stopped.IsDisposed);
+    source.Stop();gameplay.Paused=true;gameplay.Paused=false;Check(source.State==AudioPlaybackState.Stopped);
+    using var stereo=Read(Wave(channels:2));using var pending=AudioSystem.PlayOneShot(stereo,groupName:environment.Name);
+    gameplay.Paused=true;pending.SpatialMode=AudioSpatialMode.ThreeD;
+    Check(pending.IsPaused);gameplay.Paused=false;Check(pending.IsPlaying);
+    using var shortClip=Read(Wave(pcm:new byte[16]));
+    gameplay.Muted=true;var silent=AudioSystem.PlayOneShot(shortClip,groupName:environment.Name);
+    var wait=System.Diagnostics.Stopwatch.StartNew();
+    while(!silent.IsDisposed && wait.Elapsed.TotalSeconds<2){Thread.Sleep(5);AudioSystem.Update(0);}
+    Check(silent.IsDisposed);gameplay.Muted=false;
+    AudioSystem.Master.Paused=true;Check(interfaceSource.IsPaused);AudioSystem.Master.Paused=false;Check(interfaceSource.IsPlaying);
+    AudioSystem.CheckError("finish group pause checks");
 });
 Run("Audio Groups JSON loads through Content, validates before replacing live groups and keeps sources playing",()=>
 {

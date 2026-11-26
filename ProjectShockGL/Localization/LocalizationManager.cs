@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Globalization;
 using Newtonsoft.Json;
 
 namespace ProjectShockGL.Localization
@@ -10,7 +10,8 @@ namespace ProjectShockGL.Localization
         public const string DefaultLanguage = "en";
         
         private static readonly Dictionary<string, LocalizationData> TablesData = [];
-        
+        private static readonly HashSet<(string Category, string Table, string Language, string Key)> Reported = [];
+
         private static string _language = DefaultLanguage;
         private static bool _isInitialized;
         
@@ -31,24 +32,17 @@ namespace ProjectShockGL.Localization
                 
                 if (!File.Exists(path))
                 {
+                    Log.PrintWarning($"Localization table was not found: {path}");
                     continue;
                 }
 
                 try
                 {
-                    var data = JsonConvert.DeserializeObject<LocalizationData>(File.ReadAllText(path));
-                    
-                    if (data?.Languages == null)
-                    {
-                        Console.Error.WriteLine($"Localization table '{path}' has no language data.");
-                        continue;
-                    }
-
-                    TablesData[table] = data;
+                    TablesData[table] = LocalizationData.Read(path);
                 }
-                catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
                 {
-                    Console.Error.WriteLine($"Cannot load localization table '{path}': {error.Message}");
+                    Log.PrintError($"Cannot load localization table '{path}'.", error);
                 }
             }
             
@@ -56,9 +50,65 @@ namespace ProjectShockGL.Localization
             _language = Settings.GetString("Localization", "Language", DefaultLanguage);
         }
         
-        private static bool HasFormatPlaceholders(string text)
+        private static string GetString(string key, string table, bool random)
         {
-            return !string.IsNullOrEmpty(text) && Regex.IsMatch(text, @"{\d+}");
+            if (!TablesData.TryGetValue(table, out var tableData))
+            {
+                if (Reported.Add(("Table", table, "", "")))
+                {
+                    Log.PrintWarning($"Localization table '{table}' is not loaded.");
+                }
+                
+                return key;
+            }
+
+            var text = FindString(tableData, _language, key, random);
+            
+            if (text != null)
+            {
+                return text;
+            }
+            
+            var fallback = FindString(tableData, DefaultLanguage, key, random);
+
+            if (Reported.Add(("Translation", table, _language, key)))
+            {
+                Log.PrintWarning($"Localization '{table}/{key}' has no translation for '{_language}'; using {(fallback != null ? DefaultLanguage : "the key")}.");
+            }
+            
+            return fallback ?? key;
+        }
+
+        private static string? FindString(LocalizationData table, string language, string key, bool random)
+        {
+            if (table.Languages.TryGetValue(language, out var data) &&
+                data?.Translations != null &&
+                data.Translations.TryGetValue(key, out var variants) &&
+                variants is { Length: > 0 })
+            {
+                return variants[random ? Tools.Random.Range(0, variants.Length) : 0];
+            }
+
+            return null;
+        }
+        
+        private static string FormatString(string text, string key, string table, object[] args)
+        {
+            ArgumentNullException.ThrowIfNull(args);
+            
+            try
+            {
+                return string.Format(CultureInfo.CurrentCulture, text, args);
+            }
+            catch (FormatException error)
+            {
+                if (Reported.Add(("Format", table, _language, key)))
+                {
+                    Log.PrintError($"Cannot format localization '{table}/{key}' for language '{_language}': {error.Message}");
+                }
+                
+                return text;
+            }
         }
         
         public static void SetLanguage(string language)
@@ -79,34 +129,22 @@ namespace ProjectShockGL.Localization
 
         public static string GetStringFormat(string key, string table, params object[] args)
         {
-            var text = GetString(key, table);
-            
-            return !HasFormatPlaceholders(text) ? text : string.Format(text, args);
+            return FormatString(GetString(key, table), key, table, args);
+        }
+
+        public static string GetRandomStringFormat(string key, string table, params object[] args)
+        {
+            return FormatString(GetRandomString(key, table), key, table, args);
         }
 
         public static string GetString(string key, string table)
         {
-            if (!TablesData.TryGetValue(table, out var tableData))
-            {
-                return key;
-            }
-
-            return FindString(tableData, _language, key)
-                ?? FindString(tableData, DefaultLanguage, key)
-                ?? key;
+            return GetString(key, table, false);
         }
 
-        private static string? FindString(LocalizationData table, string language, string key)
+        public static string GetRandomString(string key, string table)
         {
-            if (table.Languages.TryGetValue(language, out var data) &&
-                data?.Translations != null &&
-                data.Translations.TryGetValue(key, out var variants) &&
-                variants is { Length: > 0 })
-            {
-                return variants[Tools.Random.Range(0, variants.Length)];
-            }
-
-            return null;
+            return GetString(key, table, true);
         }
     }
 }

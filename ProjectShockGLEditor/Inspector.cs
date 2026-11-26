@@ -444,6 +444,33 @@ public static class Inspector
 
         DrawSurfaces(obj);
         DrawCollisionLayers(obj);
+        if (obj.Collider is { IsDestroyed: false } collider)
+        {
+            var surfaceType = collider.SurfaceType;
+            ImGui.SetNextItemWidth(Math.Max(80, ImGui.GetContentRegionAvail().X - 145));
+            if (ImGui.InputText("SurfaceType", ref surfaceType, 256))
+            {
+                collider.SurfaceType = surfaceType;
+                Changed("SurfaceType", false);
+            }
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(28);
+            if (ImGui.BeginCombo("##SurfaceTypeChoices", "", ImGuiComboFlags.NoPreview))
+            {
+                var surfaces = new[] { "Default" }.Concat(Settings.GetString("Physics", "Surfaces", "")
+                    .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                    .Distinct(StringComparer.Ordinal);
+                foreach (var surface in surfaces)
+                {
+                    if (ImGui.Selectable(surface, collider.SurfaceType == surface) && collider.SurfaceType != surface)
+                    {
+                        collider.SurfaceType = surface;
+                        Changed("SurfaceType", true);
+                    }
+                }
+                ImGui.EndCombo();
+            }
+        }
 
         if (obj is Entity outputEntity)
         {

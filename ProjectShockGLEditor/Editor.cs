@@ -218,6 +218,7 @@ public static class Editor
         UIEditor.Draw();
         EntityAssetEditor.Draw();
         AudioGroupsEditor.Draw();
+        UserSettingsEditor.Draw();
         ParticleEditor.Draw();
         BrushTextureWindow.Draw(_windowSize, SceneMin, SceneMax);
         
@@ -253,6 +254,7 @@ public static class Editor
         UIEditor.Dispose();
         ParticleEditor.Dispose();
         AudioGroupsEditor.Dispose();
+        UserSettingsEditor.Dispose();
         _imGui.Dispose();
     }
 
@@ -260,6 +262,7 @@ public static class Editor
     {
         if (!ParticleEditor.AllowClose()) return false;
         if (!AudioGroupsEditor.AllowClose()) return false;
+        if (!UserSettingsEditor.AllowClose()) return false;
         if (!EntityAssetEditor.AllowClose())
         {
             _allowClose = false;
@@ -333,7 +336,7 @@ public static class Editor
         
         if (saveAs || path == null)
         {
-            using var dialog = new NativeFileDialog().SaveFile().AddFilter("Map Files", "map");
+            using var dialog = new NativeFileDialog().SaveFile().AddFilter("Level Files", "level");
             var result = dialog.Open(out string? selected, DefaultDirectory(), EditorLevelManager.DisplayName);
 
             if (result != DialogResult.Okay || string.IsNullOrWhiteSpace(selected))
@@ -341,7 +344,7 @@ public static class Editor
                 return false;
             }
             
-            path = Path.HasExtension(selected) ? selected : selected + ".map";
+            path = Path.HasExtension(selected) ? selected : selected + ".level";
         }
         
         EditorLevelManager.SaveCurrentLevel(path);
@@ -365,7 +368,7 @@ public static class Editor
 
     private static void Open()
     {
-        using var dialog = new NativeFileDialog().AddFilter("Map Files", "map");
+        using var dialog = new NativeFileDialog().AddFilter("Level Files", "level");
         var result = dialog.Open(out string? path, DefaultDirectory(), "");
         
         if (result != DialogResult.Okay || string.IsNullOrWhiteSpace(path))
@@ -491,6 +494,7 @@ public static class Editor
             }
             if (ImGui.MenuItem("Entity Asset Editor", "", EntityAssetEditor.Open)) EntityAssetEditor.Toggle();
             if (ImGui.MenuItem("Audio Groups Editor", "", AudioGroupsEditor.Open)) AudioGroupsEditor.Toggle();
+            if (ImGui.MenuItem("UserSettings Editor", "", UserSettingsEditor.Open)) UserSettingsEditor.Toggle();
             if (ImGui.MenuItem("Particle Editor", "", ParticleEditor.Open)) ParticleEditor.Toggle();
             if (ImGui.MenuItem("UI Editor", "", UIEditor.Open)) UIEditor.Open = !UIEditor.Open;
 

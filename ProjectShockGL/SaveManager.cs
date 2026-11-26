@@ -148,7 +148,7 @@ public static class SaveManager
             Path.Combine(Path.GetDirectoryName(defaultPath)!, _selectedSlotId + ".save");
     }
 
-    private static string GetDefaultPath()
+    internal static string GetDefaultPath()
     {
         if (Application.IsEditor)
         {
@@ -163,7 +163,7 @@ public static class SaveManager
 
             if (!string.IsNullOrWhiteSpace(legacyPath))
             {
-                return Path.GetFullPath(legacyPath, AppContext.BaseDirectory);
+                return Settings.GetPath("Game", "SavePath", string.Empty);
             }
 
             directory = "Saves";

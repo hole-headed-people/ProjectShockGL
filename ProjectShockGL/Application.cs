@@ -162,6 +162,10 @@ public static class Application
         
         Input.Initialize(_inputContext);
         Content.Initialize(_gl);
+        if (!IsEditor && !string.IsNullOrWhiteSpace(Settings.GetString("Game", "UserSettingsDefaultProfile", string.Empty)))
+        {
+            UserSettings.Initialize();
+        }
         
         _renderer = new Renderer(_gl, _window.FramebufferSize.X, _window.FramebufferSize.Y,
             IsEditor ? EditorPreview : null);
@@ -185,7 +189,7 @@ public static class Application
         
         try
         {
-            var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, icon));
+            var path = Settings.GetPath("Window", "Icon", string.Empty);
             
             using var stream = File.OpenRead(path);
             var image = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);

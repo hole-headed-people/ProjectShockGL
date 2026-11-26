@@ -52,6 +52,17 @@ public sealed class ShaderProgram : IDisposable
         }
     }
 
+    internal void RequireInstancing()
+    {
+        _gl.GetProgram(Handle, ProgramPropertyARB.ActiveAttributes, out var count);
+        for (uint i = 0; i < count; i++)
+        {
+            var name = _gl.GetActiveAttrib(Handle, i, out var size, out var type);
+            if (name == "aInstanceModel" && size == 1 && type == AttributeType.FloatMat4 &&
+                _gl.GetAttribLocation(Handle, name) == 3) return;
+        }
+        throw new InvalidDataException("Detail vertex shader requires layout(location = 3) in mat4 aInstanceModel.");
+    }
     internal int Location(string name)
     {
         ObjectDisposedException.ThrowIf(Handle == 0, this);

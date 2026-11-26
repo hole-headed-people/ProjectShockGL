@@ -319,4 +319,64 @@ public sealed class FontAtlas
     }
 }
 
-public sealed record TextLayout(IReadOnlyList<TextGlyph> Glyphs, IReadOnlyList<float> LineWidths, Vector2 Size);
+public sealed record TextLayout(IReadOnlyList<TextGlyph> Glyphs, IReadOnlyList<float> LineWidths, Vector2 Size)
+{
+    private TextLineIndex? _lineIndex;
+    internal TextLineIndex LineIndex => _lineIndex ??= new TextLineIndex(Glyphs, LineWidths.Count);
+}
+
+// Prefix/suffix bounds remain ordered even when glyphs extend beyond their line.
+internal sealed class TextLineIndex
+{
+    private readonly int[] _starts;
+    private readonly float[] _maximumY;
+    private readonly float[] _minimumY;
+
+    internal TextLineIndex(IReadOnlyList<TextGlyph> glyphs, int count)
+    {
+        _starts = new int[count + 1];
+        _maximumY = new float[count];
+        _minimumY = new float[count];
+        var cursor = 0;
+        var maximum = float.NegativeInfinity;
+        for (var line = 0; line < count; line++)
+        {
+            _starts[line] = cursor;
+            var minimum = float.PositiveInfinity;
+            while (cursor < glyphs.Count && glyphs[cursor].Line == line)
+            {
+                var glyph = glyphs[cursor++];
+                minimum = Math.Min(minimum, glyph.Position.Y);
+                maximum = Math.Max(maximum, glyph.Position.Y + glyph.Glyph.Size.Y);
+            }
+            _maximumY[line] = maximum;
+            _minimumY[line] = minimum;
+        }
+        _starts[count] = cursor;
+        for (var line = count - 2; line >= 0; line--)
+            _minimumY[line] = Math.Min(_minimumY[line], _minimumY[line + 1]);
+    }
+
+    internal (int Start, int End) VisibleGlyphs(float minY, float maxY)
+    {
+        var count = _maximumY.Length;
+        if (maxY <= minY || count == 0) return (0, 0);
+        var low = 0;
+        var high = count;
+        while (low < high)
+        {
+            var middle = low + (high - low) / 2;
+            if (_maximumY[middle] <= minY) low = middle + 1;
+            else high = middle;
+        }
+        var first = low;
+        high = count;
+        while (low < high)
+        {
+            var middle = low + (high - low) / 2;
+            if (_minimumY[middle] < maxY) low = middle + 1;
+            else high = middle;
+        }
+        return (_starts[first], _starts[low]);
+    }
+}

@@ -14,7 +14,6 @@ public class AudioSourceComponent : Component
     private bool _enabled = true;
 
     private bool _explicitPlayback;
-    private bool _resumeOnEnable;
     public bool PlayOnStart { get; set; } = true;
     
     public bool IsPlaying => _source?.IsPlaying == true;
@@ -66,7 +65,6 @@ public class AudioSourceComponent : Component
             _source = null;
             
             _clip = value;
-            _resumeOnEnable = false;
         }
     }
 
@@ -179,7 +177,6 @@ public class AudioSourceComponent : Component
         }
         
         _explicitPlayback = true;
-        _resumeOnEnable = false;
 
         if (Application.IsEditor || Clip == null)
         {
@@ -203,6 +200,7 @@ public class AudioSourceComponent : Component
         _source.Volume = Volume;
         _source.Loop = Loop;
         
+        _source.SetAvailabilityPaused(!IsEnabled || !Owner.IsActive);
         _source.Play(fadeIn);
         
         SyncAvailability();
@@ -213,7 +211,6 @@ public class AudioSourceComponent : Component
         ObjectDisposedException.ThrowIf(IsDestroyed, this);
         
         _explicitPlayback = true;
-        _resumeOnEnable = false;
 
         if (_source is { IsDisposed: false })
         {
@@ -245,7 +242,6 @@ public class AudioSourceComponent : Component
         }
         
         _explicitPlayback = true;
-        _resumeOnEnable = false;
 
         if (_source is { IsDisposed: false })
         {
@@ -265,19 +261,7 @@ public class AudioSourceComponent : Component
             return;
         }
         
-        if (!IsEnabled || !Owner.IsActive)
-        {
-            if (_source.IsPlaying)
-            {
-                _source.Pause();
-                _resumeOnEnable = true;
-            }
-        }
-        else if (_resumeOnEnable)
-        {
-            _resumeOnEnable = false;
-            _source.Resume();
-        }
+        _source.SetAvailabilityPaused(!IsEnabled || !Owner.IsActive);
     }
 
     public override void Destroy()
@@ -286,7 +270,6 @@ public class AudioSourceComponent : Component
         _source = null;
         
         _clip = null;
-        _resumeOnEnable = false;
         
         base.Destroy();
     }

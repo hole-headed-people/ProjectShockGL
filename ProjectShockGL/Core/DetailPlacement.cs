@@ -4,7 +4,7 @@ namespace ProjectShockGL.Core;
 
 public sealed class DetailPlacement
 {
-    private IReadOnlyList<string> _editorGroups = Array.Empty<string>();
+    private readonly IReadOnlyList<string> _editorGroups = [];
 
     public Guid Id { get; init; } = Guid.NewGuid();
     public string AssetPath { get; init; } = "";

@@ -97,6 +97,8 @@ public class Monitor : Entity
         {
             var texture = ((Monitor)Owner).GetCameraTexture();
             
+            // A monitor displays the captured RGB as a solid screen, including legacy Cutout placements.
+            SurfaceMode = SurfaceMode.Opaque;
             Mesh = Content.GetQuadMesh();
             Texture = texture ?? Content.GetWhitePixel();
             

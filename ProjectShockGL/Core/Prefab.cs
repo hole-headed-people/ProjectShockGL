@@ -154,6 +154,7 @@ public static class Prefab
             BackfaceCulling = copy.BackfaceCulling,
             Layer = copy.Layer,
             CollidesWith = copy.CollidesWith,
+            SurfaceType = copy.SurfaceType,
             Brush = copy.Brush, Properties = copy.Properties, Outputs = copy.Outputs
         };
         

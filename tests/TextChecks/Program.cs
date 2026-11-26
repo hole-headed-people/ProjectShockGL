@@ -92,6 +92,24 @@ Run("Text widget starts as pointer-transparent and tolerates an unset font", () 
     Check(text.MeasureText() == Vector2.Zero);
     canvas.Destroy();
 });
+Run("Text line index selects visible ranges without scanning the whole document", () =>
+{
+    var layout = atlas.LayoutText(string.Join("\n", Enumerable.Repeat("Ёжик English\n\n", 3000)), 160);
+    var index = typeof(TextLayout).GetProperty("LineIndex", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(layout)!;
+    var method = index.GetType().GetMethod("VisibleGlyphs", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+    foreach (var top in new[] { -100f, 0f, 23.5f, layout.Size.Y / 2, layout.Size.Y - 20, layout.Size.Y + 100 })
+    {
+        var bottom = top + 70;
+        var range = ((int Start, int End))method.Invoke(index, new object[] { top, bottom })!;
+        Check(range.End - range.Start < 200);
+        for (var i = 0; i < layout.Glyphs.Count; i++)
+        {
+            var glyph = layout.Glyphs[i];
+            if (glyph.Position.Y < bottom && glyph.Position.Y + glyph.Glyph.Size.Y > top)
+                Check(i >= range.Start && i < range.End);
+        }
+    }
+});
 if (args.Contains("--render")) Render();
 Console.WriteLine("All text checks passed.");
 
@@ -104,7 +122,7 @@ void Render()
     using var window = Window.Create(options);
     window.Initialize();
     using var gl = window.CreateOpenGL();
-    File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "GameSettings.ini"),
+    File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "DefaultSettings.ini"),
         "[Content]\nCustomPath=" + Path.Combine(root, "StarterContent") + "\n");
     Settings.Initialize();
     Content.Initialize(gl);
@@ -930,6 +948,7 @@ void Render()
         {
             var color=new Color(.2f,.4f,.6f,.5f);
             Matches(BlendPixel(ParticleBlendMode.Alpha,color),new Vector3(.3f,.45f,.6f));
+            Check(BlendPixel(ParticleBlendMode.Alpha,color)[3]==255);
             Matches(BlendPixel(ParticleBlendMode.Additive,color),new Vector3(.5f,.7f,.9f));
             Matches(BlendPixel(ParticleBlendMode.Multiply,color),new Vector3(.24f,.35f,.48f));
             Matches(BlendPixel(ParticleBlendMode.Additive,Color.Black),new Vector3(.4f,.5f,.6f));
@@ -945,6 +964,7 @@ void Render()
             }
             // Returning to Alpha must not retain Multiply's shader parameter or GL blend factors.
             Matches(BlendPixel(ParticleBlendMode.Alpha,color),new Vector3(.3f,.45f,.6f));
+            Check(BlendPixel(ParticleBlendMode.Alpha,color)[3]==255);
             Check(gl.GetError()==GLEnum.NoError);
             Console.WriteLine("PASS: Particle Alpha/Additive/Multiply match pixel formulas, respect opacity, fade neutrally in fog and restore GL blending/depth state");
         }
@@ -1410,6 +1430,96 @@ void Render()
     var canvas = new Canvas();
     canvas.Resize(new Vector2(640, 240));
     var font = Content.LoadFont("NotoSans-Regular", 24)!;
+    Run("Batched text matches per-glyph rendering with wrapping, alignment and scroll clipping", () =>
+    {
+        var sampleCanvas = new Canvas();
+        sampleCanvas.Resize(new Vector2(640, 240));
+        var scrolling = sampleCanvas.Add<TextScrollView>();
+        scrolling.Rect.Position = new Vector2(40.25f, 20.5f);
+        scrolling.Rect.Size = new Vector2(170.5f, 80.25f);
+        var body = scrolling.Body;
+        body.Font = font;
+        body.Color = new Color(.4f, .8f, .6f, .75f);
+        body.Content = string.Join("\n", Enumerable.Repeat("Ёжик English AV To пример длинной строки", 200));
+        byte[] Frame(bool batched)
+        {
+            graphics.BeginDraw(Camera.Active);
+            graphics.BeginUI(sampleCanvas.Size);
+            try
+            {
+                if (batched) sampleCanvas.Draw(graphics);
+                else
+                {
+                    var layout = font.Atlas.LayoutText(body.Content, body.WordWrap ? body.Rect.Size.X : float.PositiveInfinity);
+                    var origin = body.Rect.AbsolutePosition;
+                    var vertical = body.VerticalAlignment switch
+                    {
+                        VerticalAlignment.Center => (body.Rect.Size.Y - layout.Size.Y) * .5f,
+                        VerticalAlignment.Bottom => body.Rect.Size.Y - layout.Size.Y,
+                        _ => 0
+                    };
+                    foreach (var glyph in layout.Glyphs)
+                    {
+                        var horizontal = body.HorizontalAlignment switch
+                        {
+                            HorizontalAlignment.Center => (body.Rect.Size.X - layout.LineWidths[glyph.Line]) * .5f,
+                            HorizontalAlignment.Right => body.Rect.Size.X - layout.LineWidths[glyph.Line],
+                            _ => 0
+                        };
+                        graphics.DrawUIRegion(origin + glyph.Position + new Vector2(horizontal, vertical), glyph.Glyph.Size,
+                            font.Texture, glyph.Glyph.UvRect, body.Color, scrolling.Rect.AbsolutePosition, scrolling.Rect.Size);
+                    }
+                }
+            }
+            finally { graphics.EndUI(); }
+            var image = new byte[640 * 240 * 4];
+            unsafe { fixed (byte* data = image) gl.ReadPixels(0, 0, 640, 240, PixelFormat.Rgba, PixelType.UnsignedByte, data); }
+            graphics.EndDraw();
+            return image;
+        }
+        try
+        {
+            foreach (var alignment in Enum.GetValues<HorizontalAlignment>())
+            foreach (var offset in new[] { 0f, 17.25f, 1190.5f, float.MaxValue })
+            {
+                body.HorizontalAlignment = alignment;
+                scrolling.ScrollY = offset;
+                var reference = Frame(false);
+                Check(graphics.Statistics.DrawCalls > 1);
+                var actual = Frame(true);
+                Check(graphics.Statistics.DrawCalls == 1);
+                Check(reference.Zip(actual).Count(pair => Math.Abs(pair.First - pair.Second) > 2) < 100);
+            }
+            scrolling.Visible = false;
+            body = sampleCanvas.Add<Text>();
+            body.Font = font;
+            body.Content = "Ёжик English AV To длинная строка\n\nВторая строка\nThird line";
+            body.Rect.Position = scrolling.Rect.Position;
+            body.Rect.Size = scrolling.Rect.Size;
+            body.Color = new Color(.7f, .4f, 1, .6f);
+            foreach (var wrap in new[] { true, false })
+            foreach (var horizontal in Enum.GetValues<HorizontalAlignment>())
+            foreach (var vertical in Enum.GetValues<VerticalAlignment>())
+            {
+                body.WordWrap = wrap;
+                body.HorizontalAlignment = horizontal;
+                body.VerticalAlignment = vertical;
+                var reference = Frame(false);
+                var actual = Frame(true);
+                Check(graphics.Statistics.DrawCalls == 1);
+                Check(reference.Zip(actual).Count(pair => Math.Abs(pair.First - pair.Second) > 2) < 100);
+            }
+            body.Content = "";
+            Frame(true);
+            Check(graphics.Statistics.DrawCalls == 0);
+            body.Content = "Снова текст";
+            body.Rect.Position = new Vector2(1000);
+            Frame(true);
+            Check(graphics.Statistics.DrawCalls == 0);
+            Check(gl.GetError() == GLEnum.NoError);
+        }
+        finally { sampleCanvas.Destroy(); }
+    });
     Check(ReferenceEquals(font, Content.LoadFont("NotoSans-Regular", 24)));
     Check(Content.LoadFont("missing-font") == null);
     var notePanel = canvas.Add<Widget>();
@@ -1981,7 +2091,7 @@ void Render()
         gameWorldProperty.SetValue(ProjectShockGL.Core.Game.Instance,bakedWorld);
         using var bakedCamera = Camera.Create();
         bakedCamera.Orthographic = true; bakedCamera.OrthoSize = 3; bakedCamera.AspectRatio = 640f / 240;
-        var mapFile = Path.Combine(AppContext.BaseDirectory,"LightmapRoundtrip.map");
+        var mapFile = Path.Combine(AppContext.BaseDirectory,"LightmapRoundtrip.level");
         var assets = new List<string>();
         try
         {
@@ -2259,7 +2369,7 @@ void Render()
         detailQueue.Flush(graphics);
         graphics.EndDraw();
         Check(graphics.Statistics.DrawCalls == 1 && gl.GetError() == GLEnum.NoError);
-        var map = Path.Combine(AppContext.BaseDirectory, "DetailEditorRoundtrip.map");
+        var map = Path.Combine(AppContext.BaseDirectory, "DetailEditorRoundtrip.level");
         ProjectShockGLEditor.EditorLevelManager.SaveCurrentLevel(map);
         ProjectShockGLEditor.EditorLevelManager.OpenLevel(map);
         Check(detailWorld.Details.Single().Id == id);
@@ -2559,6 +2669,33 @@ void Render()
         bool Black(byte[] p) => p.Take(3).All(c => c < 3);
         Check(DrawMonitor()[0] > 240 && DrawMonitor()[2] < 3);
         Check(ReferenceEquals(monitor.Screen.Texture, sourceA.Texture));
+        // Legacy maps may store Cutout/Transparent for this component. Capture alpha must never punch holes in a monitor.
+        sourceA.Camera.ClearColor=new Color(1,0,0,.1f);
+        sourceA.Capture.Target.Capture(monitorWorld,sourceA.Camera);
+        foreach(var legacyMode in new[]{SurfaceMode.Cutout,SurfaceMode.Transparent})
+        {
+            monitor.Screen.SurfaceMode=legacyMode;
+            Check(DrawMonitor()[0]>240 && monitor.Screen.SurfaceMode==SurfaceMode.Opaque);
+        }
+        sourceA.Camera.ClearColor=Color.Red;
+        var smokeOwner=monitorWorld.Spawn<ProjectShockGL.Core.Object>();
+        smokeOwner.Transform.Position=new Vector3(1000,0,-3);
+        var smoke=smokeOwner.AddComponent<ProjectShockGL.Core.ParticleSystemComponent>();
+        smoke.Texture=Content.GetWhitePixel();smoke.Velocity=Vector3.Zero;smoke.Size=10;smoke.Lifetime=100;
+        smoke.Color=new Color(1,1,1,.2f);smoke.EmissionMode=ProjectShockGL.Core.ParticleEmissionMode.Burst;smoke.BurstCount=6;
+        monitorWorld.Update(0);
+        sourceA.Capture.Target.Capture(monitorWorld,sourceA.Camera);
+        var capturePixels=new byte[sourceA.Width*sourceA.Height*4];
+        gl.ActiveTexture(TextureUnit.Texture0);gl.BindTexture(TextureTarget.Texture2D,sourceA.Texture.Handle);
+        unsafe {fixed(byte* data=capturePixels)gl.GetTexImage(TextureTarget.Texture2D,0,PixelFormat.Rgba,PixelType.UnsignedByte,data);}
+        var center=(sourceA.Height/2*sourceA.Width+sourceA.Width/2)*4;
+        Check(capturePixels[center+3]==255); // Alpha over an opaque camera background stays opaque.
+        monitor.Screen.SurfaceMode=SurfaceMode.Cutout;
+        var smoky=DrawMonitor();Check(smoky[0]>240 && smoky[1]>175 && smoky[2]>175);
+        monitorWorld.Destroy(smokeOwner);
+        sourceA.Capture.Target.Capture(monitorWorld,sourceA.Camera);
+        Check(DrawMonitor()[0]>240 && DrawMonitor()[1]<3);
+        Console.WriteLine("PASS: Captured smoke preserves output alpha and monitor screens remain opaque with legacy surface modes");
         var outside = DrawMonitor(400);
         Check(outside[1] > 100 && outside[0] < 3);
         sourceA.Capture.SetResolution(128, 128);
@@ -2790,7 +2927,7 @@ void Render()
         }
         finally { ProjectShockGL.Environment.Apply(viewEnvironment); }
     }
-    var boundsSettingsPath = Path.Combine(AppContext.BaseDirectory, "GameSettings.ini");
+    var boundsSettingsPath = Path.Combine(AppContext.BaseDirectory, "DefaultSettings.ini");
     var boundsSettings = File.ReadAllText(boundsSettingsPath);
     var boundsEnvironment = ProjectShockGL.Environment.Capture();
     var boundsPostEnabled = PostProcessSettings.Enabled;
