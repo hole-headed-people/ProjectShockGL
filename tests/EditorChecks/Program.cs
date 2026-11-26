@@ -5653,6 +5653,61 @@ RunScene("Collider SurfaceType persists through maps, prefab insertion and inspe
     Check(new SphereCollider().SurfaceType == "Default" && new CapsuleCollider().SurfaceType == "Default");
 });
 
+Run("Lightmap cleanup protects all saved and active references and rechecks reviewed files before deletion", () =>
+{
+    var root = Path.Combine(testRoot, "Cleanup");
+    var levels = Path.Combine(root, "Levels");
+    var lightmaps = Path.Combine(root, "Lightmaps");
+    Directory.CreateDirectory(Path.Combine(levels, "Nested"));
+    Directory.CreateDirectory(Path.Combine(lightmaps, "Nested"));
+    string Asset(string name)
+    {
+        var path = Path.GetFullPath(Path.Combine(lightmaps, name + ".lightmap"));
+        File.WriteAllText(path, "Lightmap test data");
+        return path;
+    }
+    var saved = Asset("Saved");
+    var nested = Asset("Nested/Used");
+    var active = Asset("Active");
+    var unused = Asset("Old");
+    var second = Asset("Nested/Old");
+    File.WriteAllText(Path.Combine(lightmaps, "Keep.txt"), "Not a lightmap");
+    var firstLevel = Path.Combine(levels, "A.level");
+    File.WriteAllText(firstLevel, """{"Lightmap":"Saved"}""");
+    File.WriteAllText(Path.Combine(levels, "Nested", "B.level"), """{"Lightmap":"Nested/Used"}""");
+    File.WriteAllText(Path.Combine(levels, "C.level"), """{"Lightmap":null}""");
+    var report = LightmapCleanup.Scan(root, "Active");
+    Check(report.LevelCount == 3 && report.Files.Count == 2 && report.TotalBytes > 0);
+    Check(report.Files.Any(file => file.FilePath == unused) && report.Files.Any(file => file.FilePath == second));
+    Check(File.Exists(unused) && File.Exists(second)); // Scan is read-only.
+    File.WriteAllText(firstLevel, """{"Lightmap":"Old"}""");
+    Throws(() => LightmapCleanup.Delete(report, "Active"));
+    Check(File.Exists(unused) && File.Exists(second));
+    File.WriteAllText(firstLevel, """{"Lightmap":"Saved"}""");
+    Throws(() => LightmapCleanup.Delete(report, "Old")); // Newly active unsaved bake.
+    Check(File.Exists(unused) && File.Exists(second));
+    File.AppendAllText(unused, "Changed");
+    Throws(() => LightmapCleanup.Delete(report, "Active"));
+    Check(File.Exists(unused) && File.Exists(second));
+    report = LightmapCleanup.Scan(root, "Active");
+    var newFile = Asset("NewAfterReview");
+    Check(LightmapCleanup.Delete(report, "Active") == 2);
+    Check(!File.Exists(unused) && !File.Exists(second) && File.Exists(saved) && File.Exists(nested) && File.Exists(active));
+    Check(File.Exists(newFile) && File.Exists(Path.Combine(lightmaps, "Keep.txt")));
+    foreach (var json in new[] { "broken", "[]", "{} garbage", """{"Lightmap":12}""", """{"Lightmap":"../Outside"}""",
+                 """{"Lightmap":"Saved","Lightmap":"Other"}""", """{"Lightmap":"Saved","lightmap":"Other"}""" })
+    {
+        File.WriteAllText(firstLevel, json);
+        Throws(() => LightmapCleanup.Scan(root, "Active"));
+        Check(File.Exists(newFile) && File.Exists(saved));
+    }
+    File.WriteAllText(firstLevel, "{}");
+    report = LightmapCleanup.Scan(root, "Active");
+    File.WriteAllText(firstLevel, "corrupt after review");
+    Throws(() => LightmapCleanup.Delete(report, "Active"));
+    Check(File.Exists(newFile) && File.Exists(saved));
+    Throws(() => LightmapCleanup.Scan(Path.Combine(root, "Missing")));
+});
 if (args.Contains("--imgui"))
 {
     var context = ImGuiNET.ImGui.CreateContext();
@@ -5674,6 +5729,39 @@ if (args.Contains("--imgui"))
             draw();
             ImGuiNET.ImGui.Render();
         }
+        Run("Bake Lighting cleanup preview draws its reviewed list without deleting files", () =>
+        {
+            var root = Path.Combine(testRoot, "CleanupPreview");
+            Directory.CreateDirectory(Path.Combine(root, "Levels"));
+            Directory.CreateDirectory(Path.Combine(root, "Lightmaps"));
+            var path = Path.Combine(root, "Lightmaps", "Unused.lightmap");
+            File.WriteAllText(path, "Preview only");
+            var flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+            var reportField = typeof(LightmapBakeWindow).GetField("_cleanupReport", flags)!;
+            reportField.SetValue(null, LightmapCleanup.Scan(root));
+            try
+            {
+                Frame(() =>
+                {
+                    ImGuiNET.ImGui.Begin("Cleanup test");
+                    ImGuiNET.ImGui.OpenPopup("Unused lightmaps");
+                    typeof(LightmapBakeWindow).GetMethod("DrawCleanup", flags)!.Invoke(null, new object[] { Game.Instance.World });
+                    ImGuiNET.ImGui.End();
+                });
+                Check(ImGuiNET.ImGui.GetDrawData().TotalVtxCount > 0 && File.Exists(path));
+                Frame(() =>
+                {
+                    ImGuiNET.ImGui.Begin("Cleanup test");
+                    if (ImGuiNET.ImGui.BeginPopupModal("Unused lightmaps"))
+                    {
+                        ImGuiNET.ImGui.CloseCurrentPopup();
+                        ImGuiNET.ImGui.EndPopup();
+                    }
+                    ImGuiNET.ImGui.End();
+                });
+            }
+            finally { reportField.SetValue(null, null); }
+        });
         Run("UI Editor supports layout creation, property controls, duplication and undo", () =>
         {
             var flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;

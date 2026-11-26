@@ -19,6 +19,8 @@ public static class LightmapBakeWindow
     
     private static int _levelVersion;
     private static string? _error;
+    private static LightmapCleanupReport? _cleanupReport;
+    private static string? _cleanupError;
     public static bool Open {get;set;}
 
     private static LightmapBakeSession Session => _session ??= new LightmapBakeSession();
@@ -174,6 +176,18 @@ public static class LightmapBakeWindow
 
             ImGui.EndDisabled();
             
+            ImGui.SameLine();
+            ImGui.BeginDisabled(session.IsBusy || LevelManager.IsLoading);
+            if (ImGui.Button("Clean unused lightmaps..."))
+            {
+                _cleanupReport = null;
+                _cleanupError = null;
+                try { _cleanupReport = LightmapCleanup.Scan(Content.Path, world.LightmapAsset); }
+                catch (Exception error) { _cleanupError = error.Message; Log.PrintWarning(_cleanupError); }
+                ImGui.OpenPopup("Unused lightmaps");
+            }
+            ImGui.EndDisabled();
+            DrawCleanup(world);
             if (session.IsBusy)
             {
                 ImGui.SameLine();
@@ -234,6 +248,45 @@ public static class LightmapBakeWindow
         ImGui.End();
     }
 
+    private static void DrawCleanup(World world)
+    {
+        ImGui.SetNextWindowSize(new Vector2(660, 420), ImGuiCond.Appearing);
+        if (!ImGui.BeginPopupModal("Unused lightmaps", ImGuiWindowFlags.None)) return;
+        ImGui.TextWrapped("Only files not referenced by any .level in Content/Levels are listed. The active lightmap is protected even before saving the level. Deletion is permanent.");
+        if (_cleanupReport is { } report)
+        {
+            ImGui.TextWrapped($"Checked levels: {report.LevelCount}. Unused files: {report.Files.Count}. Size: {report.TotalBytes / 1048576.0:F2} MiB.");
+            ImGui.BeginChild("Lightmap files", new Vector2(0, 220), ImGuiChildFlags.Border);
+            foreach (var file in report.Files)
+                ImGui.TextUnformatted($"{Path.GetRelativePath(report.ContentPath, file.FilePath)} ({file.Size / 1024.0:F1} KiB)");
+            ImGui.EndChild();
+        }
+        if (_cleanupError != null) ImGui.TextWrapped(_cleanupError);
+        ImGui.BeginDisabled(_cleanupReport == null || _cleanupReport.Files.Count == 0 || _cleanupError != null ||
+            Session.IsBusy || LevelManager.IsLoading);
+        if (ImGui.Button("Delete listed files"))
+        {
+            try
+            {
+                if (!Path.GetFullPath(Content.Path).TrimEnd(Path.DirectorySeparatorChar).Equals(_cleanupReport!.ContentPath, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Content directory changed. Scan again.");
+                var count = LightmapCleanup.Delete(_cleanupReport, world.LightmapAsset);
+                Editor.Report($"Deleted {count} unused lightmap files.");
+                _cleanupReport = null;
+                ImGui.CloseCurrentPopup();
+            }
+            catch (Exception error) { _cleanupError = error.Message; Log.PrintWarning(_cleanupError); }
+        }
+        ImGui.EndDisabled();
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel"))
+        {
+            _cleanupReport = null;
+            _cleanupError = null;
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.EndPopup();
+    }
     private static void DrawSettings(World world)
     {
         var settings = world.LightmapSettings;
@@ -386,6 +439,8 @@ public static class LightmapBakeWindow
 
         _session?.Dispose();
         _session = null;
+        _cleanupReport = null;
+        _cleanupError = null;
         
         Open = false;
         UndoRedo.CommitPending(SettingsOwner);
